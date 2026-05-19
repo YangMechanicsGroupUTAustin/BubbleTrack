@@ -24,11 +24,14 @@ class RadiusChart(QWidget):
                               with the 0-based frame index.
         refit_requested(int): Emitted when user requests refitting a frame,
                              with the 0-based frame index.
+        neighbor_refit_requested(int): Emitted when user requests refitting a
+                                      frame using adjacent fitted frames.
     """
 
     point_clicked = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
     refit_requested = pyqtSignal(int)
+    neighbor_refit_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -246,8 +249,18 @@ class RadiusChart(QWidget):
             refit_action.triggered.connect(
                 lambda _checked=False, i=frame_idx: self.refit_requested.emit(i),
             )
+            neighbor_refit_action = QAction(
+                f"Refit using neighbor frames (Frame {frame_label})",
+                self,
+            )
+            neighbor_refit_action.triggered.connect(
+                lambda _checked=False, i=frame_idx: (
+                    self.neighbor_refit_requested.emit(i)
+                ),
+            )
             menu.addAction(delete_action)
             menu.addAction(refit_action)
+            menu.addAction(neighbor_refit_action)
             menu.exec(event.screenPos().toPoint())
 
     # ------------------------------------------------------------------ #

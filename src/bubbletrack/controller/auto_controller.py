@@ -71,6 +71,8 @@ class AutoController(BaseController):
             clahe_clip=self.state.clahe_clip,
             closing_radius=self.state.closing_radius,
             opening_radius=self.state.opening_radius,
+            detection_mode=self.state.detection_mode,
+            gradient_boundary=self.state.gradient_boundary,
             max_radius=self._get_max_radius(),
         )
         self._worker.progress.connect(self._on_auto_progress)
@@ -268,6 +270,8 @@ class AutoController(BaseController):
             clahe_clip=self.state.clahe_clip,
             closing_radius=self.state.closing_radius,
             opening_radius=self.state.opening_radius,
+            detection_mode=self.state.detection_mode,
+            gradient_boundary=self.state.gradient_boundary,
             max_radius=self._get_max_radius(),
             export_physical=cfg.export_physical,
             fps=cfg.fps,

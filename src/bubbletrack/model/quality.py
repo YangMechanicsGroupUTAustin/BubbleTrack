@@ -7,6 +7,9 @@ from dataclasses import dataclass
 import numpy as np
 
 from bubbletrack.model.constants import (
+    FIT_ACCEPT_MIN_EDGE_DENSITY,
+    FIT_ACCEPT_MIN_SECTOR_COVERAGE,
+    FIT_ACCEPT_PARTIAL_MIN_SECTOR_COVERAGE,
     QUALITY_MAX_RADIUS_FRACTION,
     QUALITY_MAX_RMS_RATIO,
     QUALITY_MIN_RADIUS_FRACTION,
@@ -96,6 +99,14 @@ def compute_fit_quality(
     )
     score = float(np.exp(log_score))
 
+    # A partial arc can fit a mathematically plausible circle with excellent
+    # RMS, but its radius is mostly extrapolated.  Keep the result, but cap
+    # confidence so the chart marks it as marginal/unreliable instead of green.
+    if sector_coverage < 0.375:
+        score = min(score, 0.30)
+    elif sector_coverage < 0.625:
+        score = min(score, 0.60)
+
     return FitQuality(
         score=round(score, 3),
         n_edge_points=n,
@@ -155,6 +166,34 @@ def compute_all_quality_scores(
         scores[i] = q.score
 
     return scores
+
+
+def is_fit_acceptable(
+    edge_xy: np.ndarray,
+    rc: float,
+    cc: float,
+    radius: float,
+    roi_short_side: int,
+    *,
+    allow_partial: bool = False,
+) -> tuple[bool, FitQuality]:
+    """Return whether a fitted circle is reliable enough to accept.
+
+    This is intentionally stricter than display-time quality coloring.  A
+    partial arc can have low RMS and therefore a plausible-looking circle, but
+    its radius is extrapolated.  For automatic R(t) extraction we reject those
+    incomplete fits so they do not create spurious spikes.
+    """
+    q = compute_fit_quality(edge_xy, rc, cc, radius, roi_short_side)
+    min_coverage = (
+        FIT_ACCEPT_PARTIAL_MIN_SECTOR_COVERAGE
+        if allow_partial else FIT_ACCEPT_MIN_SECTOR_COVERAGE
+    )
+    ok = (
+        q.sector_coverage >= min_coverage
+        and q.edge_density >= FIT_ACCEPT_MIN_EDGE_DENSITY
+    )
+    return ok, q
 
 
 def score_failed_fit() -> FitQuality:

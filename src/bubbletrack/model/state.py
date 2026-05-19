@@ -57,6 +57,9 @@ class AppState:
     clahe_clip: float = 0.0
     closing_radius: int = 0
     opening_radius: int = 0
+    detection_mode: str = "intensity"  # "intensity" or "gradient"
+    gradient_boundary: float = 0.0  # gradient mode ring index: 0/0.5/1 -> 1st/2nd/3rd
+    temporal_refine: bool = False  # use neighbouring frames to repair weak fits
 
     # Visual binary polarity swap (session-only, NOT persisted across launches).
     # When True, the binary panel displays ``~processed`` instead of

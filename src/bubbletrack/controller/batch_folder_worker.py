@@ -53,6 +53,8 @@ class BatchFolderWorker(QThread):
         clahe_clip: float = 0.0,
         closing_radius: int = 0,
         opening_radius: int = 0,
+        detection_mode: str = "intensity",
+        gradient_boundary: float = 0.5,
         max_radius: float = float("inf"),
         export_physical: bool = False,
         fps: float = 1_000_000.0,
@@ -71,6 +73,8 @@ class BatchFolderWorker(QThread):
         self._clahe_clip = clahe_clip
         self._closing_radius = closing_radius
         self._opening_radius = opening_radius
+        self._detection_mode = detection_mode
+        self._gradient_boundary = gradient_boundary
         self._max_radius = max_radius
         self._export_physical = export_physical
         self._fps = fps
@@ -118,6 +122,8 @@ class BatchFolderWorker(QThread):
                     tuple(self._edges), self._rf_slider, self._obj_radius,
                     self._gaussian_sigma, self._clahe_clip,
                     self._closing_radius, self._opening_radius,
+                    self._detection_mode,
+                    self._gradient_boundary,
                     self._max_radius,
                 )
                 for i in range(n)

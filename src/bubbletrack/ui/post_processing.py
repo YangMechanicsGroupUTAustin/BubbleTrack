@@ -110,6 +110,20 @@ class PostProcessing(QWidget):
         mapping = {"MAT": "mat", "CSV": "csv", "Excel": "xlsx"}
         return mapping.get(self._format_combo.currentText(), "mat")
 
+    def set_physical_params(self, fps: float, scale: float, fit_length: int) -> None:
+        """Set persisted physical parameters without emitting signals."""
+        if fps >= 1_000_000:
+            self._fps_unit.setCurrentText("M")
+            self._fps_spin.setValue(fps / 1_000_000)
+        elif fps >= 1_000:
+            self._fps_unit.setCurrentText("k")
+            self._fps_spin.setValue(fps / 1_000)
+        else:
+            self._fps_unit.setCurrentText("Hz")
+            self._fps_spin.setValue(fps)
+        self._scale_spin.setValue(scale)
+        self._fit_len_spin.setValue(fit_length)
+
     def set_status(self, text: str, success: bool = True):
         colour = "#10b981" if success else "#ef4444"
         self._status.setStyleSheet(f"color:{colour}; font-size:11px;")

@@ -12,7 +12,7 @@ import numpy as np
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
-from bubbletrack.model.detection import detect_bubble
+from bubbletrack.model.detection import detect_bubble_with_mode
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
 from bubbletrack.model.removing_factor import compute_removing_factor
@@ -29,7 +29,8 @@ def _build_cache_key(filepath: str, state: AppState) -> str:
     """
     return (
         f"{filepath}:{state.img_thr}:{state.gridx}:{state.gridy}"
-        f":{state.gaussian_sigma}:{state.clahe_clip}"
+        f":{state.gaussian_sigma}:{state.clahe_clip}:{state.detection_mode}"
+        f":{state.gradient_boundary}"
     )
 
 
@@ -63,11 +64,11 @@ def display_frame(
         cached = cache.get(cache_key) if cache is not None else None
 
         if cached is not None:
-            cur_img, _, _, binary_roi = cached
+            cur_img, _, cur_img_roi, binary_roi = cached
         elif state.video_reader is not None:
             # Video mode: extract frame then normalise
             raw = state.video_reader.read_frame(idx)
-            cur_img, _, _, binary_roi = normalize_frame(
+            cur_img, _, cur_img_roi, binary_roi = normalize_frame(
                 raw,
                 state.img_thr,
                 state.gridx,
@@ -78,10 +79,10 @@ def display_frame(
             if cache is not None:
                 cache.put(
                     cache_key,
-                    (cur_img, None, None, binary_roi),
+                    (cur_img, None, cur_img_roi, binary_roi),
                 )
         else:
-            cur_img, _, _, binary_roi = load_and_normalize(
+            cur_img, _, cur_img_roi, binary_roi = load_and_normalize(
                 state.images[idx],
                 state.img_thr,
                 state.gridx,
@@ -92,7 +93,7 @@ def display_frame(
             if cache is not None:
                 cache.put(
                     cache_key,
-                    (cur_img, None, None, binary_roi),
+                    (cur_img, None, cur_img_roi, binary_roi),
                 )
         state = update_state(
             state, cur_img=cur_img, cur_img_binary_roi=binary_roi,
@@ -109,12 +110,15 @@ def display_frame(
             state.removing_factor,
             state.gridx, state.gridy,
         )
-        processed, edge_xy = detect_bubble(
-            binary_roi, state.bubble_cross_edges, rf,
+        processed, edge_xy = detect_bubble_with_mode(
+            binary_roi, cur_img_roi, state.detection_mode, state.img_thr,
+            list(state.bubble_cross_edges), rf,
             state.gridx, state.gridy,
             state.removing_obj_radius,
             opening_radius=state.opening_radius,
             closing_radius=state.closing_radius,
+            gaussian_sigma=state.gaussian_sigma,
+            gradient_boundary=state.gradient_boundary,
         )
         # Apply invert_mask as the final visual step — pure bit flip on the
         # detect_bubble output, so the binary panel mirrors black<->white

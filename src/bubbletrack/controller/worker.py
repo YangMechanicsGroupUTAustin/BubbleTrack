@@ -24,23 +24,27 @@ def _process_single_frame(args: tuple):
         idx, filepath, sensitivity, gridx, gridy,
         edges, rf_slider, removing_obj_radius,
         gaussian_sigma, clahe_clip,
-        closing_radius, opening_radius, max_radius,
+        closing_radius, opening_radius, detection_mode, gradient_boundary,
+        max_radius,
     ) = args
 
     # Import inside the function — each worker process needs its own imports
     from bubbletrack.model.circle_fit import circle_fit_taubin
-    from bubbletrack.model.detection import detect_bubble
+    from bubbletrack.model.detection import detect_bubble_with_mode
     from bubbletrack.model.image_io import load_and_normalize
     from bubbletrack.model.removing_factor import compute_removing_factor
 
-    _, _, _, binary_roi = load_and_normalize(
+    _, _, cur_img_roi, binary_roi = load_and_normalize(
         filepath, sensitivity, gridx, gridy,
         gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
     )
     rf = compute_removing_factor(rf_slider, gridx, gridy)
-    processed, edge_xy = detect_bubble(
-        binary_roi, list(edges), rf, gridx, gridy, removing_obj_radius,
+    processed, edge_xy = detect_bubble_with_mode(
+        binary_roi, cur_img_roi, detection_mode, sensitivity,
+        list(edges), rf, gridx, gridy, removing_obj_radius,
         opening_radius=opening_radius, closing_radius=closing_radius,
+        gaussian_sigma=gaussian_sigma,
+        gradient_boundary=gradient_boundary,
     )
 
     radius = -1.0
@@ -88,6 +92,8 @@ class BatchWorker(QThread):
         clahe_clip: float = 0.0,
         closing_radius: int = 0,
         opening_radius: int = 0,
+        detection_mode: str = "intensity",
+        gradient_boundary: float = 0.5,
         max_radius: float = float("inf"),
     ):
         super().__init__()
@@ -104,6 +110,8 @@ class BatchWorker(QThread):
         self._clahe_clip = clahe_clip
         self._closing_radius = closing_radius
         self._opening_radius = opening_radius
+        self._detection_mode = detection_mode
+        self._gradient_boundary = gradient_boundary
         self._max_radius = max_radius
         self._stop = False
 
@@ -134,6 +142,8 @@ class BatchWorker(QThread):
                 self._clahe_clip,
                 self._closing_radius,
                 self._opening_radius,
+                self._detection_mode,
+                self._gradient_boundary,
                 self._max_radius,
             ))
 
