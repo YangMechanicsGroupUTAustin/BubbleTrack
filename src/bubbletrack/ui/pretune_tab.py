@@ -145,6 +145,23 @@ class PreTuneTab(QWidget):
             "Useful when the bubble and its surrounding shadow are both dark."
         )
         self._gradient_detection.toggled.connect(lambda _: self.filters_changed.emit())
+        self._area_detection = QCheckBox("Dark Region Area")
+        self._area_detection.setToolTip(
+            "Segment connected dark regions and calculate an area-equivalent radius."
+        )
+        self._area_detection.toggled.connect(self._on_area_mode_toggled)
+        self._gradient_detection.toggled.connect(self._on_gradient_mode_toggled)
+        self._area_regions = QSpinBox()
+        self._area_regions.setRange(1, 20)
+        self._area_regions.setValue(1)
+        self._area_regions.setToolTip("Number of largest dark regions to include in the area.")
+        self._area_regions.valueChanged.connect(lambda _: self.filters_changed.emit())
+        area_row = QHBoxLayout()
+        area_row.addWidget(QLabel("Regions"))
+        area_row.addWidget(self._area_regions)
+        area_row.addStretch()
+        area_widget = QWidget()
+        area_widget.setLayout(area_row)
         self._gradient_boundary = SliderInput(
             "Gradient Ring", 1, 3, 1, 1, 0,
         )
@@ -168,6 +185,8 @@ class PreTuneTab(QWidget):
             s.value_changed.connect(lambda _: self.filters_changed.emit())
         filters_section.add_widget(self._gradient_detection)
         filters_section.add_widget(self._gradient_boundary)
+        filters_section.add_widget(self._area_detection)
+        filters_section.add_widget(area_widget)
         filters_section.add_widget(self._temporal_refine)
 
         # Preset buttons
@@ -267,12 +286,27 @@ class PreTuneTab(QWidget):
             "closing_radius": int(self._close_slider.value()),
             "opening_radius": int(self._open_slider.value()),
             "detection_mode": (
-                "gradient" if self._gradient_detection.isChecked()
-                else "intensity"
+                "area" if self._area_detection.isChecked() else
+                "gradient" if self._gradient_detection.isChecked() else "intensity"
             ),
+            "area_max_regions": self._area_regions.value(),
             "gradient_boundary": (self._gradient_boundary.value() - 1) / 2.0,
             "temporal_refine": self._temporal_refine.isChecked(),
         }
+
+    def _on_area_mode_toggled(self, checked: bool) -> None:
+        if checked:
+            self._gradient_detection.blockSignals(True)
+            self._gradient_detection.setChecked(False)
+            self._gradient_detection.blockSignals(False)
+        self.filters_changed.emit()
+
+    def _on_gradient_mode_toggled(self, checked: bool) -> None:
+        if checked:
+            self._area_detection.blockSignals(True)
+            self._area_detection.setChecked(False)
+            self._area_detection.blockSignals(False)
+        self.filters_changed.emit()
 
     def set_filter_params(self, params: dict) -> None:
         """Set advanced filter controls without emitting signals."""
@@ -291,6 +325,12 @@ class PreTuneTab(QWidget):
             params.get("detection_mode", "intensity") == "gradient"
         )
         self._gradient_detection.blockSignals(False)
+        self._area_detection.blockSignals(True)
+        self._area_detection.setChecked(params.get("detection_mode") == "area")
+        self._area_detection.blockSignals(False)
+        self._area_regions.blockSignals(True)
+        self._area_regions.setValue(int(params.get("area_max_regions", 1)))
+        self._area_regions.blockSignals(False)
 
         v = params.get("gradient_boundary", 0.0)
         stage = v if v > 1 else (v * 2 + 1)
@@ -342,7 +382,14 @@ class PreTuneTab(QWidget):
             for cb, val in zip(self._edge_checks, p["edge_flags"]):
                 cb.setChecked(val)
         if "detection_mode" in p:
+            self._gradient_detection.blockSignals(True)
+            self._area_detection.blockSignals(True)
             self._gradient_detection.setChecked(p["detection_mode"] == "gradient")
+            self._area_detection.setChecked(p["detection_mode"] == "area")
+            self._gradient_detection.blockSignals(False)
+            self._area_detection.blockSignals(False)
+        if "area_max_regions" in p:
+            self._area_regions.setValue(int(p["area_max_regions"]))
         if "gradient_boundary" in p:
             v = p["gradient_boundary"]
             stage = v if v > 1 else (v * 2 + 1)
@@ -379,6 +426,12 @@ class PreTuneTab(QWidget):
             f'<span style="color:#a1a1aa;">RMS:</span> {rms:.1f} px &nbsp; '
             f'<span style="color:#a1a1aa;">Confidence:</span> '
             f'<span style="color:{color};">{score_pct}%</span>'
+        )
+        self._quality_label.show()
+
+    def show_area_result(self, area: int, count: int) -> None:
+        self._quality_label.setText(
+            f"Area: {area} px^2 &nbsp; Connected regions: {count}"
         )
         self._quality_label.show()
 

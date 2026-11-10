@@ -46,12 +46,15 @@ class SliderInput(QWidget):
         else:
             self._spin = QSpinBox()
         self._spin.setRange(int(min_val * self._scale), int(max_val * self._scale))
+        self._spin.setSingleStep(step if decimals > 0 else int(step))
         self._spin.setValue(int(default * self._scale))
         self._spin.setFixedWidth(72)
         layout.addWidget(self._spin)
 
         self._slider = QSlider(Qt.Orientation.Horizontal)
         self._slider.setRange(int(min_val * self._scale), int(max_val * self._scale))
+        self._slider.setSingleStep(max(1, int(step * self._scale)))
+        self._slider.setPageStep(max(1, int(step * self._scale)))
         self._slider.setValue(int(default * self._scale))
         layout.addWidget(self._slider, 1)
 

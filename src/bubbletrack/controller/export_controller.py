@@ -186,6 +186,7 @@ class ExportController(BaseController):
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
+                region_count=self.state.region_count,
             )
         elif fmt == "xlsx":
             export_excel(
@@ -194,6 +195,7 @@ class ExportController(BaseController):
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
+                region_count=self.state.region_count,
             )
         else:
             export_r_data(
@@ -201,6 +203,7 @@ class ExportController(BaseController):
                 self.state.radius,
                 self.state.circle_fit_par,
                 self.state.circle_xy,
+                self.state.region_count,
             )
 
     def _default_export_dir(self) -> str:

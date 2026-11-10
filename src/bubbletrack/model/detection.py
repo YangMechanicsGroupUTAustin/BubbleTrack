@@ -690,8 +690,19 @@ def detect_bubble_with_mode(
     closing_radius: int = 0,
     gaussian_sigma: float = 0.0,
     gradient_boundary: float = 0.5,
+    area_max_regions: int = 1,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Dispatch to the selected detection mode."""
+    if mode == "area":
+        return detect_dark_regions(
+            binary_roi, removing_factor, gridx, gridy,
+            grayscale_roi=gray_roi,
+            sensitivity=sensitivity,
+            max_regions=area_max_regions,
+            bubble_cross_edges=bubble_cross_edges,
+            opening_radius=opening_radius,
+            closing_radius=closing_radius,
+        )
     if mode == "gradient":
         auto_roi = _gradient_roi_from_intensity(
             binary_roi,
@@ -745,6 +756,111 @@ def detect_bubble_with_mode(
         opening_radius=opening_radius,
         closing_radius=closing_radius,
     )
+
+
+def detect_dark_regions(
+    binary_roi: np.ndarray,
+    removing_factor: int,
+    gridx: tuple[int, int],
+    gridy: tuple[int, int],
+    *,
+    grayscale_roi: np.ndarray | None = None,
+    sensitivity: float = 0.5,
+    max_regions: int = 1,
+    bubble_cross_edges: list[bool] | tuple[bool, ...] = (False,) * 4,
+    opening_radius: int = 0,
+    closing_radius: int = 0,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Keep the largest connected dark regions without a shape assumption.
+
+    The mask is the union of up to ``max_regions`` regions. Reflections and
+    small holes inside each selected region count toward its area.
+    """
+    dark_masks = []
+    if grayscale_roi is not None:
+        gray = np.asarray(grayscale_roi, dtype=np.float32)
+        gray_8 = np.clip(gray * 255, 0, 255).astype(np.uint8)
+        otsu, _ = cv2.threshold(
+            gray_8, 0, 255, cv2.THRESH_BINARY | cv2.THRESH_OTSU,
+        )
+        spread = float(np.percentile(gray, 90) - np.percentile(gray, 10))
+        cutoff = np.clip((otsu + 1) / 255 + (sensitivity - 0.5) * spread, 0, 1)
+        dark_masks.append(gray <= cutoff)
+    # Local adaptive thresholding can leave only an annulus around a uniform
+    # dark interior. Use it only if grayscale segmentation finds no region.
+    dark_masks.append(~np.asarray(binary_roi, dtype=bool))
+
+    h, w = binary_roi.shape
+    for dark in dark_masks:
+        if opening_radius > 0:
+            dark = morphology.opening(dark, morphology.disk(opening_radius))
+        if closing_radius > 0:
+            dark = morphology.closing(dark, morphology.disk(closing_radius))
+        labels = measure.label(dark, connectivity=2)
+        candidates = []
+        for region in measure.regionprops(labels):
+            r0, c0, r1, c1 = region.bbox
+            touches = (r0 == 0, c1 == w, r1 == h, c0 == 0)
+            unallowed_edge = any(
+                touched and not allowed
+                for touched, allowed in zip(touches, bubble_cross_edges)
+            )
+            # A large bubble clipped by one image edge is still a useful
+            # visible-area measurement. Reject small edge specks and broad
+            # dark border bands unless the user explicitly enables that edge.
+            partial_bubble = (
+                sum(touches) == 1
+                and region.area >= max(100, h * w // 100)
+                and (c1 - c0) < 0.9 * w
+                and (r1 - r0) < 0.95 * h
+            )
+            if unallowed_edge and not partial_bubble:
+                continue
+            candidates.append(region)
+        if candidates:
+            break
+
+    candidates.sort(key=lambda region: region.area, reverse=True)
+    # Keep the largest eligible object even when Remove is set higher than
+    # its area, while still letting Remove suppress additional small regions.
+    min_area = min(max(1, removing_factor), candidates[0].area) if candidates else 1
+    candidates = [region for region in candidates if region.area >= min_area]
+    selected = candidates[:max(1, int(max_regions))]
+    mask = np.zeros_like(dark)
+    for region in selected:
+        r0, c0, r1, c1 = region.bbox
+        component = ndimage.binary_fill_holes(region.image)
+        mask[r0:r1, c0:c1] |= component
+
+    edges = morphology.dilation(mask) & ~mask
+    rows, cols = np.where(edges)
+    edge_xy = np.column_stack((rows + gridx[0], cols + gridy[0])).astype(float)
+    return mask, edge_xy
+
+
+def measure_region_area(mask: np.ndarray, gridx: tuple[int, int],
+                        gridy: tuple[int, int]) -> tuple[float, float, float, int]:
+    """Return area-equivalent radius, centroid and component count."""
+    rows, cols = np.where(mask)
+    if rows.size == 0:
+        return -1.0, float("nan"), float("nan"), 0
+    count = int(measure.label(mask, connectivity=2).max())
+    return (float(np.sqrt(rows.size / np.pi)),
+            float(rows.mean() + gridx[0]),
+            float(cols.mean() + gridy[0]), count)
+
+
+def measure_detection(mask: np.ndarray, edge_xy: np.ndarray, mode: str,
+                      gridx: tuple[int, int], gridy: tuple[int, int]
+                      ) -> tuple[float, float, float, int]:
+    """Measure either a shape-independent area or a fitted circle."""
+    if mode == "area":
+        return measure_region_area(mask, gridx, gridy)
+    if edge_xy.shape[0] < 3:
+        return -1.0, float("nan"), float("nan"), 0
+    from bubbletrack.model.circle_fit import circle_fit_taubin
+    rc, cc, radius = circle_fit_taubin(edge_xy)
+    return float(radius), float(rc), float(cc), 0
 
 
 def _constrain_edge_xy_to_prior(

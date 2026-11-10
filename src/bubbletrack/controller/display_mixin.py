@@ -12,7 +12,7 @@ import numpy as np
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
-from bubbletrack.model.detection import detect_bubble_with_mode
+from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
 from bubbletrack.model.removing_factor import compute_removing_factor
@@ -30,7 +30,7 @@ def _build_cache_key(filepath: str, state: AppState) -> str:
     return (
         f"{filepath}:{state.img_thr}:{state.gridx}:{state.gridy}"
         f":{state.gaussian_sigma}:{state.clahe_clip}:{state.detection_mode}"
-        f":{state.gradient_boundary}"
+        f":{state.gradient_boundary}:{state.area_max_regions}"
     )
 
 
@@ -119,6 +119,7 @@ def display_frame(
             closing_radius=state.closing_radius,
             gaussian_sigma=state.gaussian_sigma,
             gradient_boundary=state.gradient_boundary,
+            area_max_regions=state.area_max_regions,
         )
         # Apply invert_mask as the final visual step — pure bit flip on the
         # detect_bubble output, so the binary panel mirrors black<->white
@@ -133,7 +134,9 @@ def display_frame(
                 and state.circle_fit_par is not None
                 and not np.isfinite(state.circle_fit_par[idx]).all()
                 and edge_xy.shape[0] >= 3):
-            rc, cc, _ = circle_fit_taubin(edge_xy)
+            _, rc, cc, _ = measure_detection(
+                processed, edge_xy, state.detection_mode, state.gridx, state.gridy,
+            )
             state.circle_fit_par[idx] = [rc, cc]
             if state.circle_xy is not None:
                 state.circle_xy[idx] = edge_xy
@@ -175,7 +178,10 @@ def display_frame(
             rc = state.circle_fit_par[idx, 0]
             cc = state.circle_fit_par[idx, 1]
             r = state.radius[idx]
-            window.original_panel.draw_circle(rc, cc, r, "#6366f1")
+            is_area = (state.region_count is not None
+                       and state.region_count[idx] > 0)
+            if not is_area:
+                window.original_panel.draw_circle(rc, cc, r, "#6366f1")
             if state.circle_xy and state.circle_xy[idx] is not None:
                 window.original_panel.draw_points(
                     state.circle_xy[idx], "#ef4444", 2.0,
@@ -185,6 +191,11 @@ def display_frame(
             frame_to_display(idx), state.total_frames,
         )
         window.status_bar.update_roi(state.gridx, state.gridy)
+        if (state.region_count is not None and state.region_count[idx] > 0):
+            window.header.set_status(
+                f"Area-equivalent R = {state.radius[idx]:.1f} px; "
+                f"regions = {state.region_count[idx]}", "#10b981",
+            )
     except Exception as exc:
         window.header.set_status(f"Error: {exc}", "#ef4444")
 
@@ -204,6 +215,9 @@ def refresh_chart(state: AppState, window) -> np.ndarray | None:
             state.radius, state.circle_fit_par, state.circle_xy,
             state.gridx, state.gridy,
         )
+        if state.region_count is not None:
+            area_mask = (state.region_count > 0) & (state.radius > 0)
+            scores[area_mask] = np.nan
         window.radius_chart.plot_all(frames, state.radius, scores)
         return scores
     return None

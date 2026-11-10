@@ -22,6 +22,7 @@ Thumbs.db
 # Example image data (too large for git)
 examples/
 debug_outputs/
+tests/Jin_13_23_34/
 
 # Generated launchers (created by setup scripts)
 /BubbleTrack.bat

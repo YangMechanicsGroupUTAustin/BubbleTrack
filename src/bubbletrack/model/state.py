@@ -58,6 +58,7 @@ class AppState:
     closing_radius: int = 0
     opening_radius: int = 0
     detection_mode: str = "intensity"  # "intensity" or "gradient"
+    area_max_regions: int = 1
     gradient_boundary: float = 0.0  # gradient mode ring index: 0/0.5/1 -> 1st/2nd/3rd
     temporal_refine: bool = False  # use neighbouring frames to repair weak fits
 
@@ -75,6 +76,7 @@ class AppState:
     radius: object = None          # np.ndarray (N,) float, -1 = unprocessed
     circle_fit_par: object = None  # np.ndarray (N, 2) [row_c, col_c]
     circle_xy: object = None       # list of (M, 2) arrays | None
+    region_count: object = None     # np.ndarray (N,) number of selected regions
 
     # Display parameters
     img_grayscale_max: int = 65535
@@ -114,6 +116,7 @@ class AppState:
             radius=np.full(n, -1.0),
             circle_fit_par=np.full((n, 2), np.nan),
             circle_xy=[None] * n,
+            region_count=np.zeros(n, dtype=int),
         )
 
 

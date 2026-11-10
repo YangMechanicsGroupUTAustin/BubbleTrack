@@ -46,6 +46,7 @@ def export_r_data(
     radius: np.ndarray,
     centers: np.ndarray,
     edge_pts: list,
+    region_count: np.ndarray | None = None,
 ) -> None:
     """Save raw fitting results to a ``.mat`` file.
 
@@ -65,11 +66,14 @@ def export_r_data(
         (e if e is not None else np.empty((0, 2))) for e in edge_pts
     ]
 
-    savemat(save_path, {
+    data = {
         "Radius": radius.reshape(1, -1),
         "CircleFitPar": centers,
         "CircleXY": np.array(cleaned_edges, dtype=object),
-    })
+    }
+    if region_count is not None:
+        data["RegionCount"] = region_count.reshape(1, -1)
+    savemat(save_path, data)
 
 
 def export_rof_t_data(
@@ -223,6 +227,7 @@ def export_csv(
     *,
     fps: float | None = None,
     um2px: float | None = None,
+    region_count: np.ndarray | None = None,
 ) -> None:
     """Export results to CSV format.
 
@@ -242,6 +247,8 @@ def export_csv(
     has_fps = fps is not None
     has_scale = um2px is not None
     header = _build_header(has_fps=has_fps, has_scale=has_scale)
+    if region_count is not None:
+        header.append("Region_Count")
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
@@ -255,6 +262,8 @@ def export_csv(
                 float(circle_fit_par[i, 1]),
                 fps=fps, um2px=um2px,
             )
+            if region_count is not None:
+                row.append(str(int(region_count[i])))
             writer.writerow(row)
 
 
@@ -265,6 +274,7 @@ def export_excel(
     *,
     fps: float | None = None,
     um2px: float | None = None,
+    region_count: np.ndarray | None = None,
 ) -> None:
     """Export results to Excel (.xlsx) format.
 
@@ -287,6 +297,8 @@ def export_excel(
     has_fps = fps is not None
     has_scale = um2px is not None
     header = _build_header(has_fps=has_fps, has_scale=has_scale)
+    if region_count is not None:
+        header.append("Region_Count")
 
     wb = Workbook()
     ws = wb.active
@@ -302,6 +314,8 @@ def export_excel(
             float(circle_fit_par[i, 1]),
             fps=fps, um2px=um2px,
         )
+        if region_count is not None:
+            row.append(str(int(region_count[i])))
         ws.append(row)
 
     wb.save(filepath)

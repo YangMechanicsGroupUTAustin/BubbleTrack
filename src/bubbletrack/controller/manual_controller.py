@@ -99,6 +99,8 @@ class ManualController(BaseController):
             self.state.radius[idx] = radius
             self.state.circle_fit_par[idx] = [rc, cc]
             self.state.circle_xy[idx] = xy
+            if self.state.region_count is not None:
+                self.state.region_count[idx] = 0
 
             # Clear old overlays before drawing new results
             redraw_original(self.state, self.w)
@@ -139,6 +141,8 @@ class ManualController(BaseController):
             self.state.circle_fit_par[idx] = [0, 0]
         if self.state.circle_xy is not None:
             self.state.circle_xy[idx] = None
+        if self.state.region_count is not None:
+            self.state.region_count[idx] = 0
 
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 

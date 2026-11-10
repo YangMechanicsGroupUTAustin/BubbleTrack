@@ -20,7 +20,9 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
 from bubbletrack.model.config import load_config
-from bubbletrack.model.detection import detect_bubble_gradient, detect_bubble_with_mode
+from bubbletrack.model.detection import (
+    detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
+)
 from bubbletrack.model.image_io import load_and_normalize
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.session import save_session, load_session
@@ -215,6 +217,7 @@ class AppController:
             "closing_radius": self._state.closing_radius,
             "opening_radius": self._state.opening_radius,
             "detection_mode": self._state.detection_mode,
+            "area_max_regions": self._state.area_max_regions,
             "gradient_boundary": self._state.gradient_boundary,
             "temporal_refine": self._state.temporal_refine,
         })
@@ -248,6 +251,8 @@ class AppController:
 
         self._state.radius[idx] = -1.0
         self._state.circle_fit_par[idx] = [np.nan, np.nan]
+        if self._state.region_count is not None:
+            self._state.region_count[idx] = 0
         if self._state.circle_xy is not None:
             self._state.circle_xy[idx] = None
 
@@ -285,7 +290,7 @@ class AppController:
                 self._state.gridy,
             )
 
-            _, edge_xy = detect_bubble_with_mode(
+            processed, edge_xy = detect_bubble_with_mode(
                 binary_roi,
                 cur_img_roi,
                 self._state.detection_mode,
@@ -299,24 +304,34 @@ class AppController:
                 closing_radius=self._state.closing_radius,
                 gaussian_sigma=self._state.gaussian_sigma,
                 gradient_boundary=self._state.gradient_boundary,
+                area_max_regions=self._state.area_max_regions,
             )
 
             if edge_xy.shape[0] >= 3:
-                rc, cc, r = circle_fit_taubin(edge_xy)
+                r, rc, cc, count = measure_detection(
+                    processed, edge_xy, self._state.detection_mode,
+                    self._state.gridx, self._state.gridy,
+                )
                 # Reject fits that exceed max radius
                 if np.isfinite(r) and r > 0 and r <= self._max_radius:
                     self._state.radius[idx] = r
                     self._state.circle_fit_par[idx] = [rc, cc]
+                    if self._state.region_count is not None:
+                        self._state.region_count[idx] = count
                     if self._state.circle_xy is not None:
                         self._state.circle_xy[idx] = edge_xy
                 else:
                     self._state.radius[idx] = -1.0
                     self._state.circle_fit_par[idx] = [np.nan, np.nan]
+                    if self._state.region_count is not None:
+                        self._state.region_count[idx] = 0
                     if self._state.circle_xy is not None:
                         self._state.circle_xy[idx] = None
             else:
                 self._state.radius[idx] = -1.0
                 self._state.circle_fit_par[idx] = [np.nan, np.nan]
+                if self._state.region_count is not None:
+                    self._state.region_count[idx] = 0
                 if self._state.circle_xy is not None:
                     self._state.circle_xy[idx] = None
 
@@ -394,6 +409,8 @@ class AppController:
 
             self._state.radius[idx] = r
             self._state.circle_fit_par[idx] = [rc, cc]
+            if self._state.region_count is not None:
+                self._state.region_count[idx] = 0
             if self._state.circle_xy is not None:
                 self._state.circle_xy[idx] = edge_xy
 

@@ -168,6 +168,8 @@ class RadiusChart(QWidget):
     @staticmethod
     def _quality_color(score: float) -> str:
         """Map a quality score [0, 1] to a display color."""
+        if not np.isfinite(score):
+            return "#94a3b8"  # area mode has no circle-fit quality score
         if score >= QUALITY_GOOD_THRESHOLD:
             return "#10b981"  # green — reliable
         if score >= QUALITY_WARN_THRESHOLD:
@@ -311,7 +313,9 @@ class RadiusChart(QWidget):
 
         frame = int(self._frames[nearest_idx])
         radius = self._radii[nearest_idx]
-        if self._quality_scores is not None and nearest_idx < len(self._quality_scores):
+        if (self._quality_scores is not None
+                and nearest_idx < len(self._quality_scores)
+                and np.isfinite(self._quality_scores[nearest_idx])):
             q_pct = int(self._quality_scores[nearest_idx] * 100)
             self._hover_label.setText(
                 f"Frame: {frame}  R: {radius:.1f} px  Q: {q_pct}%",

@@ -73,6 +73,7 @@ class AutoController(BaseController):
             opening_radius=self.state.opening_radius,
             detection_mode=self.state.detection_mode,
             gradient_boundary=self.state.gradient_boundary,
+            area_max_regions=self.state.area_max_regions,
             max_radius=self._get_max_radius(),
         )
         self._worker.progress.connect(self._on_auto_progress)
@@ -124,13 +125,15 @@ class AutoController(BaseController):
             eta_text = "Calculating..."
         self.w.left_panel.automatic_tab.set_progress(current, total, eta_text)
 
-    def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi) -> None:
+    def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi,
+                            rc: float, cc: float, count: int) -> None:
         # Always update state (fast, no UI)
         self.state.radius[idx] = radius
-        if edge_xy is not None and edge_xy.shape[0] > 0:
-            rc, cc, _ = circle_fit_taubin(edge_xy)
+        if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
             self.state.circle_fit_par[idx] = [rc, cc]
             self.state.circle_xy[idx] = edge_xy
+        if self.state.region_count is not None:
+            self.state.region_count[idx] = count
 
         # Incremental auto-save every AUTOSAVE_INTERVAL frames
         if (idx + 1) % AUTOSAVE_INTERVAL == 0 and self.state.folder_path:
@@ -141,6 +144,7 @@ class AutoController(BaseController):
                     self.state.radius,
                     self.state.circle_fit_par,
                     self.state.circle_xy,
+                    self.state.region_count,
                 )
                 logger.info("Auto-saved at frame %d to %s", idx, autosave_path)
             except Exception as exc:
@@ -176,8 +180,8 @@ class AutoController(BaseController):
             )
             # Draw fitted circle and edge points on original image
             if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
-                rc, cc, _ = circle_fit_taubin(edge_xy)
-                self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
+                if count == 0:
+                    self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
                 self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
         except Exception:
             pass
@@ -272,6 +276,7 @@ class AutoController(BaseController):
             opening_radius=self.state.opening_radius,
             detection_mode=self.state.detection_mode,
             gradient_boundary=self.state.gradient_boundary,
+            area_max_regions=self.state.area_max_regions,
             max_radius=self._get_max_radius(),
             export_physical=cfg.export_physical,
             fps=cfg.fps,

@@ -27,6 +27,7 @@ PERSIST_KEYS: frozenset[str] = frozenset({
     "closing_radius",
     "opening_radius",
     "detection_mode",
+    "area_max_regions",
     "gradient_boundary",
     "temporal_refine",
     "um2px",

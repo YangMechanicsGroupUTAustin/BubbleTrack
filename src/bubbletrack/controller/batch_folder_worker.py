@@ -55,6 +55,7 @@ class BatchFolderWorker(QThread):
         opening_radius: int = 0,
         detection_mode: str = "intensity",
         gradient_boundary: float = 0.5,
+        area_max_regions: int = 1,
         max_radius: float = float("inf"),
         export_physical: bool = False,
         fps: float = 1_000_000.0,
@@ -75,6 +76,7 @@ class BatchFolderWorker(QThread):
         self._opening_radius = opening_radius
         self._detection_mode = detection_mode
         self._gradient_boundary = gradient_boundary
+        self._area_max_regions = area_max_regions
         self._max_radius = max_radius
         self._export_physical = export_physical
         self._fps = fps
@@ -112,6 +114,7 @@ class BatchFolderWorker(QThread):
             radius = np.full(n, -1.0)
             circle_fit_par = np.full((n, 2), np.nan)
             circle_xy: list = [None] * n
+            region_count = np.zeros(n, dtype=int)
 
             # Build args for ProcessPoolExecutor.  Tuple order MUST match
             # bubbletrack.controller.worker._process_single_frame.
@@ -124,6 +127,7 @@ class BatchFolderWorker(QThread):
                     self._closing_radius, self._opening_radius,
                     self._detection_mode,
                     self._gradient_boundary,
+                    self._area_max_regions,
                     self._max_radius,
                 )
                 for i in range(n)
@@ -141,11 +145,10 @@ class BatchFolderWorker(QThread):
                             pool.shutdown(wait=False, cancel_futures=True)
                             break
                         try:
-                            idx, r, edge_xy, _ = fut.result()
+                            idx, r, edge_xy, _, rc, cc, count = fut.result()
                             radius[idx] = r
+                            region_count[idx] = count
                             if r > 0 and edge_xy is not None and edge_xy.shape[0] >= 3:
-                                from bubbletrack.model.circle_fit import circle_fit_taubin
-                                rc, cc, _ = circle_fit_taubin(edge_xy)
                                 circle_fit_par[idx] = [rc, cc]
                                 circle_xy[idx] = edge_xy
                         except Exception as exc:
@@ -171,6 +174,8 @@ class BatchFolderWorker(QThread):
                 radius, circle_fit_par, circle_xy,
                 self._gridx, self._gridy,
             )
+            if self._detection_mode == "area":
+                q_scores[radius > 0] = np.nan
             self.folder_result_ready.emit(
                 str(folder), n, n_fitted, radius.copy(), q_scores,
             )
@@ -180,7 +185,9 @@ class BatchFolderWorker(QThread):
             # Always export R_data (pixel data)
             r_data_path = str(folder / f"R_data_{ts}.mat")
             try:
-                export_r_data(r_data_path, radius, circle_fit_par, circle_xy)
+                export_r_data(
+                    r_data_path, radius, circle_fit_par, circle_xy, region_count,
+                )
                 messages.append(f"{n_fitted}/{n} fitted")
             except Exception as exc:
                 self.folder_done.emit(folder.name, False, f"R_data export failed: {exc}")

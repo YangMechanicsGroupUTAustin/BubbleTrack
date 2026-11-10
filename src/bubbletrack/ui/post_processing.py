@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -93,6 +93,18 @@ class PostProcessing(QWidget):
         section.add_widget(self._status)
 
         layout.addWidget(section)
+
+        self._no_wheel_controls = (
+            self._fps_spin, self._fps_unit, self._scale_spin,
+            self._fit_len_spin, self._format_combo,
+        )
+        for control in self._no_wheel_controls:
+            control.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if watched in self._no_wheel_controls and event.type() == QEvent.Type.Wheel:
+            return True
+        return super().eventFilter(watched, event)
 
     def get_fps(self) -> float:
         multipliers = {"Hz": 1, "k": 1_000, "M": 1_000_000}

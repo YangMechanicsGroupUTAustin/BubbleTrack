@@ -47,6 +47,7 @@ def save_session(filepath: str, state) -> None:
         "closing_radius": state.closing_radius,
         "opening_radius": state.opening_radius,
         "detection_mode": state.detection_mode,
+        "area_max_regions": state.area_max_regions,
         "gradient_boundary": state.gradient_boundary,
         "temporal_refine": state.temporal_refine,
         "um2px": state.um2px,
@@ -57,6 +58,9 @@ def save_session(filepath: str, state) -> None:
             state.circle_fit_par.tolist()
             if state.circle_fit_par is not None
             else None
+        ),
+        "region_count": (
+            state.region_count.tolist() if state.region_count is not None else None
         ),
     }
     Path(filepath).write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -106,6 +110,8 @@ def load_session(filepath: str) -> dict:
         data["radius"] = np.array(data["radius"], dtype=np.float64)
     if data.get("circle_fit_par") is not None:
         data["circle_fit_par"] = np.array(data["circle_fit_par"], dtype=np.float64)
+    if data.get("region_count") is not None:
+        data["region_count"] = np.array(data["region_count"], dtype=int)
 
     # Reconstruct tuples from lists
     if "gridx" in data and isinstance(data["gridx"], list):
