@@ -16,7 +16,7 @@ from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import clamp_roi
-from bubbletrack.model.detection import detect_bubble
+from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
 from bubbletrack.model.image_io import load_and_normalize
 from bubbletrack.model.quality import compute_fit_quality
 from bubbletrack.model.removing_factor import compute_removing_factor
@@ -74,6 +74,10 @@ class PretuneController(BaseController):
             clahe_clip=p["clahe_clip"],
             closing_radius=p["closing_radius"],
             opening_radius=p["opening_radius"],
+            detection_mode=p["detection_mode"],
+            area_max_regions=p["area_max_regions"],
+            gradient_boundary=p["gradient_boundary"],
+            temporal_refine=p["temporal_refine"],
         )
         self._invalidate_binary_cache()
         if self._cache is not None:
@@ -116,26 +120,32 @@ class PretuneController(BaseController):
                 self.state.gridy,
                 self.state.gaussian_sigma,
                 self.state.clahe_clip,
+                self.state.detection_mode,
+                self.state.gradient_boundary,
             )
             if (current_params == self._last_binary_params
                     and self._last_binary_roi is not None):
-                binary_roi = self._last_binary_roi
+                cur_img_roi, binary_roi = self._last_binary_roi
             else:
-                _, _, _, binary_roi = load_and_normalize(
+                _, _, cur_img_roi, binary_roi = load_and_normalize(
                     self.state.images[idx], self.state.img_thr,
                     self.state.gridx, self.state.gridy,
                     gaussian_sigma=self.state.gaussian_sigma,
                     clahe_clip=self.state.clahe_clip,
                 )
-                self._last_binary_roi = binary_roi
+                self._last_binary_roi = (cur_img_roi, binary_roi)
                 self._last_binary_params = current_params
 
-            processed, _ = detect_bubble(
-                binary_roi, self.state.bubble_cross_edges, rf,
+            processed, _ = detect_bubble_with_mode(
+                binary_roi, cur_img_roi, self.state.detection_mode,
+                self.state.img_thr, list(self.state.bubble_cross_edges), rf,
                 self.state.gridx, self.state.gridy,
                 self.state.removing_obj_radius,
                 opening_radius=self.state.opening_radius,
                 closing_radius=self.state.closing_radius,
+                gaussian_sigma=self.state.gaussian_sigma,
+                gradient_boundary=self.state.gradient_boundary,
+                area_max_regions=self.state.area_max_regions,
             )
             # Apply invert_mask as the last visual step (matches display_frame).
             bin_display = ~processed if self.state.invert_mask else processed
@@ -175,18 +185,22 @@ class PretuneController(BaseController):
         )
 
         try:
-            _, _, _, binary_roi = load_and_normalize(
+            _, _, cur_img_roi, binary_roi = load_and_normalize(
                 self.state.images[idx], self.state.img_thr,
                 self.state.gridx, self.state.gridy,
                 gaussian_sigma=self.state.gaussian_sigma,
                 clahe_clip=self.state.clahe_clip,
             )
-            processed, edge_xy = detect_bubble(
-                binary_roi, self.state.bubble_cross_edges, rf,
+            processed, edge_xy = detect_bubble_with_mode(
+                binary_roi, cur_img_roi, self.state.detection_mode,
+                self.state.img_thr, list(self.state.bubble_cross_edges), rf,
                 self.state.gridx, self.state.gridy,
                 self.state.removing_obj_radius,
                 opening_radius=self.state.opening_radius,
                 closing_radius=self.state.closing_radius,
+                gaussian_sigma=self.state.gaussian_sigma,
+                gradient_boundary=self.state.gradient_boundary,
+                area_max_regions=self.state.area_max_regions,
             )
 
             # Apply invert_mask as the last visual step (matches display_frame).
@@ -194,7 +208,10 @@ class PretuneController(BaseController):
             self.w.binary_panel.set_image(bin_display)
 
             if edge_xy.shape[0] >= 3:
-                rc, cc, radius = circle_fit_taubin(edge_xy)
+                radius, rc, cc, count = measure_detection(
+                    processed, edge_xy, self.state.detection_mode,
+                    self.state.gridx, self.state.gridy,
+                )
                 if np.isnan(radius) or radius > self._get_max_radius():
                     logger.error("Fit failed for frame %d", idx)
                     self.w.header.set_status(
@@ -206,25 +223,34 @@ class PretuneController(BaseController):
                     self.state.radius[idx] = radius
                     self.state.circle_fit_par[idx] = [rc, cc]
                     self.state.circle_xy[idx] = edge_xy
+                    if self.state.region_count is not None:
+                        self.state.region_count[idx] = count
 
                     # Clear old overlays before drawing new results
                     redraw_original(self.state, self.w)
-                    self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
+                    if self.state.detection_mode != "area":
+                        self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
                     self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
                     refresh_chart(self.state, self.w)
-                    self.w.header.set_status(
-                        f"R = {radius:.1f} px", "#10b981",
-                    )
+                    label = (f"Area-equivalent R = {radius:.1f} px; regions = {count}"
+                             if self.state.detection_mode == "area"
+                             else f"R = {radius:.1f} px")
+                    self.w.header.set_status(label, "#10b981")
 
                     # Show quality metrics
                     roi_h = self.state.gridx[1] - self.state.gridx[0] + 1
                     roi_w = self.state.gridy[1] - self.state.gridy[0] + 1
-                    q = compute_fit_quality(
-                        edge_xy, rc, cc, radius, min(roi_h, roi_w),
-                    )
-                    self.w.left_panel.pretune_tab.show_quality(
-                        q.n_edge_points, q.rms_residual, int(q.score * 100),
-                    )
+                    if self.state.detection_mode == "area":
+                        self.w.left_panel.pretune_tab.show_area_result(
+                            int(processed.sum()), count,
+                        )
+                    else:
+                        q = compute_fit_quality(
+                            edge_xy, rc, cc, radius, min(roi_h, roi_w),
+                        )
+                        self.w.left_panel.pretune_tab.show_quality(
+                            q.n_edge_points, q.rms_residual, int(q.score * 100),
+                        )
             else:
                 self.w.header.set_status("Too few edge points", "#ef4444")
                 self.w.left_panel.pretune_tab.hide_quality()
@@ -239,6 +265,12 @@ class PretuneController(BaseController):
         from bubbletrack.controller.autotune_worker import AutoTuneWorker
 
         if not self.state.images:
+            return
+        if self.state.detection_mode != "intensity":
+            self.w.header.set_status(
+                "Auto Tune is for intensity-mask mode; tune Gradient manually",
+                "#f59e0b",
+            )
             return
         # Cancel any still-running worker before starting a new one
         if self._autotune_worker is not None:

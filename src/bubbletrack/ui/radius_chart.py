@@ -24,11 +24,14 @@ class RadiusChart(QWidget):
                               with the 0-based frame index.
         refit_requested(int): Emitted when user requests refitting a frame,
                              with the 0-based frame index.
+        neighbor_refit_requested(int): Emitted when user requests refitting a
+                                      frame using adjacent fitted frames.
     """
 
     point_clicked = pyqtSignal(int)
     delete_requested = pyqtSignal(int)
     refit_requested = pyqtSignal(int)
+    neighbor_refit_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -165,6 +168,8 @@ class RadiusChart(QWidget):
     @staticmethod
     def _quality_color(score: float) -> str:
         """Map a quality score [0, 1] to a display color."""
+        if not np.isfinite(score):
+            return "#94a3b8"  # area mode has no circle-fit quality score
         if score >= QUALITY_GOOD_THRESHOLD:
             return "#10b981"  # green — reliable
         if score >= QUALITY_WARN_THRESHOLD:
@@ -246,8 +251,18 @@ class RadiusChart(QWidget):
             refit_action.triggered.connect(
                 lambda _checked=False, i=frame_idx: self.refit_requested.emit(i),
             )
+            neighbor_refit_action = QAction(
+                f"Refit using neighbor frames (Frame {frame_label})",
+                self,
+            )
+            neighbor_refit_action.triggered.connect(
+                lambda _checked=False, i=frame_idx: (
+                    self.neighbor_refit_requested.emit(i)
+                ),
+            )
             menu.addAction(delete_action)
             menu.addAction(refit_action)
+            menu.addAction(neighbor_refit_action)
             menu.exec(event.screenPos().toPoint())
 
     # ------------------------------------------------------------------ #
@@ -298,7 +313,9 @@ class RadiusChart(QWidget):
 
         frame = int(self._frames[nearest_idx])
         radius = self._radii[nearest_idx]
-        if self._quality_scores is not None and nearest_idx < len(self._quality_scores):
+        if (self._quality_scores is not None
+                and nearest_idx < len(self._quality_scores)
+                and np.isfinite(self._quality_scores[nearest_idx])):
             q_pct = int(self._quality_scores[nearest_idx] * 100)
             self._hover_label.setText(
                 f"Frame: {frame}  R: {radius:.1f} px  Q: {q_pct}%",

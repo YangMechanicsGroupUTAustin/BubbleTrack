@@ -24,36 +24,39 @@ def _process_single_frame(args: tuple):
         idx, filepath, sensitivity, gridx, gridy,
         edges, rf_slider, removing_obj_radius,
         gaussian_sigma, clahe_clip,
-        closing_radius, opening_radius, max_radius,
+        closing_radius, opening_radius, detection_mode, gradient_boundary,
+        area_max_regions,
+        max_radius,
     ) = args
 
     # Import inside the function — each worker process needs its own imports
-    from bubbletrack.model.circle_fit import circle_fit_taubin
-    from bubbletrack.model.detection import detect_bubble
+    from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
     from bubbletrack.model.image_io import load_and_normalize
     from bubbletrack.model.removing_factor import compute_removing_factor
 
-    _, _, _, binary_roi = load_and_normalize(
+    _, _, cur_img_roi, binary_roi = load_and_normalize(
         filepath, sensitivity, gridx, gridy,
         gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
     )
     rf = compute_removing_factor(rf_slider, gridx, gridy)
-    processed, edge_xy = detect_bubble(
-        binary_roi, list(edges), rf, gridx, gridy, removing_obj_radius,
+    processed, edge_xy = detect_bubble_with_mode(
+        binary_roi, cur_img_roi, detection_mode, sensitivity,
+        list(edges), rf, gridx, gridy, removing_obj_radius,
         opening_radius=opening_radius, closing_radius=closing_radius,
+        gaussian_sigma=gaussian_sigma,
+        gradient_boundary=gradient_boundary,
+        area_max_regions=area_max_regions,
     )
 
-    radius = -1.0
-    if edge_xy.shape[0] >= 3:
-        _, _, r = circle_fit_taubin(edge_xy)
-        if not (np.isnan(r) or r > max_radius):
-            radius = float(r)
-        else:
-            edge_xy = np.empty((0, 2))
-    else:
+    radius, rc, cc, count = measure_detection(
+        processed, edge_xy, detection_mode, gridx, gridy,
+    )
+    if not np.isfinite(radius) or radius <= 0 or radius > max_radius:
+        radius = -1.0
         edge_xy = np.empty((0, 2))
+        count = 0
 
-    return idx, radius, edge_xy, processed
+    return idx, radius, edge_xy, processed, rc, cc, count
 
 
 class BatchWorker(QThread):
@@ -68,7 +71,7 @@ class BatchWorker(QThread):
     """
 
     progress = pyqtSignal(int, int)
-    frame_done = pyqtSignal(int, float, object, object)
+    frame_done = pyqtSignal(int, float, object, object, float, float, int)
     frame_error = pyqtSignal(int, str)  # (frame_idx, error_message)
     finished = pyqtSignal()
     error = pyqtSignal(str)
@@ -88,6 +91,9 @@ class BatchWorker(QThread):
         clahe_clip: float = 0.0,
         closing_radius: int = 0,
         opening_radius: int = 0,
+        detection_mode: str = "intensity",
+        gradient_boundary: float = 0.5,
+        area_max_regions: int = 1,
         max_radius: float = float("inf"),
     ):
         super().__init__()
@@ -104,6 +110,9 @@ class BatchWorker(QThread):
         self._clahe_clip = clahe_clip
         self._closing_radius = closing_radius
         self._opening_radius = opening_radius
+        self._detection_mode = detection_mode
+        self._gradient_boundary = gradient_boundary
+        self._area_max_regions = area_max_regions
         self._max_radius = max_radius
         self._stop = False
 
@@ -134,6 +143,9 @@ class BatchWorker(QThread):
                 self._clahe_clip,
                 self._closing_radius,
                 self._opening_radius,
+                self._detection_mode,
+                self._gradient_boundary,
+                self._area_max_regions,
                 self._max_radius,
             ))
 
@@ -154,13 +166,14 @@ class BatchWorker(QThread):
                 try:
                     result = fut.result()
                     self.frame_done.emit(
-                        result[0], result[1], result[2], result[3],
+                        *result,
                     )
                 except Exception as exc:
                     logger.error("Frame %d failed: %s", idx, exc)
                     self.frame_error.emit(idx, str(exc))
                     self.frame_done.emit(
                         idx, -1.0, np.empty((0, 2)), None,
+                        float("nan"), float("nan"), 0,
                     )
 
                 done_count += 1

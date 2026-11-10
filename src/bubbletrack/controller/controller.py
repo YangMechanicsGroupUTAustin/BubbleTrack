@@ -20,7 +20,9 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
 from bubbletrack.model.config import load_config
-from bubbletrack.model.detection import detect_bubble
+from bubbletrack.model.detection import (
+    detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
+)
 from bubbletrack.model.image_io import load_and_normalize
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.session import save_session, load_session
@@ -99,6 +101,7 @@ class AppController:
         self.bus.subscribe("load_folder", self.file_ctrl.on_folder_selected)
 
         self._connect_signals()
+        self._sync_ui_from_state()
 
         # Keyboard shortcuts
         self._shortcuts = setup_shortcuts(self.w, {
@@ -190,6 +193,9 @@ class AppController:
         # R-t chart right-click: delete / refit
         self.w.radius_chart.delete_requested.connect(self._on_delete_point)
         self.w.radius_chart.refit_requested.connect(self._on_refit_point)
+        self.w.radius_chart.neighbor_refit_requested.connect(
+            self._on_refit_point_with_neighbors,
+        )
 
         # Compare mode change — refresh display immediately
         self.w.compare_mode_changed.connect(self._on_compare_mode_changed)
@@ -197,6 +203,30 @@ class AppController:
         # Session save/load (menubar File menu)
         self.w.save_session_requested.connect(self._on_save_session)
         self.w.load_session_requested.connect(self._on_load_session)
+
+    def _sync_ui_from_state(self) -> None:
+        """Reflect loaded/persisted state in the visible controls."""
+        pt = self.w.left_panel.pretune_tab
+        pt.set_threshold(self._state.img_thr)
+        pt.set_removing_factor(self._state.removing_factor)
+        pt.set_invert_mask(self._state.invert_mask)
+        pt.set_edge_flags(self._state.bubble_cross_edges)
+        pt.set_filter_params({
+            "gaussian_sigma": self._state.gaussian_sigma,
+            "clahe_clip": self._state.clahe_clip,
+            "closing_radius": self._state.closing_radius,
+            "opening_radius": self._state.opening_radius,
+            "detection_mode": self._state.detection_mode,
+            "area_max_regions": self._state.area_max_regions,
+            "gradient_boundary": self._state.gradient_boundary,
+            "temporal_refine": self._state.temporal_refine,
+        })
+
+        self.w.left_panel.post_processing.set_physical_params(
+            self._state.fps,
+            self._state.um2px,
+            self._state.rmax_fit_length,
+        )
 
     # ------------------------------------------------------------------ #
     #  Compare mode refresh
@@ -221,6 +251,8 @@ class AppController:
 
         self._state.radius[idx] = -1.0
         self._state.circle_fit_par[idx] = [np.nan, np.nan]
+        if self._state.region_count is not None:
+            self._state.region_count[idx] = 0
         if self._state.circle_xy is not None:
             self._state.circle_xy[idx] = None
 
@@ -243,7 +275,7 @@ class AppController:
             return
 
         try:
-            _, _, _, binary_roi = load_and_normalize(
+            _, _, cur_img_roi, binary_roi = load_and_normalize(
                 self._state.images[idx],
                 self._state.img_thr,
                 self._state.gridx,
@@ -258,8 +290,11 @@ class AppController:
                 self._state.gridy,
             )
 
-            _, edge_xy = detect_bubble(
+            processed, edge_xy = detect_bubble_with_mode(
                 binary_roi,
+                cur_img_roi,
+                self._state.detection_mode,
+                self._state.img_thr,
                 list(self._state.bubble_cross_edges),
                 rf,
                 self._state.gridx,
@@ -267,24 +302,36 @@ class AppController:
                 self._state.removing_obj_radius,
                 opening_radius=self._state.opening_radius,
                 closing_radius=self._state.closing_radius,
+                gaussian_sigma=self._state.gaussian_sigma,
+                gradient_boundary=self._state.gradient_boundary,
+                area_max_regions=self._state.area_max_regions,
             )
 
             if edge_xy.shape[0] >= 3:
-                rc, cc, r = circle_fit_taubin(edge_xy)
+                r, rc, cc, count = measure_detection(
+                    processed, edge_xy, self._state.detection_mode,
+                    self._state.gridx, self._state.gridy,
+                )
                 # Reject fits that exceed max radius
                 if np.isfinite(r) and r > 0 and r <= self._max_radius:
                     self._state.radius[idx] = r
                     self._state.circle_fit_par[idx] = [rc, cc]
+                    if self._state.region_count is not None:
+                        self._state.region_count[idx] = count
                     if self._state.circle_xy is not None:
                         self._state.circle_xy[idx] = edge_xy
                 else:
                     self._state.radius[idx] = -1.0
                     self._state.circle_fit_par[idx] = [np.nan, np.nan]
+                    if self._state.region_count is not None:
+                        self._state.region_count[idx] = 0
                     if self._state.circle_xy is not None:
                         self._state.circle_xy[idx] = None
             else:
                 self._state.radius[idx] = -1.0
                 self._state.circle_fit_par[idx] = [np.nan, np.nan]
+                if self._state.region_count is not None:
+                    self._state.region_count[idx] = 0
                 if self._state.circle_xy is not None:
                     self._state.circle_xy[idx] = None
 
@@ -310,6 +357,117 @@ class AppController:
         except Exception as exc:
             logger.error("Refit frame %d failed: %s", idx + 1, exc)
             self.w.header.set_status(f"Refit failed: {exc}", "#ef4444")
+
+    def _on_refit_point_with_neighbors(self, idx: int) -> None:
+        """Refit one frame using neighbouring fitted frames as a circle prior."""
+        if not self._state.images or idx < 0 or idx >= len(self._state.images):
+            return
+        if self._state.radius is None or self._state.circle_fit_par is None:
+            return
+
+        prior = self._neighbor_circle_prior(idx)
+        if prior is None:
+            self.w.header.set_status(
+                f"No neighbouring fits for frame {idx + 1}", "#f59e0b",
+            )
+            return
+
+        try:
+            _, _, cur_img_roi, _ = load_and_normalize(
+                self._state.images[idx],
+                self._state.img_thr,
+                self._state.gridx,
+                self._state.gridy,
+                gaussian_sigma=self._state.gaussian_sigma,
+                clahe_clip=self._state.clahe_clip,
+            )
+            processed, edge_xy = detect_bubble_gradient(
+                cur_img_roi,
+                self._state.img_thr,
+                self._state.gridx,
+                self._state.gridy,
+                boundary_bias=self._state.gradient_boundary,
+                prior_circle=prior,
+                gaussian_sigma=(
+                    self._state.gaussian_sigma
+                    if self._state.gaussian_sigma > 0 else 1.2
+                ),
+            )
+
+            if edge_xy.shape[0] < 3:
+                self.w.header.set_status(
+                    f"Neighbor refit frame {idx + 1}: no boundary", "#f59e0b",
+                )
+                return
+
+            rc, cc, r = circle_fit_taubin(edge_xy)
+            if not np.isfinite(r) or r <= 0 or r > self._max_radius:
+                self.w.header.set_status(
+                    f"Neighbor refit frame {idx + 1}: invalid radius", "#f59e0b",
+                )
+                return
+
+            self._state.radius[idx] = r
+            self._state.circle_fit_par[idx] = [rc, cc]
+            if self._state.region_count is not None:
+                self._state.region_count[idx] = 0
+            if self._state.circle_xy is not None:
+                self._state.circle_xy[idx] = edge_xy
+
+            self._refresh_chart()
+            if self._state.image_no == idx:
+                display_frame(
+                    self._state, self.w, idx, self._set_state, self._image_cache,
+                )
+            self.w.header.set_status(
+                f"Neighbor refit frame {idx + 1}: r = {r:.1f} px", "#10b981",
+            )
+            logger.info("Neighbor refit frame %d: radius = %.3f", idx + 1, r)
+
+        except Exception as exc:
+            logger.error("Neighbor refit frame %d failed: %s", idx + 1, exc)
+            self.w.header.set_status(f"Neighbor refit failed: {exc}", "#ef4444")
+
+    def _neighbor_circle_prior(
+        self,
+        idx: int,
+    ) -> tuple[float, float, float] | None:
+        """Predict a circle for *idx* from nearest valid neighbouring frames."""
+        radius = self._state.radius
+        centers = self._state.circle_fit_par
+        n = len(radius)
+
+        def valid(i: int) -> bool:
+            return (
+                0 <= i < n
+                and radius[i] > 0
+                and np.isfinite(radius[i])
+                and np.isfinite(centers[i]).all()
+            )
+
+        prev_idx = next((i for i in range(idx - 1, -1, -1) if valid(i)), None)
+        next_idx = next((i for i in range(idx + 1, n) if valid(i)), None)
+
+        if prev_idx is None and next_idx is None:
+            return None
+        if prev_idx is None:
+            return (
+                float(centers[next_idx, 0]),
+                float(centers[next_idx, 1]),
+                float(radius[next_idx]),
+            )
+        if next_idx is None:
+            return (
+                float(centers[prev_idx, 0]),
+                float(centers[prev_idx, 1]),
+                float(radius[prev_idx]),
+            )
+
+        alpha = (idx - prev_idx) / (next_idx - prev_idx)
+        rc = (1 - alpha) * centers[prev_idx, 0] + alpha * centers[next_idx, 0]
+        cc = (1 - alpha) * centers[prev_idx, 1] + alpha * centers[next_idx, 1]
+        r = (1 - alpha) * radius[prev_idx] + alpha * radius[next_idx]
+        return float(rc), float(cc), float(r)
 
     def _refresh_chart(self) -> None:
         """Refresh the R-t chart with quality-based coloring."""

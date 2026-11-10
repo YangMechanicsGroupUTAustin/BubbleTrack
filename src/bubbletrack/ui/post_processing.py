@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QDoubleSpinBox, QGridLayout, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -94,6 +94,18 @@ class PostProcessing(QWidget):
 
         layout.addWidget(section)
 
+        self._no_wheel_controls = (
+            self._fps_spin, self._fps_unit, self._scale_spin,
+            self._fit_len_spin, self._format_combo,
+        )
+        for control in self._no_wheel_controls:
+            control.installEventFilter(self)
+
+    def eventFilter(self, watched, event):
+        if watched in self._no_wheel_controls and event.type() == QEvent.Type.Wheel:
+            return True
+        return super().eventFilter(watched, event)
+
     def get_fps(self) -> float:
         multipliers = {"Hz": 1, "k": 1_000, "M": 1_000_000}
         unit = self._fps_unit.currentText()
@@ -109,6 +121,20 @@ class PostProcessing(QWidget):
         """Return selected export format: ``"mat"``, ``"csv"``, or ``"xlsx"``."""
         mapping = {"MAT": "mat", "CSV": "csv", "Excel": "xlsx"}
         return mapping.get(self._format_combo.currentText(), "mat")
+
+    def set_physical_params(self, fps: float, scale: float, fit_length: int) -> None:
+        """Set persisted physical parameters without emitting signals."""
+        if fps >= 1_000_000:
+            self._fps_unit.setCurrentText("M")
+            self._fps_spin.setValue(fps / 1_000_000)
+        elif fps >= 1_000:
+            self._fps_unit.setCurrentText("k")
+            self._fps_spin.setValue(fps / 1_000)
+        else:
+            self._fps_unit.setCurrentText("Hz")
+            self._fps_spin.setValue(fps)
+        self._scale_spin.setValue(scale)
+        self._fit_len_spin.setValue(fit_length)
 
     def set_status(self, text: str, success: bool = True):
         colour = "#10b981" if success else "#ef4444"
