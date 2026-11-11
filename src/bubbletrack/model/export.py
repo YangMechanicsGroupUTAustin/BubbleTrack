@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -180,8 +181,17 @@ def export_rof_t_data(
 # CSV / Excel export
 # ---------------------------------------------------------------------------
 
+# A data cell: its numeric value plus the format spec used to render it as
+# CSV text.  Excel receives the raw value so that cells stay numeric.
+_Cell = tuple["int | float", str]
+
+_FMT_INT = "d"
+_FMT_TIME = ".8f"
+_FMT_LENGTH = ".4f"
+
+
 def _build_header(
-    *, has_fps: bool, has_scale: bool,
+    *, has_fps: bool, has_scale: bool, has_region_count: bool = False,
 ) -> list[str]:
     """Build the column header list for CSV/Excel export."""
     header: list[str] = ["Frame"]
@@ -190,10 +200,12 @@ def _build_header(
     header.extend(["Radius_px", "Center_Row_px", "Center_Col_px"])
     if has_scale:
         header.extend(["Radius_um", "Center_Row_um", "Center_Col_um"])
+    if has_region_count:
+        header.append("Region_Count")
     return header
 
 
-def _build_row(
+def _build_cells(
     frame_idx: int,
     radius_val: float,
     center_row: float,
@@ -201,23 +213,49 @@ def _build_row(
     *,
     fps: float | None,
     um2px: float | None,
-) -> list[str]:
-    """Build a single data row for CSV/Excel export."""
-    row: list[str] = [str(frame_idx + 1)]
+    region_count: int | None = None,
+) -> list[_Cell]:
+    """Build the cells of a single data row for CSV/Excel export."""
+    cells: list[_Cell] = [(frame_idx + 1, _FMT_INT)]
     if fps is not None:
-        row.append(f"{frame_idx / fps:.8f}")
-    row.extend([
-        f"{radius_val:.4f}",
-        f"{center_row:.4f}",
-        f"{center_col:.4f}",
+        cells.append((frame_idx / fps, _FMT_TIME))
+    cells.extend([
+        (radius_val, _FMT_LENGTH),
+        (center_row, _FMT_LENGTH),
+        (center_col, _FMT_LENGTH),
     ])
     if um2px is not None:
-        row.extend([
-            f"{radius_val * um2px:.4f}",
-            f"{center_row * um2px:.4f}",
-            f"{center_col * um2px:.4f}",
+        cells.extend([
+            (radius_val * um2px, _FMT_LENGTH),
+            (center_row * um2px, _FMT_LENGTH),
+            (center_col * um2px, _FMT_LENGTH),
         ])
-    return row
+    if region_count is not None:
+        cells.append((region_count, _FMT_INT))
+    return cells
+
+
+def _iter_data_rows(
+    radius: np.ndarray,
+    circle_fit_par: np.ndarray,
+    *,
+    fps: float | None,
+    um2px: float | None,
+    region_count: np.ndarray | None,
+) -> Iterator[list[_Cell]]:
+    """Yield the cells of every processed frame, skipping ``radius <= 0``."""
+    for i in range(len(radius)):
+        if radius[i] <= 0:
+            continue  # skip unprocessed frames
+        yield _build_cells(
+            i, float(radius[i]),
+            float(circle_fit_par[i, 0]),
+            float(circle_fit_par[i, 1]),
+            fps=fps, um2px=um2px,
+            region_count=(
+                None if region_count is None else int(region_count[i])
+            ),
+        )
 
 
 def export_csv(
@@ -244,27 +282,21 @@ def export_csv(
     um2px : float or None
         Micrometres per pixel.  If provided, physical-unit columns are included.
     """
-    has_fps = fps is not None
-    has_scale = um2px is not None
-    header = _build_header(has_fps=has_fps, has_scale=has_scale)
-    if region_count is not None:
-        header.append("Region_Count")
+    header = _build_header(
+        has_fps=fps is not None,
+        has_scale=um2px is not None,
+        has_region_count=region_count is not None,
+    )
+    rows = _iter_data_rows(
+        radius, circle_fit_par,
+        fps=fps, um2px=um2px, region_count=region_count,
+    )
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
-        for i in range(len(radius)):
-            if radius[i] <= 0:
-                continue  # skip unprocessed frames
-            row = _build_row(
-                i, float(radius[i]),
-                float(circle_fit_par[i, 0]),
-                float(circle_fit_par[i, 1]),
-                fps=fps, um2px=um2px,
-            )
-            if region_count is not None:
-                row.append(str(int(region_count[i])))
-            writer.writerow(row)
+        for cells in rows:
+            writer.writerow([format(value, spec) for value, spec in cells])
 
 
 def export_excel(
@@ -294,28 +326,22 @@ def export_excel(
     # Lazy import to avoid hard dependency
     from openpyxl import Workbook  # type: ignore[import-untyped]
 
-    has_fps = fps is not None
-    has_scale = um2px is not None
-    header = _build_header(has_fps=has_fps, has_scale=has_scale)
-    if region_count is not None:
-        header.append("Region_Count")
+    header = _build_header(
+        has_fps=fps is not None,
+        has_scale=um2px is not None,
+        has_region_count=region_count is not None,
+    )
+    rows = _iter_data_rows(
+        radius, circle_fit_par,
+        fps=fps, um2px=um2px, region_count=region_count,
+    )
 
     wb = Workbook()
     ws = wb.active
     ws.title = "Bubble Radius Data"
     ws.append(header)
-
-    for i in range(len(radius)):
-        if radius[i] <= 0:
-            continue  # skip unprocessed frames
-        row = _build_row(
-            i, float(radius[i]),
-            float(circle_fit_par[i, 0]),
-            float(circle_fit_par[i, 1]),
-            fps=fps, um2px=um2px,
-        )
-        if region_count is not None:
-            row.append(str(int(region_count[i])))
-        ws.append(row)
+    for cells in rows:
+        # Raw numbers (not CSV text) so Excel treats the cells as numeric.
+        ws.append([value for value, _spec in cells])
 
     wb.save(filepath)
