@@ -207,6 +207,54 @@ class TestLocateRmax:
         np.testing.assert_array_equal(R, before)
 
 
+class TestRmaxBoundaryWarning:
+    """A peak near the edge of the valid data still exports, with a warning."""
+
+    @staticmethod
+    def _smooth_peak(n, peak):
+        t = np.arange(1, n + 1, dtype=float)
+        return 100.0 - 0.05 * (t - peak) ** 2
+
+    def test_peak_at_first_frame_warns(self, tmp_path):
+        ok, msg = export_rof_t_data(
+            str(tmp_path / "x.mat"), np.array([100.0, 90.0, 80.0]), 1.0, 1.0, 5,
+        )
+        assert ok
+        assert "boundary" in msg
+        assert "start" in msg
+        assert "Rmax" in msg and "t=0" in msg and "inaccurate" in msg
+
+    def test_peak_at_last_frame_warns(self, tmp_path):
+        ok, msg = export_rof_t_data(
+            str(tmp_path / "x.mat"), np.array([80.0, 90.0, 100.0]), 1.0, 1.0, 5,
+        )
+        assert ok
+        assert "boundary" in msg
+        assert "end" in msg
+
+    def test_peak_near_first_valid_frame_warns(self, tmp_path):
+        """Leading failed frames move the boundary to the first valid frame."""
+        R = self._smooth_peak(30, 5.0)
+        R[:2] = -1.0  # first valid frame is 3; peak at 5 is 2 frames away
+        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 11)
+        assert ok
+        assert "boundary" in msg
+        assert "start" in msg
+        assert "end" not in msg
+
+    def test_peak_half_window_from_boundary_does_not_warn(self, tmp_path):
+        R = self._smooth_peak(30, 6.0)  # frames 1..5 fill the left half-window
+        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 11)
+        assert ok
+        assert msg == ""
+
+    def test_locate_rmax_reports_boundary_warning(self):
+        est = locate_rmax(np.array([100.0, 90.0, 80.0]), 5)
+        assert len(est.warnings) == 1
+        assert "boundary" in est.warnings[0]
+        assert locate_rmax(self._smooth_peak(30, 15.0), 11).warnings == ()
+
+
 class TestRmaxFitWindow:
     """The fit window uses ``half = (L - 1) // 2`` frames on each side."""
 

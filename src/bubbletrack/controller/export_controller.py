@@ -34,6 +34,25 @@ _FORMAT_EXT: dict[str, str] = {
     "xlsx": ".xlsx",
 }
 
+# Amber, as used elsewhere in the UI for "marginal" states.
+_WARNING_COLOUR = "#f59e0b"
+
+
+def _show_export_success(pp, path: str, warning: str = "") -> None:
+    """Report a finished export: green when clean, amber with a warning.
+
+    ``PostProcessingPanel.set_status`` only knows success (green) and
+    error (red), so the warning colour is applied to its status label.
+    """
+    if not warning:
+        pp.set_status(f"Exported: {os.path.basename(path)}", True)
+        return
+    logger.warning("Export %s: %s", path, warning)
+    pp.set_status(f"Exported with warning: {warning}", True)
+    label = getattr(pp, "_status", None)
+    if label is not None:
+        label.setStyleSheet(f"color:{_WARNING_COLOUR}; font-size:11px;")
+
 
 class ExportController(BaseController):
     """Handles exporting radius data to .mat / CSV / Excel files."""
@@ -105,7 +124,7 @@ class ExportController(BaseController):
                 )
                 if ok:
                     logger.info("Export: %s", path)
-                    pp.set_status(f"Exported: {os.path.basename(path)}", True)
+                    _show_export_success(pp, path, msg)
                     self.w.status_bar.update_scale(pp.get_scale())
                 else:
                     pp.set_status(msg, False)

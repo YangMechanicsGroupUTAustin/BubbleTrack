@@ -109,6 +109,8 @@ class RmaxEstimate:
         Inclusive 1-based fit window, clamped to ``[1, N]``.
     fitted : bool
         True when the parabola vertex was accepted.
+    warnings : tuple[str, ...]
+        Human-readable caveats about the estimate; empty when none apply.
     """
 
     frame: float
@@ -116,11 +118,41 @@ class RmaxEstimate:
     peak_frame: int
     window: tuple[int, int]
     fitted: bool
+    warnings: tuple[str, ...] = ()
 
 
 def _valid_frame_mask(radius: np.ndarray) -> np.ndarray:
     """Return True for frames with a usable radius (> 0 and not NaN)."""
     return (radius > 0) & ~np.isnan(radius)
+
+
+def _boundary_warning(
+    peak_frame: int, valid_indices: np.ndarray, half: int,
+) -> str | None:
+    """Warn when the peak is at, or within half a window of, a data edge.
+
+    The edges are the first and last *valid* frames.  Closer than *half*
+    frames, the fit window runs past the data and is truncated; a peak on
+    the edge itself is always flagged because the true maximum may lie
+    outside the recording.
+    """
+    margin = max(half, 1)
+    first_frame = int(valid_indices[0]) + 1
+    last_frame = int(valid_indices[-1]) + 1
+    sides = [
+        side for side, distance in (
+            ("start", peak_frame - first_frame),
+            ("end", last_frame - peak_frame),
+        )
+        if distance < margin
+    ]
+    if not sides:
+        return None
+    return (
+        f"Rmax (frame {peak_frame}) is at or within half a fit window of the "
+        f"{' and '.join(sides)} boundary of the valid frames; the fit window "
+        f"was truncated, so Rmax and t=0 may be inaccurate."
+    )
 
 
 def _fit_parabola_vertex(
@@ -190,14 +222,20 @@ def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
     fit_frames = window_frames[valid_mask[window_frames - 1]]
     vertex = _fit_parabola_vertex(fit_frames, R[fit_frames - 1], window)
 
+    warnings = tuple(
+        w for w in (_boundary_warning(peak_frame, valid_indices, half),)
+        if w is not None
+    )
     if vertex is None:
         return RmaxEstimate(
             frame=float(peak_frame), radius=float(R[peak_idx]),
             peak_frame=peak_frame, window=window, fitted=False,
+            warnings=warnings,
         )
     return RmaxEstimate(
         frame=vertex[0], radius=vertex[1],
         peak_frame=peak_frame, window=window, fitted=True,
+        warnings=warnings,
     )
 
 
@@ -230,6 +268,16 @@ def export_rof_t_data(
     Returns
     -------
     (success, message) : (bool, str)
+        On failure, *message* explains why nothing was written.  On
+        success, *message* is empty or holds warnings about the Rmax
+        estimate (e.g. a peak near the data boundary); the file is
+        written either way.
+
+    Notes
+    -----
+    ``t`` is measured from Rmax: frame k (1-based) maps to
+    ``(k - RmaxFrame) / fps``, and the Rmax sample is inserted at t = 0.
+    ``RmaxTimeLoc`` is the 1-based frame position of Rmax divided by fps.
     """
     deltax = um2px
     deltat = 1.0 / fps
@@ -271,7 +319,7 @@ def export_rof_t_data(
         "RmaxTimeLoc": float(rmax_time_loc_phys),
     })
 
-    return True, ""
+    return True, " ".join(estimate.warnings)
 
 
 # ---------------------------------------------------------------------------
