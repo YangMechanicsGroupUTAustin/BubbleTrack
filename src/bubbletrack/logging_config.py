@@ -15,9 +15,16 @@ def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> 
     root = logging.getLogger("bubbletrack")
     root.setLevel(level)
 
+    # Idempotent: replace handlers from a previous call instead of stacking
+    # them (otherwise every log line is printed once per call).
+    for handler in [h for h in root.handlers if getattr(h, "_bubbletrack", False)]:
+        root.removeHandler(handler)
+        handler.close()
+
     # Console handler
     console = logging.StreamHandler(sys.stderr)
     console.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+    console._bubbletrack = True
     root.addHandler(console)
 
     # File handler (optional)
@@ -25,4 +32,5 @@ def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> 
         log_dir.mkdir(parents=True, exist_ok=True)
         fh = logging.FileHandler(log_dir / "bubbletrack.log", encoding="utf-8")
         fh.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
+        fh._bubbletrack = True
         root.addHandler(fh)

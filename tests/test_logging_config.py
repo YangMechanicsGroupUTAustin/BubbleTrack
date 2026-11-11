@@ -52,3 +52,12 @@ def test_custom_level():
     logger = logging.getLogger("bubbletrack")
 
     assert logger.level == logging.DEBUG
+
+
+def test_setup_twice_does_not_duplicate_handlers(tmp_path):
+    """Repeated setup (e.g. the CLI called twice in one process) must not
+    print every log line several times."""
+    setup_logging(log_dir=tmp_path / "logs")
+    setup_logging(log_dir=tmp_path / "logs")
+    logger = logging.getLogger("bubbletrack")
+    assert len(logger.handlers) == 2
