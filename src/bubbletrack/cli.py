@@ -11,9 +11,11 @@ import numpy as np
 
 from bubbletrack.logging_config import setup_logging
 from bubbletrack.model.config import DETECTION_MODES
+from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR
 from bubbletrack.model.export import export_csv, export_excel, export_r_data
 from bubbletrack.model.frame_pipeline import FrameParams, fit_image_file
 from bubbletrack.model.image_io import imread_unicode, scan_folder
+from bubbletrack.model.removing_factor import compute_removing_factor
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +35,19 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Adaptive threshold sensitivity [0-1] (default: 0.5)",
     )
     parser.add_argument(
-        "--rf", type=int, default=90,
-        help="Removing factor [0-100] (default: 90)",
+        "--rf", type=float, default=DEFAULT_REMOVING_FACTOR,
+        help=(
+            "Removing factor as the GUI's Remove slider value [0-100] "
+            f"(default: {DEFAULT_REMOVING_FACTOR}); it is mapped to a minimum "
+            "blob area over the ROI exactly as in the GUI. Changed in 3.1: "
+            "--rf used to be a raw pixel area, so old scripts that pass e.g. "
+            "--rf 90 now remove far larger blobs; use --rf-area for a raw "
+            "pixel area."
+        ),
+    )
+    parser.add_argument(
+        "--rf-area", type=int, default=None, metavar="PIXELS",
+        help="Minimum blob area as a raw pixel area; overrides --rf",
     )
     parser.add_argument(
         "--mode", choices=DETECTION_MODES, default="intensity",
@@ -96,6 +109,17 @@ def _resolve_roi(
         return (args.roi[0], args.roi[1]), (args.roi[2], args.roi[3])
     h, w = shape
     return (1, h), (1, w)
+
+
+def _removing_area(
+    args: argparse.Namespace,
+    gridx: tuple[int, int],
+    gridy: tuple[int, int],
+) -> int:
+    """Minimum blob area in pixels: --rf-area, else --rf mapped like the GUI."""
+    if args.rf_area is not None:
+        return args.rf_area
+    return compute_removing_factor(args.rf, gridx, gridy)
 
 
 def _process_frames(
@@ -174,7 +198,7 @@ def main(argv: list[str] | None = None) -> None:
         sensitivity=args.threshold,
         gridx=gridx,
         gridy=gridy,
-        removing_factor=args.rf,
+        removing_factor=_removing_area(args, gridx, gridy),
         edges=tuple(bool(e) for e in args.edges),
         mode=args.mode,
         max_radius=float(max(shape)),  # the GUI's sanity bound

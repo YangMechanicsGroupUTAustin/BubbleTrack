@@ -122,7 +122,7 @@ class TestLoadersUseUnicodeReader:
         for i in range(2):
             _write_unicode(unicode_dir / f"frame_{i}.tiff", frame16)
         out = tmp_path / "out.csv"
-        cli.main(["--folder", str(unicode_dir), "--output", str(out)])
+        cli.main(["--folder", str(unicode_dir), "--output", str(out), "--threshold", "0.58"])
         assert "2/2 frames fitted" in capsys.readouterr().out
 
 
