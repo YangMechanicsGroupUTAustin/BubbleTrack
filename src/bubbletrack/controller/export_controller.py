@@ -180,7 +180,10 @@ class ExportController(BaseController):
             chart_path = None
 
         try:
-            generate_report(path, self.state, chart_image_path=chart_path)
+            generate_report(
+                path, self.state, chart_image_path=chart_path,
+                fps=pp.get_fps(), um2px=pp.get_scale(),
+            )
             logger.info("Report: %s", path)
             pp.set_status(f"Report saved: {os.path.basename(path)}", True)
         except Exception as exc:

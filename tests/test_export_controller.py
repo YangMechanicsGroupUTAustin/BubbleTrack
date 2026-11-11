@@ -154,6 +154,24 @@ def _smooth_radius(n: int = 30) -> np.ndarray:
     return 100.0 - 0.05 * (t - n / 2) ** 2
 
 
+class TestReport:
+    def test_report_uses_panel_fps_and_scale(self, monkeypatch, tmp_path):
+        panel = _FakePanel(fps=5e5, scale=2.5)
+        out = tmp_path / "report.pdf"
+        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+        calls = []
+        monkeypatch.setattr(
+            ec, "generate_report",
+            lambda *args, **kwargs: calls.append(kwargs),
+        )
+
+        ctrl.on_generate_report()
+
+        assert calls[0]["fps"] == pytest.approx(5e5)
+        assert calls[0]["um2px"] == pytest.approx(2.5)
+        assert panel.statuses[-1] == ("Report saved: report.pdf", True)
+
+
 class TestExportMetadata:
     """Every export carries provenance built from state + panel values."""
 
