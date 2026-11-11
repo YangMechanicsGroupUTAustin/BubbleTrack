@@ -317,6 +317,8 @@ def export_rof_t_data(
     ``t`` is measured from Rmax: frame k (1-based) maps to
     ``(k - RmaxFrame) / fps``, and the Rmax sample is inserted at t = 0.
     ``RmaxTimeLoc`` is the 1-based frame position of Rmax divided by fps.
+    The scalars ``fps``, ``um2px`` and ``RmaxFitLength`` record the
+    conversion parameters.
     """
     deltax = um2px
     deltat = 1.0 / fps
@@ -356,6 +358,10 @@ def export_rof_t_data(
         "R": R_out.reshape(-1, 1),
         "RmaxAll": float(rmax_all_phys),
         "RmaxTimeLoc": float(rmax_time_loc_phys),
+        # Conversion parameters, stored as MATLAB doubles.
+        "fps": float(fps),
+        "um2px": float(um2px),
+        "RmaxFitLength": float(rmax_fit_length),
     })
 
     return True, " ".join(estimate.warnings)

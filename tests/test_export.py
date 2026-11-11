@@ -99,6 +99,18 @@ class TestExportRofTData:
         # Rmax should be near 30.0 (the peak among valid frames)
         assert rmax >= 30.0
 
+    def test_stores_export_parameters(self, tmp_path):
+        """fps, um2px and the fit length travel with the data."""
+        out = str(tmp_path / "params.mat")
+        ok, _ = export_rof_t_data(out, self._make_parabola(), 3.2, 2.5e5, 9)
+        assert ok
+        data = loadmat(out)
+        assert data["fps"].shape == (1, 1)
+        assert data["fps"].item() == pytest.approx(2.5e5)
+        assert data["um2px"].item() == pytest.approx(3.2)
+        assert data["RmaxFitLength"].item() == 9
+        assert "BubbleTrackMeta" not in data  # only with metadata
+
     def test_invalid_frames_exported_as_nan(self, tmp_path):
         """Failed frames (-1, 0, NaN) become NaN in R but keep their t."""
         R = np.array([-1.0, 10.0, np.nan, 20.0, 30.0, 25.0, 15.0, 0.0])
