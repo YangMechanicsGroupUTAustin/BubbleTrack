@@ -5,6 +5,7 @@ from __future__ import annotations
 import csv
 import importlib.metadata
 import json
+import math
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime
@@ -542,6 +543,13 @@ _FMT_TIME = ".8f"
 _FMT_LENGTH = ".4f"
 
 
+def _excel_number(value: int | float) -> int | float | None:
+    """Return *value* for an Excel cell; NaN/inf (unsupported) become empty."""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return value
+
+
 def _build_header(
     *, has_fps: bool, has_scale: bool, has_region_count: bool = False,
 ) -> list[str]:
@@ -785,7 +793,7 @@ def export_excel(
     ws.append(header)
     for cells in rows:
         # Raw numbers (not CSV text) so Excel treats the cells as numeric.
-        ws.append([value for value, _spec in cells])
+        ws.append([_excel_number(value) for value, _spec in cells])
 
     if metadata is not None:
         meta_ws = wb.create_sheet(META_SHEET_TITLE)

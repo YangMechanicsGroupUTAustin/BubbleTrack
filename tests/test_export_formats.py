@@ -354,6 +354,24 @@ class TestExportExcel:
         assert second["Frame"] == 3
         assert second["Time_s"] == pytest.approx(2 / 3000.0)
 
+    def test_non_finite_values_become_empty_cells(self, tmp_path):
+        """Excel has no NaN: such cells are left empty, not written as NaN."""
+        import zipfile
+
+        from openpyxl import load_workbook
+
+        radius = np.array([10.0, 20.0])
+        centers = np.array([[np.nan, 60.0], [51.0, 61.0]])
+        out = str(tmp_path / "nan.xlsx")
+        export_excel(out, radius, centers)
+
+        sheet_xml = zipfile.ZipFile(out).read("xl/worksheets/sheet1.xml")
+        assert b"<v></v>" not in sheet_xml
+        assert b"nan" not in sheet_xml.lower()
+        ws = load_workbook(out).active
+        assert ws.cell(row=2, column=3).value is None  # Center_Row_px
+        assert ws.cell(row=2, column=4).value == pytest.approx(60.0)
+
     def test_sheet_title(self, tmp_path, sample_data):
         from openpyxl import load_workbook
 
