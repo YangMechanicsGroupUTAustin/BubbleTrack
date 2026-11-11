@@ -8,6 +8,7 @@ and check that every read path in the app copes.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 
@@ -41,6 +42,16 @@ def unicode_dir(tmp_path):
     folder = tmp_path / UNICODE_NAME
     folder.mkdir()
     return folder
+
+
+@pytest.fixture()
+def restore_bubbletrack_logger():
+    """cli.main() calls setup_logging(), which adds a handler on every call."""
+    logger = logging.getLogger("bubbletrack")
+    handlers, level = list(logger.handlers), logger.level
+    yield
+    logger.handlers[:] = handlers
+    logger.setLevel(level)
 
 
 @pytest.fixture()
@@ -105,7 +116,9 @@ class TestLoadersUseUnicodeReader:
         path = _write_unicode(unicode_dir / "a.tiff", frame16)
         assert detect_bit_depth(path) == 65535
 
-    def test_cli_fits_frames_in_unicode_folder(self, unicode_dir, frame16, tmp_path, capsys):
+    def test_cli_fits_frames_in_unicode_folder(
+        self, unicode_dir, frame16, tmp_path, capsys, restore_bubbletrack_logger,
+    ):
         for i in range(2):
             _write_unicode(unicode_dir / f"frame_{i}.tiff", frame16)
         out = tmp_path / "out.csv"
