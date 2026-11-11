@@ -261,6 +261,11 @@ class TestRmaxBoundaryWarning:
         assert ok
         assert msg == ""
 
+    def test_both_boundaries_are_reported_together(self):
+        est = locate_rmax(np.array([99.0, 100.0, 99.5]), 11)
+        assert len(est.warnings) == 1
+        assert "boundary (start and end of the valid frames)" in est.warnings[0]
+
     def test_locate_rmax_reports_boundary_warning(self):
         est = locate_rmax(np.array([100.0, 99.0, 98.0]), 5)
         assert len(est.warnings) == 1

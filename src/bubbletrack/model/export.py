@@ -311,8 +311,8 @@ def _boundary_warning(
         return None
     return (
         f"Rmax (frame {peak_frame}) is at or within half a fit window of the "
-        f"{' and '.join(sides)} boundary of the valid frames; the fit window "
-        f"was truncated, so Rmax and t=0 may be inaccurate."
+        f"data boundary ({' and '.join(sides)} of the valid frames); the fit "
+        f"window was truncated, so Rmax and t=0 may be inaccurate."
     )
 
 
