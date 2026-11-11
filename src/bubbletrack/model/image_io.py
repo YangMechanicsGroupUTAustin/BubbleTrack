@@ -10,7 +10,11 @@ import cv2
 import numpy as np
 
 from bubbletrack.model.conventions import roi_to_slice
-from bubbletrack.model.folder_scan import ScanResult, scan_folder_report  # noqa: F401  (re-export)
+from bubbletrack.model.folder_scan import (  # noqa: F401  (re-exported)
+    ScanResult,
+    scan_folder_report,
+    tiff_page_count,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -114,9 +118,10 @@ def scan_folder(folder: str) -> list[str]:
     for callers that only need the paths: one extension group is loaded
     (tif/tiff > png > jpg/jpeg > bmp, any letter case), and hidden files and
     symlinks are skipped.  Use ``scan_folder_report`` to also learn which
-    files were ignored.
+    files were ignored or are multi-page TIFFs (this wrapper reads no file
+    headers, so existing callers pay nothing extra).
     """
-    return list(scan_folder_report(folder).images)
+    return list(scan_folder_report(folder, check_pages=False).images)
 
 
 def detect_bit_depth(path: str) -> int:
