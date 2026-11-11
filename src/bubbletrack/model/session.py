@@ -63,6 +63,7 @@ def save_session(filepath: str, state) -> None:
     data = {
         "version": SESSION_VERSION,
         "folder_path": state.folder_path,
+        "video_path": state.video_path,
         "image_no": state.image_no,
         "img_thr": state.img_thr,
         "gridx": list(state.gridx),

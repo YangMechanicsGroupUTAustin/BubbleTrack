@@ -15,14 +15,16 @@ from bubbletrack.ui.batch_config_dialog import BatchConfigDialog
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.batch_folder_worker import BatchFolderWorker
-from bubbletrack.controller.display_mixin import display_frame, refresh_chart
+from bubbletrack.controller.display_mixin import (
+    current_source, display_frame, refresh_chart,
+)
 from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
 from bubbletrack.model.conventions import display_to_frame, frame_to_display
 from bubbletrack.model.export import export_r_data
-from bubbletrack.model.image_io import load_and_normalize
+from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 
 logger = logging.getLogger(__name__)
@@ -117,6 +119,8 @@ class AutoController(BaseController):
             gradient_boundary=self.state.gradient_boundary,
             area_max_regions=self.state.area_max_regions,
             max_radius=self._get_max_radius(),
+            video_path=(self.state.video_path
+                        if self.state.video_reader is not None else None),
         )
         # Every slot is bound to *this* worker: results from an older run
         # (e.g. one still draining after Stop) can never reach new arrays.
@@ -284,8 +288,8 @@ class AutoController(BaseController):
 
         # Load and display original image for current frame
         try:
-            cur_img, _, _, _ = load_and_normalize(
-                self.state.images[idx], self.state.img_thr,
+            cur_img, _, _, _ = normalize_source(
+                current_source(self.state, idx), self.state.img_thr,
                 self.state.gridx, self.state.gridy,
                 gaussian_sigma=self.state.gaussian_sigma,
                 clahe_clip=self.state.clahe_clip,
@@ -316,11 +320,20 @@ class AutoController(BaseController):
             frames = np.arange(1, len(self.state.radius) + 1)
             self.w.radius_chart.plot_all(frames, self.state.radius)
 
+    def _autosave_path(self) -> Path | None:
+        """Next to the images, or next to the video (one file per video)."""
+        if self.state.video_reader is not None and self.state.video_path:
+            video = Path(self.state.video_path)
+            return video.with_name(f".{video.stem}{AUTOSAVE_NAME}")
+        if self.state.folder_path:
+            return Path(self.state.folder_path) / AUTOSAVE_NAME
+        return None
+
     def _write_autosave(self) -> bool:
-        """Write the incremental autosave next to the images; never raises."""
-        if not self.state.folder_path or self.state.video_reader is not None:
+        """Write the incremental autosave; never raises."""
+        path = self._autosave_path()
+        if path is None:
             return False
-        path = Path(self.state.folder_path) / AUTOSAVE_NAME
         try:
             export_r_data(
                 str(path),

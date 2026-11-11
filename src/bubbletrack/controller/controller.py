@@ -10,7 +10,9 @@ from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from bubbletrack.controller.auto_controller import AutoController
-from bubbletrack.controller.display_mixin import display_frame, refresh_chart
+from bubbletrack.controller.display_mixin import (
+    current_source, display_frame, refresh_chart,
+)
 from bubbletrack.controller.export_controller import ExportController
 from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
@@ -24,7 +26,7 @@ from bubbletrack.model.config import load_config
 from bubbletrack.model.detection import (
     detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
 )
-from bubbletrack.model.image_io import load_and_normalize
+from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.state import AppState, update_state
@@ -316,8 +318,8 @@ class AppController:
             return
 
         try:
-            _, _, cur_img_roi, binary_roi = load_and_normalize(
-                self._state.images[idx],
+            _, _, cur_img_roi, binary_roi = normalize_source(
+                current_source(self._state, idx),
                 self._state.img_thr,
                 self._state.gridx,
                 self._state.gridy,
@@ -409,8 +411,8 @@ class AppController:
             return
 
         try:
-            _, _, cur_img_roi, _ = load_and_normalize(
-                self._state.images[idx],
+            _, _, cur_img_roi, _ = normalize_source(
+                current_source(self._state, idx),
                 self._state.img_thr,
                 self._state.gridx,
                 self._state.gridy,

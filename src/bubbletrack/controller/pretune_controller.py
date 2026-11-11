@@ -8,6 +8,7 @@ import numpy as np
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
+    current_source,
     display_frame,
     redraw_original,
     refresh_chart,
@@ -17,7 +18,7 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
-from bubbletrack.model.image_io import load_and_normalize
+from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.quality import compute_fit_quality
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.state import update_state
@@ -127,8 +128,8 @@ class PretuneController(BaseController):
                     and self._last_binary_roi is not None):
                 cur_img_roi, binary_roi = self._last_binary_roi
             else:
-                _, _, cur_img_roi, binary_roi = load_and_normalize(
-                    self.state.images[idx], self.state.img_thr,
+                _, _, cur_img_roi, binary_roi = normalize_source(
+                    current_source(self.state, idx), self.state.img_thr,
                     self.state.gridx, self.state.gridy,
                     gaussian_sigma=self.state.gaussian_sigma,
                     clahe_clip=self.state.clahe_clip,
@@ -185,8 +186,8 @@ class PretuneController(BaseController):
         )
 
         try:
-            _, _, cur_img_roi, binary_roi = load_and_normalize(
-                self.state.images[idx], self.state.img_thr,
+            _, _, cur_img_roi, binary_roi = normalize_source(
+                current_source(self.state, idx), self.state.img_thr,
                 self.state.gridx, self.state.gridy,
                 gaussian_sigma=self.state.gaussian_sigma,
                 clahe_clip=self.state.clahe_clip,
@@ -284,7 +285,7 @@ class PretuneController(BaseController):
         self.w.left_panel.pretune_tab.set_autotune_enabled(False)
 
         self._autotune_worker = AutoTuneWorker(
-            self.state.images[idx],
+            current_source(self.state, idx),
             self.state.gridx,
             self.state.gridy,
             self.state.bubble_cross_edges,

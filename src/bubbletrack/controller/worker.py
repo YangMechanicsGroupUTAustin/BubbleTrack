@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
 
 import numpy as np
 
@@ -31,10 +31,11 @@ def _process_single_frame(args: tuple):
 
     # Import inside the function — each worker process needs its own imports
     from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
-    from bubbletrack.model.image_io import load_and_normalize
+    from bubbletrack.model.frame_source import normalize_source
     from bubbletrack.model.removing_factor import compute_removing_factor
 
-    _, _, cur_img_roi, binary_roi = load_and_normalize(
+    # ``filepath`` is an image path, or a raw frame already decoded from a video
+    _, _, cur_img_roi, binary_roi = normalize_source(
         filepath, sensitivity, gridx, gridy,
         gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
     )
@@ -95,9 +96,11 @@ class BatchWorker(QThread):
         gradient_boundary: float = 0.5,
         area_max_regions: int = 1,
         max_radius: float = float("inf"),
+        video_path: str | None = None,
     ):
         super().__init__()
         self._images = images
+        self._video_path = video_path  # decode frames here instead of by path
         self._start = start        # 0-indexed
         self._end = end            # 0-indexed inclusive
         self._sensitivity = sensitivity
@@ -119,6 +122,24 @@ class BatchWorker(QThread):
     def request_stop(self):
         self._stop = True
 
+    def _frame_args(self, i: int, source) -> tuple:
+        # Tuple order MUST match _process_single_frame.
+        return (
+            i, source, self._sensitivity, self._gridx, self._gridy,
+            tuple(self._edges), self._rf_slider, self._obj_radius,
+            self._gaussian_sigma, self._clahe_clip,
+            self._closing_radius, self._opening_radius,
+            self._detection_mode, self._gradient_boundary,
+            self._area_max_regions, self._max_radius,
+        )
+
+    def _emit_failure(self, idx: int, exc: Exception) -> None:
+        logger.error("Frame %d failed: %s", idx, exc)
+        self.frame_error.emit(idx, str(exc))
+        self.frame_done.emit(
+            idx, -1.0, np.empty((0, 2)), None, float("nan"), float("nan"), 0,
+        )
+
     def run(self):
         total = self._end - self._start + 1
         n_workers = min(4, os.cpu_count() or 1)
@@ -127,56 +148,64 @@ class BatchWorker(QThread):
             self._start, self._end, n_workers,
         )
 
-        # Build picklable args for all frames (tuples, not lists for edges)
-        all_args = []
-        for i in range(self._start, self._end + 1):
-            all_args.append((
-                i,
-                self._images[i],
-                self._sensitivity,
-                self._gridx,
-                self._gridy,
-                tuple(self._edges),
-                self._rf_slider,
-                self._obj_radius,
-                self._gaussian_sigma,
-                self._clahe_clip,
-                self._closing_radius,
-                self._opening_radius,
-                self._detection_mode,
-                self._gradient_boundary,
-                self._area_max_regions,
-                self._max_radius,
-            ))
+        reader = None
+        if self._video_path:
+            # A private reader: VideoCapture must not be shared across threads.
+            from bubbletrack.model.image_io import VideoFrameReader
+            try:
+                reader = VideoFrameReader(self._video_path)
+            except Exception as exc:
+                self.error.emit(f"Cannot open video: {exc}")
+                self.finished.emit()
+                return
 
+        # Bounded submission: only a few frames are in flight at once, so
+        # memory stays flat for long sequences and decoded video frames.
+        frame_iter = iter(range(self._start, self._end + 1))
+        max_in_flight = 2 * n_workers
         done_count = 0
-        with ProcessPoolExecutor(max_workers=n_workers) as pool:
-            futures = {
-                pool.submit(_process_single_frame, args): args[0]
-                for args in all_args
-            }
+        try:
+            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+                pending: dict = {}
 
-            for fut in as_completed(futures):
-                if self._stop:
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    logger.warning("Batch stopped by user")
-                    break
+                def submit_next() -> bool:
+                    nonlocal done_count
+                    for i in frame_iter:
+                        try:
+                            source = reader.read_frame(i) if reader else self._images[i]
+                        except Exception as exc:  # unreadable video frame
+                            self._emit_failure(i, exc)
+                            done_count += 1
+                            self.progress.emit(done_count, total)
+                            continue
+                        pending[pool.submit(_process_single_frame,
+                                            self._frame_args(i, source))] = i
+                        return True
+                    return False
 
-                idx = futures[fut]
-                try:
-                    result = fut.result()
-                    self.frame_done.emit(
-                        *result,
-                    )
-                except Exception as exc:
-                    logger.error("Frame %d failed: %s", idx, exc)
-                    self.frame_error.emit(idx, str(exc))
-                    self.frame_done.emit(
-                        idx, -1.0, np.empty((0, 2)), None,
-                        float("nan"), float("nan"), 0,
-                    )
+                while len(pending) < max_in_flight and submit_next():
+                    pass
 
-                done_count += 1
-                self.progress.emit(done_count, total)
-
-        self.finished.emit()
+                while pending:
+                    finished, _ = wait(pending, return_when=FIRST_COMPLETED)
+                    for fut in finished:
+                        idx = pending.pop(fut)
+                        try:
+                            self.frame_done.emit(*fut.result())
+                        except Exception as exc:
+                            self._emit_failure(idx, exc)
+                        done_count += 1
+                        self.progress.emit(done_count, total)
+                    if self._stop:
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        logger.warning("Batch stopped by user")
+                        break
+                    while len(pending) < max_in_flight and submit_next():
+                        pass
+        except Exception as exc:  # e.g. the process pool could not start
+            logger.exception("Batch worker failed")
+            self.error.emit(f"Fitting failed: {exc}")
+        finally:
+            if reader is not None:
+                reader.close()
+            self.finished.emit()

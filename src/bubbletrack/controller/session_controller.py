@@ -26,7 +26,7 @@ from bubbletrack.model.state import AppState, update_state
 logger = logging.getLogger(__name__)
 
 RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_source")
-_NOT_PARAMS = {"version", "folder_path", "images", *RESULT_KEYS}
+_NOT_PARAMS = {"version", "folder_path", "video_path", "images", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
 LAST_SESSION_NAME = "last_session.brt"
 
@@ -133,14 +133,27 @@ class SessionController(BaseController):
             return False
 
         folder, params, results = split_session(data)
+        video = data.get("video_path") or ""
+        if video:
+            return self._restore(path, params, results, video=video)
         if folder and not os.path.isdir(folder):
             located = self._locate_folder(folder)
             if not located:
                 self.w.header.set_status(f"Image folder not found: {folder}", _ERR)
                 return False
             folder = located
+        return self._restore(path, params, results, folder=folder)
 
-        if folder:
+    def _restore(self, path: str, params: dict, results: dict, *,
+                 folder: str = "", video: str = "") -> bool:
+        if video:
+            if not os.path.isfile(video):
+                self.w.header.set_status(f"Video not found: {video}", _ERR)
+                return False
+            self._file_ctrl.on_video_selected(video)
+            if self.state.video_path != video:
+                return False  # opening failed; FileController reported why
+        elif folder:
             self._file_ctrl.on_folder_selected(folder)
             if self.state.folder_path != folder:
                 return False  # loading failed; FileController reported why

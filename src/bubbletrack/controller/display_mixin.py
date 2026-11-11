@@ -20,6 +20,17 @@ from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.image_compare import CompareMode, create_overlay, create_wipe
 
 
+def current_source(state: AppState, idx: int):
+    """Where frame *idx* comes from: its file path, or the decoded video frame.
+
+    Pass the result to ``frame_source.normalize_source``.  Video frames are
+    identified by placeholder ids in ``state.images`` that are not paths.
+    """
+    if state.video_reader is not None:
+        return state.video_reader.read_frame(idx)
+    return state.images[idx]
+
+
 def _build_cache_key(filepath: str, state: AppState) -> str:
     """Build a cache key from filepath and processing parameters.
 

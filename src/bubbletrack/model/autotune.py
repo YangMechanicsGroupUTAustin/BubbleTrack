@@ -17,7 +17,7 @@ from bubbletrack.model.constants import (
     AUTOTUNE_TOP_K,
 )
 from bubbletrack.model.detection import detect_bubble
-from bubbletrack.model.image_io import load_and_normalize
+from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.quality import FitQuality, compute_fit_quality, score_failed_fit
 from bubbletrack.model.removing_factor import compute_removing_factor
 
@@ -35,7 +35,7 @@ class AutoTuneResult:
 
 
 def run_autotune(
-    image_path: str,
+    image_path: str | np.ndarray,
     gridx: tuple[int, int],
     gridy: tuple[int, int],
     bubble_cross_edges: tuple[bool, ...],
@@ -94,7 +94,7 @@ def run_autotune(
 
         # One load_and_normalize per threshold value
         try:
-            _, _, _, binary_roi = load_and_normalize(
+            _, _, _, binary_roi = normalize_source(
                 image_path, thr, gridx, gridy,
                 gaussian_sigma=gaussian_sigma,
                 clahe_clip=clahe_clip,
@@ -157,7 +157,7 @@ def run_autotune(
                 binary_roi = _binary_cache[thr_key]
             else:
                 try:
-                    _, _, _, binary_roi = load_and_normalize(
+                    _, _, _, binary_roi = normalize_source(
                         image_path, thr, gridx, gridy,
                         gaussian_sigma=gaussian_sigma,
                         clahe_clip=clahe_clip,
