@@ -170,3 +170,43 @@ class TestOnboarding:
         """set_onboarding_done should create the config dir if needed."""
         set_onboarding_done()
         assert is_onboarding_done() is True
+
+    def test_onboarding_flag_survives_save_config(self):
+        """Saving parameters on quit must not bring the welcome dialog back."""
+        set_onboarding_done()
+        save_config(update_state(AppState(), img_thr=0.7))
+        assert is_onboarding_done() is True
+        assert load_config()["img_thr"] == 0.7
+
+
+class TestSaveKeepsOtherKeys:
+    """save_config merges into the existing file instead of replacing it."""
+
+    def test_unknown_keys_survive_save(self, tmp_path):
+        config_file = tmp_path / ".bubbletrack" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text(
+            json.dumps({"future_option": [1, 2], "img_thr": 0.2}), encoding="utf-8",
+        )
+        save_config(update_state(AppState(), img_thr=0.7))
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert data["future_option"] == [1, 2]
+        assert data["img_thr"] == 0.7
+
+    def test_corrupt_existing_file_is_replaced(self, tmp_path):
+        config_file = tmp_path / ".bubbletrack" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_text("{not json", encoding="utf-8")
+        save_config(AppState())
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert set(data) == PERSIST_KEYS
+
+    def test_non_utf8_file_neither_crashes_nor_sticks(self, tmp_path):
+        config_file = tmp_path / ".bubbletrack" / "config.json"
+        config_file.parent.mkdir(parents=True)
+        config_file.write_bytes(b"\xff\xfe\x00garbage\x80")
+        assert is_onboarding_done() is False
+        assert load_config() == {}
+        save_config(AppState())
+        data = json.loads(config_file.read_text(encoding="utf-8"))
+        assert set(data) == PERSIST_KEYS

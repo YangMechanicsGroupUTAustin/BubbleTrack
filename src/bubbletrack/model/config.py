@@ -179,13 +179,16 @@ def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
 def save_config(state: object) -> None:
     """Persist the PERSIST_KEYS fields of *state* to CONFIG_FILE.
 
-    Creates the config directory if it does not exist.  Silently logs
-    and returns on any I/O or serialisation error so the application
+    The values are merged into the existing file, so other keys (the
+    ``onboarding_done`` flag, keys of newer versions) are kept; rewriting
+    only the persisted keys used to bring the welcome dialog back on every
+    launch.  Creates the config directory if it does not exist.  Silently
+    logs and returns on any I/O or serialisation error so the application
     can always shut down cleanly.
     """
     try:
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        data: dict[str, Any] = {}
+        data: dict[str, Any] = dict(_load_raw_config())
         for key in sorted(PERSIST_KEYS):
             value = getattr(state, key, None)
             # Convert tuples to lists for JSON round-trip
@@ -211,7 +214,7 @@ def load_config() -> dict[str, Any]:
         return {}
     try:
         raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+    except (ValueError, OSError) as exc:  # ValueError covers JSON and UTF-8 errors
         logger.warning("Failed to load config: %s", exc)
         return {}
     if not isinstance(raw, dict):
@@ -231,7 +234,7 @@ def _load_raw_config() -> dict[str, Any]:
     try:
         raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         return raw if isinstance(raw, dict) else {}
-    except (json.JSONDecodeError, OSError):
+    except (ValueError, OSError):  # ValueError covers JSON and UTF-8 errors
         return {}
 
 
