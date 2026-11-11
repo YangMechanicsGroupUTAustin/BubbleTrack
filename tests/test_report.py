@@ -7,7 +7,7 @@ import os
 import numpy as np
 import pytest
 
-from bubbletrack.model.report import generate_report
+from bubbletrack.model.report import build_report_parameters, generate_report
 from bubbletrack.model.state import AppState, update_state
 
 
@@ -114,6 +114,26 @@ class TestGenerateReport:
         out = str(tmp_path / "report.pdf")
         generate_report(out, state, chart_image_path="/nonexistent/chart.png")
         assert os.path.exists(out)
+
+    def test_panel_fps_and_scale_override_state(self):
+        """Values given explicitly (from the panel) win over state defaults."""
+        state = _make_state_with_results()
+        params = build_report_parameters(state, fps=500_000.0, um2px=1.5)
+        assert params["FPS"] == "500000 Hz"
+        assert params["Scale"] == "1.50 um/px"
+
+    def test_state_fps_and_scale_used_by_default(self):
+        state = _make_state_with_results()
+        params = build_report_parameters(state)
+        assert params["FPS"] == "1000000 Hz"
+        assert params["Scale"] == "3.20 um/px"
+
+    def test_generate_report_accepts_panel_values(self, tmp_path):
+        state = _make_state_with_results()
+        out = str(tmp_path / "panel.pdf")
+        generate_report(out, state, fps=500_000.0, um2px=1.5)
+        with open(out, "rb") as f:
+            assert f.read(5) == b"%PDF-"
 
     def test_video_source_in_params(self, tmp_path):
         """When folder_path is empty, video_path should be used as source."""

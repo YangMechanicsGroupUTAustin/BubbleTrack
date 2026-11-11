@@ -13,6 +13,8 @@ from bubbletrack.model.constants import (
     PREVIEW_DEBOUNCE_MS,
     RF_MAX_AREA_FRACTION,
     RF_MIN_AREA,
+    RMAX_OUTLIER_NEIGHBOURS,
+    RMAX_OUTLIER_TOLERANCE,
     TAUBIN_EPSILON,
     TAUBIN_MAX_ITER,
     TAUBIN_MIN_POINTS,
@@ -63,6 +65,12 @@ class TestExportDefaults:
     def test_rmax_fit_length_positive_and_odd(self):
         assert DEFAULT_RMAX_FIT_LENGTH > 0
         assert DEFAULT_RMAX_FIT_LENGTH % 2 == 1
+
+    def test_rmax_outlier_tolerance_is_a_fraction(self):
+        assert 0 < RMAX_OUTLIER_TOLERANCE < 1
+
+    def test_rmax_outlier_neighbours_positive(self):
+        assert RMAX_OUTLIER_NEIGHBOURS >= 1
 
 
 class TestStateDefaults:

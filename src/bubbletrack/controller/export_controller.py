@@ -11,7 +11,9 @@ from PyQt6.QtWidgets import QFileDialog
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.event_bus import EventBus
+from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import (
+    build_export_metadata,
     export_csv,
     export_excel,
     export_r_data,
@@ -33,6 +35,25 @@ _FORMAT_EXT: dict[str, str] = {
     "csv": ".csv",
     "xlsx": ".xlsx",
 }
+
+# Amber, as used elsewhere in the UI for "marginal" states.
+_WARNING_COLOUR = "#f59e0b"
+
+
+def _show_export_success(pp, path: str, warning: str = "") -> None:
+    """Report a finished export: green when clean, amber with a warning.
+
+    ``PostProcessingPanel.set_status`` only knows success (green) and
+    error (red), so the warning colour is applied to its status label.
+    """
+    if not warning:
+        pp.set_status(f"Exported: {os.path.basename(path)}", True)
+        return
+    logger.warning("Export %s: %s", path, warning)
+    pp.set_status(f"Exported with warning: {warning}", True)
+    label = getattr(pp, "_status", None)
+    if label is not None:
+        label.setStyleSheet(f"color:{_WARNING_COLOUR}; font-size:11px;")
 
 
 class ExportController(BaseController):
@@ -60,7 +81,7 @@ class ExportController(BaseController):
             return  # user cancelled
 
         try:
-            self._do_export_r_data(path, fmt)
+            self._do_export_r_data(path, fmt, metadata=self._export_metadata(pp))
             logger.info("Export: %s", path)
             pp.set_status(f"Exported: {os.path.basename(path)}", True)
         except Exception as exc:
@@ -86,14 +107,17 @@ class ExportController(BaseController):
             return  # user cancelled
 
         try:
+            metadata = self._export_metadata(pp)
             if fmt in ("csv", "xlsx"):
-                self._do_export_r_data(
+                warning = self._do_export_r_data(
                     path, fmt,
                     fps=pp.get_fps(),
                     um2px=pp.get_scale(),
+                    rmax_fit_length=pp.get_fit_length(),
+                    metadata=metadata,
                 )
                 logger.info("Export: %s", path)
-                pp.set_status(f"Exported: {os.path.basename(path)}", True)
+                _show_export_success(pp, path, warning)
                 self.w.status_bar.update_scale(pp.get_scale())
             else:
                 ok, msg = export_rof_t_data(
@@ -102,10 +126,11 @@ class ExportController(BaseController):
                     pp.get_scale(),
                     pp.get_fps(),
                     pp.get_fit_length(),
+                    metadata=metadata,
                 )
                 if ok:
                     logger.info("Export: %s", path)
-                    pp.set_status(f"Exported: {os.path.basename(path)}", True)
+                    _show_export_success(pp, path, msg)
                     self.w.status_bar.update_scale(pp.get_scale())
                 else:
                     pp.set_status(msg, False)
@@ -155,7 +180,10 @@ class ExportController(BaseController):
             chart_path = None
 
         try:
-            generate_report(path, self.state, chart_image_path=chart_path)
+            generate_report(
+                path, self.state, chart_image_path=chart_path,
+                fps=pp.get_fps(), um2px=pp.get_scale(),
+            )
             logger.info("Report: %s", path)
             pp.set_status(f"Report saved: {os.path.basename(path)}", True)
         except Exception as exc:
@@ -177,34 +205,53 @@ class ExportController(BaseController):
         *,
         fps: float | None = None,
         um2px: float | None = None,
-    ) -> None:
-        """Dispatch pixel-data export to the correct format handler."""
+        rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+        metadata: dict | None = None,
+    ) -> str:
+        """Dispatch pixel-data export to the correct format handler.
+
+        Returns the exporter's warning message ("" when there is none).
+        """
         if fmt == "csv":
-            export_csv(
+            return export_csv(
                 path,
                 self.state.radius,
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
                 region_count=self.state.region_count,
+                rmax_fit_length=rmax_fit_length,
+                metadata=metadata,
             )
-        elif fmt == "xlsx":
-            export_excel(
+        if fmt == "xlsx":
+            return export_excel(
                 path,
                 self.state.radius,
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
                 region_count=self.state.region_count,
+                rmax_fit_length=rmax_fit_length,
+                metadata=metadata,
             )
-        else:
-            export_r_data(
-                path,
-                self.state.radius,
-                self.state.circle_fit_par,
-                self.state.circle_xy,
-                self.state.region_count,
-            )
+        export_r_data(
+            path,
+            self.state.radius,
+            self.state.circle_fit_par,
+            self.state.circle_xy,
+            self.state.region_count,
+            metadata=metadata,
+        )
+        return ""
+
+    def _export_metadata(self, pp) -> dict:
+        """Provenance for an export: current state plus the panel values."""
+        return build_export_metadata(
+            self.state,
+            fps=pp.get_fps(),
+            um2px=pp.get_scale(),
+            rmax_fit_length=pp.get_fit_length(),
+        )
 
     def _default_export_dir(self) -> str:
         """Return the image folder as default export directory, or home."""
