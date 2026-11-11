@@ -94,6 +94,28 @@ class TestExportRofTData:
         # Rmax should be near 30.0 (the peak among valid frames)
         assert rmax >= 30.0
 
+    def test_invalid_frames_exported_as_nan(self, tmp_path):
+        """Failed frames (-1, 0, NaN) become NaN in R but keep their t."""
+        R = np.array([-1.0, 10.0, np.nan, 20.0, 30.0, 25.0, 15.0, 0.0])
+        invalid = [0, 2, 7]
+        out = str(tmp_path / "nan.mat")
+        ok, _ = export_rof_t_data(out, R, 3.2, 1.0, 3)
+        assert ok
+        data = loadmat(out)
+        t = data["t"].ravel()
+        r = data["R"].ravel()
+        loc = data["RmaxTimeLoc"].item()  # fps = 1, so this is in frames
+
+        assert len(t) == len(r)
+        assert not np.isnan(t).any()
+        assert np.isnan(r).sum() == len(invalid)
+        assert (r[~np.isnan(r)] > 0).all()
+        frame_times = np.arange(1, len(R) + 1) - loc
+        for k in invalid:
+            idx = int(np.argmin(np.abs(t - frame_times[k])))
+            assert t[idx] == pytest.approx(frame_times[k])
+            assert np.isnan(r[idx])
+
     def test_vertex_outside_fit_window_falls_back_to_discrete_max(self, tmp_path):
         """A parabola whose vertex leaves its own window must be rejected."""
         R = np.array([

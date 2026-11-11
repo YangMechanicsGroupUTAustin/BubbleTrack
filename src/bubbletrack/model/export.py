@@ -101,7 +101,9 @@ def export_rof_t_data(
     save_path : str
         Full file path for the output ``.mat`` file.
     radius : (N,) array
-        Fitted radii in pixels.
+        Fitted radii in pixels.  Frames with radius <= 0 or NaN (e.g. the
+        -1 "unprocessed/failed" sentinel) are invalid: they are exported as
+        NaN in ``R`` while keeping their sample in ``t``.
     um2px : float
         Micrometres per pixel.
     fps : float
@@ -167,11 +169,16 @@ def export_rof_t_data(
         # Too few points for quadratic fit — use discrete max
         rmax_all = rmax_val
 
-    # Build output arrays — insert Rmax at the peak and shift time
+    # Build output arrays — insert Rmax at the peak and shift time.
+    # Failed frames are exported as NaN (not a scaled -1 sentinel) so that
+    # MATLAB plots and statistics skip them; their time samples are kept.
     mask_before = t < rmax_loc
     mask_after = t > rmax_loc
+    R_valid = np.where(valid_mask, R, np.nan)
 
-    R_out = np.concatenate([R[mask_before], [rmax_all], R[mask_after]]) * deltax
+    R_out = np.concatenate([
+        R_valid[mask_before], [rmax_all], R_valid[mask_after],
+    ]) * deltax
     t_out = np.concatenate([
         t[mask_before] - rmax_loc,
         [0.0],
