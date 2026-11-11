@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -49,12 +50,88 @@ def safe_loadmat(filepath: str, expected_keys: frozenset[str]) -> dict:
     return data
 
 
+# ---------------------------------------------------------------------------
+# Provenance metadata
+# ---------------------------------------------------------------------------
+
+META_MAT_VARIABLE = "BubbleTrackMeta"
+"""Name of the struct variable holding metadata in exported ``.mat`` files."""
+
+META_SHEET_TITLE = "Metadata"
+"""Title of the key/value sheet holding metadata in exported ``.xlsx`` files."""
+
+META_SIDECAR_SUFFIX = ".meta.json"
+"""Suffix of the JSON file written next to an exported CSV (``run.meta.json``)."""
+
+
+def _plain_value(value: object) -> object:
+    """Convert a metadata value to plain Python data.
+
+    Results are str, int, float, bool, None, lists or dicts of those;
+    NumPy scalars/arrays and tuples are unpacked, anything else is ``str()``.
+    """
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return [_plain_value(v) for v in value.tolist()]
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(v) for v in value]
+    if isinstance(value, dict):
+        return {str(k): _plain_value(v) for k, v in value.items()}
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
+
+
+def _plain_metadata(metadata: dict) -> dict:
+    """Return a plain-data copy of *metadata* (the input is not modified)."""
+    return {str(k): _plain_value(v) for k, v in metadata.items()}
+
+
+def _mat_value(value: object) -> object:
+    """Make a plain metadata value storable by ``savemat`` (None -> "")."""
+    if value is None:
+        return ""
+    if isinstance(value, list):
+        return [_mat_value(v) for v in value]
+    if isinstance(value, dict):
+        return {k: _mat_value(v) for k, v in value.items()}
+    return value
+
+
+def _mat_metadata(metadata: dict) -> dict:
+    """Return *metadata* as a dict ``savemat`` writes as a MATLAB struct."""
+    return {k: _mat_value(v) for k, v in _plain_metadata(metadata).items()}
+
+
+def _excel_value(value: object) -> object:
+    """Render a plain metadata value for a single Excel cell."""
+    if isinstance(value, (list, dict)):
+        return json.dumps(value)
+    return value
+
+
+def _sidecar_path(filepath: str) -> Path:
+    """Return the metadata sidecar path for a CSV file (``run.meta.json``)."""
+    path = Path(filepath)
+    return path.with_name(path.stem + META_SIDECAR_SUFFIX)
+
+
+def _write_json_sidecar(filepath: str, metadata: dict) -> None:
+    """Write *metadata* as JSON next to *filepath*."""
+    with open(_sidecar_path(filepath), "w", encoding="utf-8") as f:
+        json.dump(_plain_metadata(metadata), f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
 def export_r_data(
     save_path: str,
     radius: np.ndarray,
     centers: np.ndarray,
     edge_pts: list,
     region_count: np.ndarray | None = None,
+    *,
+    metadata: dict | None = None,
 ) -> None:
     """Save raw fitting results to a ``.mat`` file.
 
@@ -68,6 +145,11 @@ def export_r_data(
         Circle centres ``[row, col]``.
     edge_pts : list of (M, 2) arrays or None
         Edge coordinates per frame.
+    region_count : (N,) int array or None
+        Selected region count per frame, saved as ``RegionCount``.
+    metadata : dict or None
+        Provenance (detection settings, version, ...).  When given it is
+        saved as the struct variable ``BubbleTrackMeta``.
     """
     # Replace None entries with empty arrays for savemat compatibility
     cleaned_edges = [
@@ -81,6 +163,8 @@ def export_r_data(
     }
     if region_count is not None:
         data["RegionCount"] = region_count.reshape(1, -1)
+    if metadata is not None:
+        data[META_MAT_VARIABLE] = _mat_metadata(metadata)
     savemat(save_path, data)
 
 
@@ -284,6 +368,8 @@ def export_rof_t_data(
     um2px: float,
     fps: float,
     rmax_fit_length: int,
+    *,
+    metadata: dict | None = None,
 ) -> tuple[bool, str]:
     """Convert pixel radii to physical units and save to a ``.mat`` file.
 
@@ -303,6 +389,8 @@ def export_rof_t_data(
         Window length L for quadratic Rmax fitting.  The window spans
         ``(L - 1) // 2`` frames on each side of the discrete peak, so an
         odd L uses L points and an even L uses L - 1 points.
+    metadata : dict or None
+        Provenance; when given it is saved as the struct ``BubbleTrackMeta``.
 
     Returns
     -------
@@ -353,7 +441,7 @@ def export_rof_t_data(
     rmax_all_phys = rmax_all * deltax
     rmax_time_loc_phys = rmax_loc * deltat
 
-    savemat(save_path, {
+    data = {
         "t": t_out.reshape(-1, 1),
         "R": R_out.reshape(-1, 1),
         "RmaxAll": float(rmax_all_phys),
@@ -362,7 +450,10 @@ def export_rof_t_data(
         "fps": float(fps),
         "um2px": float(um2px),
         "RmaxFitLength": float(rmax_fit_length),
-    })
+    }
+    if metadata is not None:
+        data[META_MAT_VARIABLE] = _mat_metadata(metadata)
+    savemat(save_path, data)
 
     return True, " ".join(estimate.warnings)
 
@@ -511,6 +602,7 @@ def export_csv(
     um2px: float | None = None,
     region_count: np.ndarray | None = None,
     rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+    metadata: dict | None = None,
 ) -> str:
     """Export results to CSV format.
 
@@ -531,6 +623,9 @@ def export_csv(
         Selected region count per frame; adds a Region_Count column.
     rmax_fit_length : int
         Rmax fit window length used for Time_from_Rmax_s.
+    metadata : dict or None
+        Provenance; when given it is written as JSON to a sidecar file
+        ``<name>.meta.json`` next to the CSV.  The CSV itself is unchanged.
 
     Returns
     -------
@@ -556,6 +651,8 @@ def export_csv(
         writer.writerow(header)
         for cells in rows:
             writer.writerow([format(value, spec) for value, spec in cells])
+    if metadata is not None:
+        _write_json_sidecar(filepath, metadata)
     return warning
 
 
@@ -568,6 +665,7 @@ def export_excel(
     um2px: float | None = None,
     region_count: np.ndarray | None = None,
     rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+    metadata: dict | None = None,
 ) -> str:
     """Export results to Excel (.xlsx) format with numeric cells.
 
@@ -588,6 +686,9 @@ def export_excel(
         Selected region count per frame; adds a Region_Count column.
     rmax_fit_length : int
         Rmax fit window length used for Time_from_Rmax_s.
+    metadata : dict or None
+        Provenance; when given it is written to a second sheet
+        ``Metadata`` as Key/Value rows (lists are JSON-encoded).
 
     Returns
     -------
@@ -614,6 +715,12 @@ def export_excel(
     for cells in rows:
         # Raw numbers (not CSV text) so Excel treats the cells as numeric.
         ws.append([value for value, _spec in cells])
+
+    if metadata is not None:
+        meta_ws = wb.create_sheet(META_SHEET_TITLE)
+        meta_ws.append(["Key", "Value"])
+        for key, value in _plain_metadata(metadata).items():
+            meta_ws.append([key, _excel_value(value)])
 
     wb.save(filepath)
     return warning

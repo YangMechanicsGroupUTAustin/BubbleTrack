@@ -395,3 +395,84 @@ class TestExportExcel:
         ws = wb.active
         rows = list(ws.iter_rows(values_only=True))
         assert len(rows) == 1  # header only
+
+
+# ---------------------------------------------------------------------------
+# Provenance metadata
+# ---------------------------------------------------------------------------
+
+META = {
+    "detection_mode": "gradient",
+    "img_thr": 0.45,
+    "removing_factor": np.int64(30),
+    "gridx": (10, 200),
+    "bubble_cross_edges": (False, True, False, False),
+    "folder_path": "C:/data/run1",
+    "video_path": None,
+}
+
+
+class TestCsvMetadata:
+    def test_writes_json_sidecar(self, tmp_path, sample_data):
+        import json
+
+        radius, centers = sample_data
+        out = tmp_path / "run.csv"
+        export_csv(str(out), radius, centers, fps=1e6, metadata=META)
+
+        sidecar = tmp_path / "run.meta.json"
+        assert sidecar.exists()
+        meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        assert meta == {
+            "detection_mode": "gradient",
+            "img_thr": 0.45,
+            "removing_factor": 30,
+            "gridx": [10, 200],
+            "bubble_cross_edges": [False, True, False, False],
+            "folder_path": "C:/data/run1",
+            "video_path": None,
+        }
+
+    def test_csv_itself_is_unchanged(self, tmp_path, sample_data):
+        radius, centers = sample_data
+        plain, meta = tmp_path / "plain.csv", tmp_path / "meta.csv"
+        export_csv(str(plain), radius, centers, fps=1e6)
+        export_csv(str(meta), radius, centers, fps=1e6, metadata=META)
+        assert meta.read_bytes() == plain.read_bytes()
+
+    def test_no_sidecar_without_metadata(self, tmp_path, sample_data):
+        radius, centers = sample_data
+        export_csv(str(tmp_path / "run.csv"), radius, centers)
+        assert list(tmp_path.iterdir()) == [tmp_path / "run.csv"]
+
+
+class TestExcelMetadata:
+    def test_writes_metadata_sheet(self, tmp_path, sample_data):
+        import json
+
+        from openpyxl import load_workbook
+
+        radius, centers = sample_data
+        out = str(tmp_path / "run.xlsx")
+        export_excel(out, radius, centers, fps=1e6, metadata=META)
+
+        wb = load_workbook(out)
+        assert wb.sheetnames == ["Bubble Radius Data", "Metadata"]
+        assert wb.active.title == "Bubble Radius Data"
+        rows = list(wb["Metadata"].iter_rows(values_only=True))
+        assert rows[0] == ("Key", "Value")
+        values = dict(rows[1:])
+        assert values["detection_mode"] == "gradient"
+        assert values["img_thr"] == pytest.approx(0.45)
+        assert values["removing_factor"] == 30
+        assert json.loads(values["gridx"]) == [10, 200]
+        assert json.loads(values["bubble_cross_edges"]) == [False, True, False, False]
+        assert values["video_path"] is None
+
+    def test_no_metadata_sheet_by_default(self, tmp_path, sample_data):
+        from openpyxl import load_workbook
+
+        radius, centers = sample_data
+        out = str(tmp_path / "run.xlsx")
+        export_excel(out, radius, centers)
+        assert load_workbook(out).sheetnames == ["Bubble Radius Data"]

@@ -342,6 +342,75 @@ class TestRmaxFitWindow:
         assert loc4 != pytest.approx(loc6)
 
 
+META = {
+    "detection_mode": "intensity",
+    "img_thr": 0.45,
+    "removing_factor": np.int64(30),
+    "gridx": (10, 200),
+    "bubble_cross_edges": (False, True, False, False),
+    "folder_path": "C:/data/run1",
+    "video_path": None,
+    "app_version": "3.0.0",
+}
+
+
+class TestMatMetadata:
+    """Optional provenance metadata saved as a BubbleTrackMeta struct."""
+
+    @staticmethod
+    def _pixel_export(path, **kwargs):
+        radius = np.array([10.0, 20.0, 30.0])
+        centers = np.array([[50, 60], [51, 61], [52, 62]], dtype=float)
+        export_r_data(path, radius, centers, [None, None, None], **kwargs)
+
+    def test_r_data_saves_metadata_struct(self, tmp_path):
+        out = str(tmp_path / "r.mat")
+        self._pixel_export(out, metadata=META)
+        data = loadmat(out, simplify_cells=True)
+        meta = data["BubbleTrackMeta"]
+        assert meta["detection_mode"] == "intensity"
+        assert meta["img_thr"] == pytest.approx(0.45)
+        assert meta["removing_factor"] == 30
+        np.testing.assert_array_equal(meta["gridx"], [10, 200])
+        np.testing.assert_array_equal(meta["bubble_cross_edges"], [0, 1, 0, 0])
+        assert meta["folder_path"] == "C:/data/run1"
+        assert meta["app_version"] == "3.0.0"
+        # Existing variables are untouched.
+        for key in ("Radius", "CircleFitPar", "CircleXY"):
+            assert key in data
+
+    def test_r_data_without_metadata_has_no_struct(self, tmp_path):
+        out = str(tmp_path / "r.mat")
+        self._pixel_export(out)
+        assert "BubbleTrackMeta" not in loadmat(out)
+
+    def test_rof_t_saves_metadata_struct(self, tmp_path):
+        t = np.arange(1, 31, dtype=float)
+        R = 100.0 - 0.05 * (t - 15) ** 2
+        out = str(tmp_path / "rt.mat")
+        ok, _ = export_rof_t_data(out, R, 3.2, 1e6, 11, metadata=META)
+        assert ok
+        data = loadmat(out, simplify_cells=True)
+        assert data["BubbleTrackMeta"]["detection_mode"] == "intensity"
+        assert data["fps"] == pytest.approx(1e6)
+        for key in ("t", "R", "RmaxAll", "RmaxTimeLoc"):
+            assert key in data
+
+    def test_metadata_is_not_mutated(self, tmp_path):
+        meta = dict(META)
+        snapshot = dict(meta)
+        self._pixel_export(str(tmp_path / "r.mat"), metadata=meta)
+        assert meta == snapshot
+
+    def test_metadata_is_keyword_only(self, tmp_path):
+        radius = np.array([10.0, 20.0, 30.0])
+        centers = np.zeros((3, 2))
+        with pytest.raises(TypeError):
+            export_r_data(  # type: ignore[misc]
+                str(tmp_path / "r.mat"), radius, centers, [None] * 3, None, META,
+            )
+
+
 class TestSafeLoadmat:
     def test_safe_loadmat_valid_file(self, tmp_path):
         """A valid .mat file with expected keys loads successfully."""
