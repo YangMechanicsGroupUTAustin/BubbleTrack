@@ -155,7 +155,8 @@ def export_rof_t_data(
             else:
                 fit_time_loc = -p[1] / (2.0 * p[0])
                 fit_rmax = (4 * p[0] * p[2] - p[1] ** 2) / (4 * p[0])
-                if fit_time_loc < 1 or fit_time_loc > len(R):
+                # Only trust the vertex inside the window it was fitted on.
+                if fit_time_loc < win_left or fit_time_loc > win_right:
                     rmax_all = rmax_val
                 else:
                     rmax_loc = fit_time_loc

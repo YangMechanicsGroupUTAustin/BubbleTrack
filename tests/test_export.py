@@ -94,6 +94,23 @@ class TestExportRofTData:
         # Rmax should be near 30.0 (the peak among valid frames)
         assert rmax >= 30.0
 
+    def test_vertex_outside_fit_window_falls_back_to_discrete_max(self, tmp_path):
+        """A parabola whose vertex leaves its own window must be rejected."""
+        R = np.array([
+            32.4, 32.15, 31.92, 31.72, 31.38, 75.42, 73.91,
+            72.16, 70.15, 67.92, 65.35, 62.0, 58.0, 54.0,
+        ])
+        out = str(tmp_path / "vertex.mat")
+        ok, _ = export_rof_t_data(out, R, 1.0, 1.0, 11)
+        assert ok
+        data = loadmat(out)
+        # Discrete max is 75.42 at frame 6; the window is frames [1, 11].
+        assert data["RmaxAll"].item() == pytest.approx(75.42)
+        assert data["RmaxTimeLoc"].item() == pytest.approx(6.0)
+        t = data["t"].ravel()
+        np.testing.assert_allclose(t, np.arange(1, 15) - 6.0)
+        np.testing.assert_allclose(data["R"].ravel(), R)
+
     def test_rmax_fit_all_invalid(self, tmp_path):
         """All invalid radius values should return failure."""
         R = np.array([-1.0, -1.0, -1.0, -1.0, -1.0])
