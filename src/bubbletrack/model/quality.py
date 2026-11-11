@@ -30,6 +30,18 @@ class FitQuality:
     radius: float          # Fitted radius (px)
 
 
+def _sector_coverage(angles: np.ndarray) -> float:
+    """Fraction of QUALITY_N_SECTORS angular sectors containing an edge point.
+
+    Vectorised; identical to the former per-point loop (chart refreshes on
+    long sequences were dominated by that loop).
+    """
+    sector_edges = np.linspace(-np.pi, np.pi, QUALITY_N_SECTORS + 1)
+    idx = np.searchsorted(sector_edges, angles, side="right") - 1
+    idx = np.clip(idx, 0, QUALITY_N_SECTORS - 1)
+    return len(np.unique(idx)) / QUALITY_N_SECTORS
+
+
 def compute_fit_quality(
     edge_xy: np.ndarray,
     rc: float,
@@ -68,13 +80,7 @@ def compute_fit_quality(
     dy = edge_xy[:, 0] - rc
     dx = edge_xy[:, 1] - cc
     angles = np.arctan2(dy, dx)  # [-pi, pi]
-    sector_edges = np.linspace(-np.pi, np.pi, QUALITY_N_SECTORS + 1)
-    sectors_hit: set[int] = set()
-    for a in angles:
-        idx = int(np.searchsorted(sector_edges, a, side="right")) - 1
-        idx = max(0, min(idx, QUALITY_N_SECTORS - 1))
-        sectors_hit.add(idx)
-    sector_coverage = len(sectors_hit) / QUALITY_N_SECTORS
+    sector_coverage = _sector_coverage(angles)
 
     # 4. Radius plausibility
     if roi_short_side > 0:
