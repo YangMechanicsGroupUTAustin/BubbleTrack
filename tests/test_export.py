@@ -52,17 +52,25 @@ class TestExportRofTData:
         # t=0 should be at the peak
         assert 0.0 in t
 
-    def test_left_boundary_error(self, tmp_path):
+    # Since b9a054c a peak at the sequence boundary no longer aborts the
+    # export: the fit window is clamped and the discrete maximum is used.
+    def test_left_boundary_falls_back_to_discrete_max(self, tmp_path):
         R = np.array([100.0, 90.0, 80.0])  # peak at index 0
-        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 5)
-        assert not ok
-        assert "left boundary" in msg
+        out = str(tmp_path / "x.mat")
+        ok, _ = export_rof_t_data(out, R, 1.0, 1.0, 5)
+        assert ok
+        data = loadmat(out)
+        assert data["RmaxAll"].item() == pytest.approx(100.0)
+        np.testing.assert_allclose(data["t"].ravel(), [0.0, 1.0, 2.0])
 
-    def test_right_boundary_error(self, tmp_path):
+    def test_right_boundary_falls_back_to_discrete_max(self, tmp_path):
         R = np.array([80.0, 90.0, 100.0])  # peak at last index
-        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 5)
-        assert not ok
-        assert "right boundary" in msg
+        out = str(tmp_path / "x.mat")
+        ok, _ = export_rof_t_data(out, R, 1.0, 1.0, 5)
+        assert ok
+        data = loadmat(out)
+        assert data["RmaxAll"].item() == pytest.approx(100.0)
+        np.testing.assert_allclose(data["t"].ravel(), [-2.0, -1.0, 0.0])
 
     def test_physical_units(self, tmp_path):
         R = self._make_parabola(n=50, peak=25)
