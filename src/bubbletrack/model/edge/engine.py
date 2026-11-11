@@ -260,21 +260,24 @@ def _normalize(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slice, slice]
 def _steep_edges(e: np.ndarray, invalid: np.ndarray, coarse: CoarseMask, sel: Selection,
                  params: EdgeParams, cfg: EdgeConfig,
                  rng: np.random.Generator) -> tuple[RayEdges, CircleFit | None]:
-    """Ray passes around the candidate circle, each re-centred on the previous fit."""
+    """Ray passes around the candidate circle, each re-centred on the previous fit.
+
+    The reported fit is a final robust fit of the last pass's points (a fresh
+    RANSAC draw), exactly as in the prototype.
+    """
     circle, window = sel.best.circle, None
-    edges, fit = None, None
+    edges = None
     for _ in range(1 + cfg.rays.refine_passes):
         edges = ray_edges(e, circle, coarse.contrast, coarse.noise, cfg.rays,
                           edge_choice=params.edge_choice, level=params.level,
                           window=window, invalid=invalid)
-        fit = None
         if len(edges.points) < cfg.quality.min_edge_points:
-            break
+            return edges, None
         fit = fit_circle(edges.points, rng, cfg.fit)
         if fit is None:
             break
         circle, window = fit.circle, refine_window(fit.radius, cfg.rays)
-    return edges, fit
+    return edges, fit_circle(edges.points, rng, cfg.fit)
 
 
 def _outer(image: np.ndarray, exclude: np.ndarray, steep: CircleFit, clipped: bool, cfg: EdgeConfig,

@@ -120,10 +120,11 @@ def _agree(circle, ref, crit) -> bool:
 def test_labelled_bubble_frames_on_lic():
     """Visual labels of the real10 scorecard (32 sampled frames x 10 sequences, 235 bubble frames).
 
-    Measured at the port (edge-1.0.0): 204/235 = 86.8 % correct; no-bubble frames rejected
-    (confidence < 0.3) 75/85.  For comparison, prototype P2 without the saturated-speckle fix
-    scored 214/235 (91.1 %): the fix stops masking isolated saturated speckle grains, which
-    costs frames on the uint16 bright-speckle sequences 06 and 08 and helps 8-bit speckle.
+    Measured at the port (edge-1.0.0): 205/235 = 87.2 % correct (same frames as proto3); no-bubble
+    frames rejected (confidence < 0.3) 75/85.  For comparison, prototype P2 without the
+    saturated-speckle fix scored 214/235 (91.1 %): the fix stops masking isolated saturated
+    speckle grains, which costs frames on the uint16 bright-speckle sequences 06 and 08 and
+    helps the 8-bit dense-speckle hard sequences.
     """
     labels = _labels()
     crit = labels["criterion"]
