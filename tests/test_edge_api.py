@@ -77,6 +77,7 @@ def test_accepted_needs_a_finite_radius_and_the_gate():
     assert _result(10.0, 0.3).accepted
     assert not _result(10.0, 0.29).accepted
     assert not _result(float("nan"), 0.9).accepted
+    assert not _result(0.0, 0.9).accepted
     assert _result(10.0, 0.5, gate=0.5).accepted and not _result(10.0, 0.49, gate=0.5).accepted
 
 

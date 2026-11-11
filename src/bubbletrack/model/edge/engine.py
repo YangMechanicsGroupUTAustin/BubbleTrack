@@ -113,8 +113,8 @@ class EdgeResult:
 
     @property
     def accepted(self) -> bool:
-        """True when a radius was found and its confidence passes the gate."""
-        return bool(np.isfinite(self.radius) and self.confidence >= self.confidence_gate)
+        """True when a positive radius was found and its confidence passes the gate."""
+        return bool(np.isfinite(self.radius) and self.radius > 0 and self.confidence >= self.confidence_gate)
 
 
 class _Stopwatch:

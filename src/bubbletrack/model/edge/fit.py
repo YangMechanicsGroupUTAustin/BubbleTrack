@@ -173,6 +173,8 @@ def fit_circle(p: np.ndarray, rng: np.random.Generator, cfg: FitConfig, *,
             and jump < max(cfg.centre_jump_px, cfg.centre_jump_frac * init[2])
             and init[2] / cfg.radius_ratio_max < radius < cfg.radius_ratio_max * init[2])
     if not sane:
+        if not init[2] > 0:
+            return None
         res = np.abs(np.hypot(p[:, 0] - init[0], p[:, 1] - init[1]) - init[2])
         weights = (res < cfg.ransac_tol_px).astype(float)
         return CircleFit(*init, _nan_cov(), weights, "init(irls diverged)")

@@ -140,6 +140,16 @@ def test_reference_free_normalisation_reports_its_method():
     np.testing.assert_allclose(out.image, 1.0, atol=1e-3)
 
 
+def test_roi_without_any_background_pixel_is_noted():
+    img = np.full((30, 40), 1000.0, np.float32)
+    everything = np.ones(img.shape, bool)
+    for ref in (None, img):
+        out = normalize_roi(img, everything, CFG, reference=ref)
+        assert "no usable background" in out.method
+        assert np.all(np.isfinite(out.image))
+    assert "no usable background" not in normalize_roi(img, ~everything, CFG).method
+
+
 def test_noise_sigma_matches_white_noise():
     rng = np.random.default_rng(2)
     img = (1.0 + 0.02 * rng.standard_normal((200, 200))).astype(np.float32)

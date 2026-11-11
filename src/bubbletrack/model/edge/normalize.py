@@ -223,7 +223,8 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
         surface = estimate_background(values, saturated | invalid, cfg)
         image = values / np.maximum(surface, _EPS)
         image = np.where(invalid, 1.0, image).astype(np.float32)
-        return Normalized(image, saturated, invalid, f"surface(cubic+normconv {cfg.bg_sigma:g})", 1.0)
+        method = f"surface(cubic+normconv {cfg.bg_sigma:g})" + _no_background_note(saturated | invalid)
+        return Normalized(image, saturated, invalid, method, 1.0)
     blurred = cv2.GaussianBlur(reference, (0, 0), cfg.ref_blur_sigma)
     med = float(np.median(blurred))
     dead = blurred < cfg.ref_invalid_level * med
@@ -238,7 +239,13 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
     image = np.where(invalid, 1.0, ratio / gain).astype(np.float32)
     residual = estimate_background(image * _SURFACE_SCALE, saturated | invalid, cfg) / _SURFACE_SCALE
     image = np.where(invalid, 1.0, image / np.maximum(residual, _EPS)).astype(np.float32)
-    return Normalized(image, saturated, invalid, f"reference(gain={gain:.3f})+surface", gain)
+    method = f"reference(gain={gain:.3f})+surface" + _no_background_note(saturated | invalid)
+    return Normalized(image, saturated, invalid, method, gain)
+
+
+def _no_background_note(excluded: np.ndarray) -> str:
+    """Provenance note when no pixel of the ROI could serve as background."""
+    return " [no usable background pixel]" if excluded.all() else ""
 
 
 def noise_sigma(image: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig) -> float:
