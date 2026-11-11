@@ -10,7 +10,8 @@ from pathlib import Path
 import numpy as np
 
 from bubbletrack.logging_config import setup_logging
-from bubbletrack.model.config import DETECTION_MODES
+from bubbletrack.model import edge_pipeline
+from bubbletrack.model.config import DETECTION_MODES, EDGE_DEFINITIONS
 from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR
 from bubbletrack.model.export import export_csv, export_excel, export_r_data
 from bubbletrack.model.frame_pipeline import FrameParams, fit_image_file
@@ -52,6 +53,15 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--mode", choices=DETECTION_MODES, default="intensity",
         help="Detection mode, as in the GUI (default: intensity)",
+    )
+    parser.add_argument(
+        "--edge-definition", choices=EDGE_DEFINITIONS, default="steep",
+        help="Edge mode: wall at the 50%% crossing of the steep edge (steep, "
+             "default) or at the outer extent (outer)",
+    )
+    parser.add_argument(
+        "--reference", type=int, default=None, metavar="FRAME",
+        help="Edge mode: 1-based bubble-free reference frame (default: auto)",
     )
     parser.add_argument(
         "--roi", nargs=4, type=int,
@@ -234,7 +244,14 @@ def main(argv: list[str] | None = None) -> None:
         print(f"Cannot read the first image: {images[0]}", file=sys.stderr)
         sys.exit(1)
     _validate_roi(parser, args.roi, shape)
+    if args.reference is not None and not 1 <= args.reference <= len(images):
+        parser.error(f"--reference must be in [1, {len(images)}], got {args.reference}")
     gridx, gridy = _resolve_roi(args, shape)
+
+    if args.mode == "edge":
+        result = _process_frames_edge(images, args, gridx, gridy, float(max(shape)))
+        _finish(args, images, *result)
+        return
     params = FrameParams(
         sensitivity=args.threshold,
         gridx=gridx,
@@ -248,7 +265,47 @@ def main(argv: list[str] | None = None) -> None:
     radius, centers, edge_pts, region_count = _process_frames(
         images, params, args.verbose,
     )
+    _finish(args, images, radius, centers, edge_pts, region_count)
 
+
+def _process_frames_edge(images: list[str], args: argparse.Namespace,
+                         gridx: tuple[int, int], gridy: tuple[int, int],
+                         max_radius: float) -> tuple[np.ndarray, np.ndarray, list, np.ndarray]:
+    """Fit every frame with the Edge engine, using the GUI's acceptance rules."""
+    explicit = args.reference - 1 if args.reference is not None else None
+    ref_idx = edge_pipeline.resolve_reference_index(
+        lambda i: edge_pipeline.read_raw(images[i]), len(images), explicit,
+    )
+    reference = edge_pipeline.read_raw(images[ref_idx]) if ref_idx is not None else None
+    print("Reference frame: "
+          + (f"{ref_idx + 1}" if ref_idx is not None else "none (surface fallback)"))
+    job = edge_pipeline.EdgeJob(
+        params=edge_pipeline.make_params(edge_definition=args.edge_definition),
+        reference=reference, max_radius=max_radius,
+    )
+    n = len(images)
+    radius = np.full(n, -1.0)
+    centers = np.full((n, 2), np.nan)
+    edge_pts: list[np.ndarray | None] = [None] * n
+    for i, img_path in enumerate(images):
+        try:
+            fit = edge_pipeline.fit_edge(edge_pipeline.read_raw(img_path), gridx, gridy, job)
+            if fit.radius > 0:
+                radius[i] = fit.radius
+                centers[i] = [fit.rc, fit.cc]
+                edge_pts[i] = fit.edge_xy
+            elif args.verbose:
+                print(f"Frame {i + 1}: {fit.rejected_reason}", file=sys.stderr)
+        except Exception as exc:
+            if args.verbose:
+                print(f"Frame {i + 1}: {exc}", file=sys.stderr)
+        if (i + 1) % 50 == 0 or i == n - 1:
+            print(f"Processed {i + 1}/{n} frames")
+    return radius, centers, edge_pts, np.zeros(n, dtype=int)
+
+
+def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
+            centers: np.ndarray, edge_pts: list, region_count: np.ndarray) -> None:
     n_valid = int((radius > 0).sum())
     if n_valid == 0:
         # Do not overwrite a previous result with an all-invalid file.
