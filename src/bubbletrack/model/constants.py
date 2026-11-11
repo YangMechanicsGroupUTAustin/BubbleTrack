@@ -20,6 +20,23 @@ MIN_HOLE_AREA: int = 40
 """Minimum hole area (px) inside the bubble blob to keep (smaller holes are filled)."""
 
 # ------------------------------------------------------------------ #
+#  Bit depth (frame -> 8-bit image for adaptive thresholding)
+# ------------------------------------------------------------------ #
+
+UINT16_PACKED_DEPTHS: tuple[tuple[int, int], ...] = (
+    (1023, 4),   # 10-bit data stored in uint16
+    (4095, 16),  # 12-bit data stored in uint16
+)
+"""``(max grey value, divisor)`` for sub-16-bit data in uint16 frames, smallest first.
+
+A uint16 frame whose maximum is at most the bound is divided by the divisor
+to reach 8 bits; a frame brighter than every bound is real 16-bit data and
+is divided by ``UINT16_DIVISOR``."""
+
+UINT16_DIVISOR: int = 256
+"""Divisor that maps 16-bit grey values to 8 bits (the original behaviour)."""
+
+# ------------------------------------------------------------------ #
 #  Removing factor (slider -> area mapping)
 # ------------------------------------------------------------------ #
 

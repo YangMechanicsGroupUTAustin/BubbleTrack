@@ -56,6 +56,21 @@ class TestScanFolder:
         paths = scan_folder(str(tmp_path))
         assert all(p.endswith(".tiff") for p in paths)
 
+    def test_skips_appledouble_and_dot_files(self, tmp_path):
+        """macOS '._*' companions and dot-files must not become (first) frames."""
+        for name in ("frame_001.tif", "frame_002.tif", "frame_003.tif"):
+            cv2.imwrite(str(tmp_path / name), np.zeros((10, 10), np.uint8))
+        (tmp_path / "._frame_001.tif").write_bytes(b"\x00\x05\x16\x07AppleDouble")
+        cv2.imwrite(str(tmp_path / ".hidden.tif"), np.zeros((10, 10), np.uint8))
+        paths = scan_folder(str(tmp_path))
+        assert [os.path.basename(p) for p in paths] == [
+            "frame_001.tif", "frame_002.tif", "frame_003.tif",
+        ]
+
+    def test_folder_of_only_hidden_files_is_empty(self, tmp_path):
+        (tmp_path / "._a.tif").write_bytes(b"\x00")
+        assert scan_folder(str(tmp_path)) == []
+
     def test_scan_nonexistent_dir_returns_empty(self):
         """Passing a path that doesn't exist returns an empty list."""
         result = scan_folder("/this/path/does/not/exist/at/all")

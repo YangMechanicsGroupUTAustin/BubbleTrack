@@ -12,6 +12,7 @@ from bubbletrack.model.constants import (
     MAX_ECCENTRICITY,
     MIN_HOLE_AREA,
 )
+from bubbletrack.model.skimage_compat import remove_small_objects_compat
 
 
 def expand_binary_image(
@@ -120,9 +121,7 @@ def detect_bubble(
     expanded = expand_binary_image(bw, bubble_cross_edges)
 
     # Remove small connected white areas
-    expanded = morphology.remove_small_objects(
-        expanded, min_size=removing_factor,
-    )
+    expanded = remove_small_objects_compat(expanded, removing_factor)
 
     # Optional morphological opening (remove bead spurs on edges)
     if opening_radius > 0:
@@ -168,7 +167,7 @@ def detect_bubble(
 
     # Remove small holes inside the blob
     holes = ~blob_mask
-    holes_cleaned = morphology.remove_small_objects(holes, min_size=MIN_HOLE_AREA)
+    holes_cleaned = remove_small_objects_compat(holes, MIN_HOLE_AREA)
     blob_mask = ~holes_cleaned
 
     # Crop back to original ROI size
@@ -264,7 +263,7 @@ def detect_bubble_gradient(
     edge_mask = grad >= threshold
 
     # Trim tiny speckles before RANSAC.  Canny-like gradients can be peppery.
-    edge_mask = morphology.remove_small_objects(edge_mask, min_size=6)
+    edge_mask = remove_small_objects_compat(edge_mask, 6)
     rows, cols = np.where(edge_mask)
     points = np.column_stack([rows, cols]).astype(np.float64)
     if points.shape[0] < 12:
@@ -630,7 +629,7 @@ def _estimate_dark_core(img: np.ndarray) -> tuple[float, float, float] | None:
     cutoff = np.percentile(img, 20)
     mask = img <= cutoff
     min_size = max(30, int(img.size * 0.002))
-    mask = morphology.remove_small_objects(mask, min_size=min_size)
+    mask = remove_small_objects_compat(mask, min_size)
     mask = morphology.closing(mask, morphology.disk(2))
     labels = measure.label(mask)
     props = measure.regionprops(labels)
