@@ -126,16 +126,21 @@ def scan_folder(folder: str) -> list[str]:
 
     Validates that *folder* is an existing directory and skips symlinked
     files during iteration to avoid following potentially unsafe links.
+    Hidden files (names starting with ``.``) are skipped too: macOS writes
+    ``._<name>`` AppleDouble companions next to every frame on shared or
+    FAT/exFAT drives, and they would otherwise sort first and shift every
+    frame index.
     """
     p = Path(folder).resolve()
     if not p.is_dir():
         logger.warning("Not a directory: %s", folder)
         return []
 
-    folder_str = str(p)
     for ext in _EXTENSIONS:
         files = []
         for f in p.iterdir():
+            if f.name.startswith("."):
+                continue
             if f.is_symlink():
                 logger.warning("Skipping symlink: %s", f)
                 continue
