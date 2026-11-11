@@ -249,10 +249,61 @@ class TestRmaxBoundaryWarning:
         assert msg == ""
 
     def test_locate_rmax_reports_boundary_warning(self):
-        est = locate_rmax(np.array([100.0, 90.0, 80.0]), 5)
+        est = locate_rmax(np.array([100.0, 99.0, 98.0]), 5)
         assert len(est.warnings) == 1
         assert "boundary" in est.warnings[0]
         assert locate_rmax(self._smooth_peak(30, 15.0), 11).warnings == ()
+
+
+class TestRmaxOutlierWarning:
+    """A lone spurious Rmax frame is flagged but still chosen as the peak."""
+
+    @staticmethod
+    def _smooth_peak(n=30, peak=15.0):
+        t = np.arange(1, n + 1, dtype=float)
+        return 100.0 - 0.05 * (t - peak) ** 2
+
+    def test_spike_warns_but_peak_is_unchanged(self, tmp_path):
+        R = self._smooth_peak()
+        R[21] = 130.0  # frame 22: a single spurious detection
+        est = locate_rmax(R, 11)
+        assert est.peak_frame == 22  # peak selection is not altered
+        assert len(est.warnings) == 1
+        assert "frame 22" in est.warnings[0]
+        assert "median" in est.warnings[0]
+
+        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 11)
+        assert ok
+        assert "median" in msg
+
+    def test_threshold_is_more_than_ten_percent(self):
+        R = np.full(30, 100.0)
+        R[14] = 109.0
+        assert locate_rmax(R, 11).warnings == ()
+        R[14] = 111.0
+        assert len(locate_rmax(R, 11).warnings) == 1
+
+    def test_invalid_neighbours_are_skipped(self):
+        R = np.full(30, 100.0)
+        R[14] = 105.0          # 5% above its valid neighbours: no warning
+        R[[13, 15]] = -1.0     # failed frames right next to the peak
+        assert locate_rmax(R, 11).warnings == ()
+
+    def test_combined_with_boundary_warning(self, tmp_path):
+        R = np.array([130.0, 100.0, 99.0, 98.0, 97.0, 96.0])
+        ok, msg = export_rof_t_data(str(tmp_path / "x.mat"), R, 1.0, 1.0, 5)
+        assert ok
+        assert "boundary" in msg
+        assert "median" in msg
+
+    def test_threshold_constant_is_used(self, monkeypatch):
+        import bubbletrack.model.export as export_mod
+
+        R = np.full(30, 100.0)
+        R[14] = 105.0
+        assert locate_rmax(R, 11).warnings == ()
+        monkeypatch.setattr(export_mod, "RMAX_OUTLIER_TOLERANCE", 0.01)
+        assert len(locate_rmax(R, 11).warnings) == 1
 
 
 class TestRmaxFitWindow:

@@ -11,6 +11,11 @@ import numpy as np
 import scipy.io
 from scipy.io import savemat
 
+from bubbletrack.model.constants import (
+    RMAX_OUTLIER_NEIGHBOURS,
+    RMAX_OUTLIER_TOLERANCE,
+)
+
 
 def safe_loadmat(filepath: str, expected_keys: frozenset[str]) -> dict:
     """Load a ``.mat`` file with structure validation.
@@ -155,6 +160,35 @@ def _boundary_warning(
     )
 
 
+def _outlier_warning(
+    radius: np.ndarray, valid_indices: np.ndarray, peak_pos: int,
+) -> str | None:
+    """Warn when the peak frame towers over its nearest valid neighbours.
+
+    The reference is the median of up to ``RMAX_OUTLIER_NEIGHBOURS`` valid
+    frames on each side of the peak (failed frames are skipped).  *peak_pos*
+    indexes into *valid_indices*.
+    """
+    n = RMAX_OUTLIER_NEIGHBOURS
+    neighbours = np.concatenate([
+        valid_indices[max(0, peak_pos - n):peak_pos],
+        valid_indices[peak_pos + 1:peak_pos + 1 + n],
+    ])
+    if len(neighbours) == 0:
+        return None
+    peak_value = float(radius[valid_indices[peak_pos]])
+    median = float(np.median(radius[neighbours]))
+    if peak_value <= median * (1.0 + RMAX_OUTLIER_TOLERANCE):
+        return None
+    return (
+        f"Rmax frame {int(valid_indices[peak_pos]) + 1} ({peak_value:.2f} px) "
+        f"exceeds the median of its {len(neighbours)} nearest valid frames "
+        f"({median:.2f} px) by {peak_value / median - 1.0:.0%} (limit "
+        f"{RMAX_OUTLIER_TOLERANCE:.0%}); it may be a spurious detection that "
+        f"misplaces t=0."
+    )
+
+
 def _fit_parabola_vertex(
     frames: np.ndarray,
     values: np.ndarray,
@@ -213,7 +247,8 @@ def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
     if len(valid_indices) == 0:
         raise ValueError("No valid frames to locate Rmax")
 
-    peak_idx = int(valid_indices[np.argmax(R[valid_indices])])
+    peak_pos = int(np.argmax(R[valid_indices]))  # position among valid frames
+    peak_idx = int(valid_indices[peak_pos])
     peak_frame = peak_idx + 1  # 1-based
     half = rmax_fit_half_window(rmax_fit_length)
     window = (max(1, peak_frame - half), min(len(R), peak_frame + half))
@@ -223,7 +258,10 @@ def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
     vertex = _fit_parabola_vertex(fit_frames, R[fit_frames - 1], window)
 
     warnings = tuple(
-        w for w in (_boundary_warning(peak_frame, valid_indices, half),)
+        w for w in (
+            _boundary_warning(peak_frame, valid_indices, half),
+            _outlier_warning(R, valid_indices, peak_pos),
+        )
         if w is not None
     )
     if vertex is None:

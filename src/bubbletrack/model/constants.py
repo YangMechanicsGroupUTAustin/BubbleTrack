@@ -61,6 +61,15 @@ DEFAULT_UM2PX: float = 3.2
 DEFAULT_RMAX_FIT_LENGTH: int = 11
 """Default window length for quadratic Rmax fitting (must be odd)."""
 
+RMAX_OUTLIER_TOLERANCE: float = 0.10
+"""Warn when the Rmax frame exceeds its neighbours' median by more than this fraction.
+
+Rmax is the global argmax, so one spurious detection can move t=0; the
+export flags (but does not drop) such a peak."""
+
+RMAX_OUTLIER_NEIGHBOURS: int = 2
+"""Valid frames taken on each side of the Rmax frame for the outlier median."""
+
 # ------------------------------------------------------------------ #
 #  State defaults
 # ------------------------------------------------------------------ #
