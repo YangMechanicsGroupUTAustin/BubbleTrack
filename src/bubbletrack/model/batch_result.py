@@ -31,6 +31,10 @@ class FolderResult:
     n_fitted: int
     radius: np.ndarray
     quality_scores: np.ndarray
+    # Optional so older callers keep working; needed to restore a folder fully.
+    circle_fit_par: np.ndarray | None = None  # (N, 2) [row_c, col_c]
+    circle_xy: list | None = None  # per-frame (M, 2) edge points or None
+    region_count: np.ndarray | None = None  # (N,)
 
 
 @dataclass(frozen=True)

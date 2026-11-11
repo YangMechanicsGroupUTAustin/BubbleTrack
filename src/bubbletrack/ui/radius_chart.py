@@ -222,6 +222,10 @@ class RadiusChart(QWidget):
         frame_num = int(self._frames[nearest_idx])  # 1-based
         return frame_num - 1  # 0-based
 
+    def set_editing_enabled(self, enabled: bool) -> None:
+        """Enable/disable the delete/refit context menu (off while a fit runs)."""
+        self._editing_enabled = enabled
+
     def _on_mouse_clicked(self, event) -> None:
         """Unified click handler: double-click resets zoom, left-click jumps, right-click menu."""
         if event.double():
@@ -238,7 +242,7 @@ class RadiusChart(QWidget):
             return
 
         if event.button() == Qt.MouseButton.RightButton:
-            if frame_idx is None:
+            if frame_idx is None or not getattr(self, "_editing_enabled", True):
                 return
             menu = QMenu(self)
             frame_label = frame_idx + 1

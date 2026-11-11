@@ -7,7 +7,7 @@ import os
 
 import numpy as np
 from PyQt6.QtCore import QTimer
-from PyQt6.QtWidgets import QFileDialog
+from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from bubbletrack.controller.auto_controller import AutoController
 from bubbletrack.controller.display_mixin import display_frame, refresh_chart
@@ -15,6 +15,7 @@ from bubbletrack.controller.export_controller import ExportController
 from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
 from bubbletrack.controller.pretune_controller import PretuneController
+from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
@@ -24,8 +25,8 @@ from bubbletrack.model.detection import (
     detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
 )
 from bubbletrack.model.image_io import load_and_normalize
+from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
-from bubbletrack.model.session import save_session, load_session
 from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.shortcuts import setup_shortcuts
 
@@ -75,6 +76,7 @@ class AppController:
         self.file_ctrl = FileController(
             self.bus, gs, ss, self.w, self._set_max_radius,
             self._image_cache,
+            is_busy=lambda: self.auto_ctrl.is_busy(),
         )
         self.pretune_ctrl = PretuneController(
             self.bus, gs, ss, self.w,
@@ -90,6 +92,12 @@ class AppController:
             self._image_cache,
         )
         self.export_ctrl = ExportController(self.bus, gs, ss, self.w)
+        self.session_ctrl = SessionController(
+            self.bus, gs, ss, self.w, self.file_ctrl,
+            is_busy=lambda: self.auto_ctrl.is_busy(),
+            locate_folder=lambda original: self._locate_moved_folder(original),
+            after_restore=lambda: self._after_session_restore(),
+        )
 
         # Wire preview timer to pretune handler
         self._preview_timer.timeout.connect(self.pretune_ctrl.preview_detection)
@@ -99,6 +107,10 @@ class AppController:
 
         # Batch browser "Load into Main View" → reuse folder-loading logic
         self.bus.subscribe("load_folder", self.file_ctrl.on_folder_selected)
+
+        # Lock everything that mutates results while a worker writes into them
+        self.bus.subscribe("run_state_changed", self._apply_run_lock)
+        self.w.set_close_guard(self._confirm_close)
 
         self._connect_signals()
         self._sync_ui_from_state()
@@ -229,6 +241,21 @@ class AppController:
             self._state.rmax_fit_length,
         )
 
+    def _apply_run_lock(self, running: bool) -> None:
+        """Disable every control that loads data or edits results during a run.
+
+        Frame navigation stays available so the user can watch progress.
+        """
+        enabled = not running
+        lp = self.w.left_panel
+        for widget in (lp.image_source, lp.pretune_tab, lp.manual_tab,
+                       lp.post_processing):
+            widget.setEnabled(enabled)
+        lp.automatic_tab.set_editing_enabled(enabled)
+        self.w.save_session_action.setEnabled(enabled)
+        self.w.load_session_action.setEnabled(enabled)
+        self.w.radius_chart.set_editing_enabled(enabled)
+
     def _on_physical_params_changed(self) -> None:
         """Keep fps / scale / fit length in state so sessions, config and
         reports record the values the user actually exports with."""
@@ -267,6 +294,8 @@ class AppController:
             self._state.region_count[idx] = 0
         if self._state.circle_xy is not None:
             self._state.circle_xy[idx] = None
+        if self._state.fit_source is not None:
+            self._state.fit_source[idx] = FitSource.NONE
 
         self._refresh_chart()
 
@@ -339,6 +368,8 @@ class AppController:
                     self._state.region_count[idx] = count
                 if self._state.circle_xy is not None:
                     self._state.circle_xy[idx] = edge_xy
+                if self._state.fit_source is not None:
+                    self._state.fit_source[idx] = FitSource.REFIT
                 self._refresh_chart()
                 if self._state.image_no == idx:
                     display_frame(
@@ -418,6 +449,8 @@ class AppController:
                 self._state.region_count[idx] = 0
             if self._state.circle_xy is not None:
                 self._state.circle_xy[idx] = edge_xy
+            if self._state.fit_source is not None:
+                self._state.fit_source[idx] = FitSource.NEIGHBOR
 
             self._refresh_chart()
             if self._state.image_no == idx:
@@ -482,6 +515,12 @@ class AppController:
     #  Session save/load
     # ------------------------------------------------------------------ #
 
+    def save_session_file(self, path: str) -> bool:
+        return self.session_ctrl.save(path)
+
+    def load_session_file(self, path: str) -> bool:
+        return self.session_ctrl.load(path)
+
     def _on_save_session(self) -> None:
         """Prompt the user for a path and save the current session."""
         default_dir = self._state.folder_path or os.path.expanduser("~")
@@ -489,16 +528,8 @@ class AppController:
             self.w, "Save Session", default_dir,
             "BubbleTrack Session (*.brt);;All Files (*)",
         )
-        if not path:
-            return
-        try:
-            save_session(path, self._state)
-            self.w.header.set_status(
-                f"Session saved: {os.path.basename(path)}", "#10b981",
-            )
-        except Exception as exc:
-            logger.error("Session save failed: %s", exc)
-            self.w.header.set_status(f"Save failed: {exc}", "#f59e0b")
+        if path:
+            self.save_session_file(path)
 
     def _on_load_session(self) -> None:
         """Prompt the user for a .brt file and restore the session."""
@@ -507,28 +538,52 @@ class AppController:
             self.w, "Load Session", default_dir,
             "BubbleTrack Session (*.brt);;All Files (*)",
         )
-        if not path:
-            return
-        try:
-            data = load_session(path)
-        except (ValueError, FileNotFoundError) as exc:
-            logger.error("Session load failed: %s", exc)
-            self.w.header.set_status(f"Load failed: {exc}", "#f59e0b")
-            return
+        if path:
+            self.load_session_file(path)
 
-        # Remove keys that are not AppState fields (e.g. "version")
-        data.pop("version", None)
-        try:
-            self._state = update_state(AppState(), **data)
-        except TypeError as exc:
-            logger.error("Session restore failed: %s", exc)
-            self.w.header.set_status(f"Restore failed: {exc}", "#f59e0b")
-            return
-
-        # Reload the folder if one was saved and re-display
-        if self._state.folder_path:
-            self.file_ctrl.on_folder_selected(self._state.folder_path)
-
-        self.w.header.set_status(
-            f"Session loaded: {os.path.basename(path)}", "#10b981",
+    def _locate_moved_folder(self, original: str) -> str:
+        """Ask the user where a session's image folder went; '' if cancelled."""
+        QMessageBox.information(
+            self.w, "Image folder not found",
+            f"The session's image folder no longer exists:\n{original}\n\n"
+            "Please select its new location.",
         )
+        return QFileDialog.getExistingDirectory(
+            self.w, "Locate the image folder", os.path.dirname(original),
+        )
+
+    def _after_session_restore(self) -> None:
+        """Bring every view in line with a freshly restored state."""
+        self._sync_ui_from_state()
+        self.w.original_panel.set_roi_text(self._state.gridx, self._state.gridy)
+        if self._state.images:
+            self.file_ctrl.on_frame_changed(self._state.image_no)
+        self._refresh_chart()
+
+    # ------------------------------------------------------------------ #
+    #  Closing the window
+    # ------------------------------------------------------------------ #
+
+    def _ask_yes_no(self, title: str, text: str) -> bool:
+        answer = QMessageBox.question(
+            self.w, title, text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _confirm_close(self) -> bool:
+        """Return False to keep the window open.
+
+        A running fit needs confirmation.  Results are always kept in
+        ~/.bubbletrack/recovery/last_session.brt so closing never loses them.
+        """
+        if self.auto_ctrl.is_busy():
+            if not self._ask_yes_no(
+                "Fit in progress",
+                "A fit is still running. Stop it and quit?",
+            ):
+                return False
+            self.auto_ctrl.stop_and_wait()
+        self.session_ctrl.save_last_session()
+        return True

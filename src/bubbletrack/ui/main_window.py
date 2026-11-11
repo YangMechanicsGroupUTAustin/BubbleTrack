@@ -114,6 +114,22 @@ class MainWindow(QMainWindow):
         load_action.triggered.connect(self.load_session_requested.emit)
         file_menu.addAction(load_action)
 
+        self.save_session_action = save_action
+        self.load_session_action = load_action
+
+    # -- Close guard ------------------------------------------------------ #
+
+    def set_close_guard(self, guard) -> None:
+        """Install a callable returning False to veto closing the window."""
+        self._close_guard = guard
+
+    def closeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        guard = getattr(self, "_close_guard", None)
+        if guard is not None and not guard():
+            event.ignore()
+            return
+        super().closeEvent(event)
+
     # -- Compare mode helpers --
 
     @property

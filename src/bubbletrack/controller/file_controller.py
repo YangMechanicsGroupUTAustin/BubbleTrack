@@ -26,14 +26,27 @@ class FileController(BaseController):
     """Handles folder selection, frame navigation, and tab switching."""
 
     def __init__(self, bus: EventBus, get_state, set_state, window,
-                 set_max_radius, cache: ImageCache | None = None) -> None:
+                 set_max_radius, cache: ImageCache | None = None,
+                 is_busy=lambda: False) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._set_max_radius = set_max_radius
         self._cache = cache
+        self._is_busy = is_busy
+
+    def _refuse_while_busy(self) -> bool:
+        """A running fit writes into the current arrays: never swap them out."""
+        if self._is_busy():
+            self.w.header.set_status(
+                "Stop the running fit before loading other data", "#f59e0b",
+            )
+            return True
+        return False
 
     # -- public handlers -------------------------------------------------- #
 
     def on_folder_selected(self, folder: str) -> None:
+        if self._refuse_while_busy():
+            return
         # Close any previous video reader
         if self.state.video_reader is not None:
             self.state.video_reader.close()
@@ -81,6 +94,8 @@ class FileController(BaseController):
 
     def on_video_selected(self, video_path: str) -> None:
         """Open a video file and set up virtual frame list."""
+        if self._refuse_while_busy():
+            return
         # Close any previous video reader
         if self.state.video_reader is not None:
             self.state.video_reader.close()

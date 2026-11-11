@@ -5,10 +5,10 @@ from __future__ import annotations
 import logging
 import time
 from datetime import datetime
+from functools import partial
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from bubbletrack.ui.batch_config_dialog import BatchConfigDialog
@@ -19,39 +19,71 @@ from bubbletrack.controller.display_mixin import display_frame, refresh_chart
 from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
-from bubbletrack.model.conventions import frame_to_display
+from bubbletrack.model.conventions import display_to_frame, frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.image_io import load_and_normalize
-from bubbletrack.model.state import update_state
+from bubbletrack.model.provenance import FitSource
 
 logger = logging.getLogger(__name__)
 
 AUTOSAVE_INTERVAL = 50  # frames between incremental auto-saves
+AUTOSAVE_NAME = ".bubbletrack_autosave.mat"
 
 
 class AutoController(BaseController):
-    """Manages automatic batch fitting with a background worker thread."""
+    """Manages automatic batch fitting with a background worker thread.
+
+    While a run is active the controller emits ``run_state_changed`` on the
+    event bus so the rest of the UI can lock anything that would mutate the
+    result arrays the worker is writing into.
+    """
 
     def __init__(self, bus: EventBus, get_state, set_state, window,
                  get_max_radius, cache: ImageCache | None = None) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._worker: BatchWorker | None = None
         self._batch_worker: BatchFolderWorker | None = None
+        self._running = False
+        self._batch_running = False
         self._auto_last_display: float = 0.0
         self._auto_start_time: float = 0.0
         self._get_max_radius = get_max_radius
         self._cache = cache
         self._batch_results: list = []  # Accumulates FolderResult during batch
+        self._batch_params: tuple | None = None  # (gridx, gridy, sensitivity) at start
+        self._batch_store = None  # last BatchResultStore, for "Load into Main View"
+        # Per-run bookkeeping
+        self._protected: frozenset[int] = frozenset()
+        self._stop_requested = False
+        self._frame_errors = 0
+        self._frames_done = 0
+        self._autosave_failed = False
+
+    # -- run state -------------------------------------------------------- #
+
+    def is_busy(self) -> bool:
+        """True while a single-folder or multi-folder fit is running."""
+        return self._running or self._batch_running
+
+    def stop_and_wait(self, timeout_ms: int = 10_000) -> None:
+        """Stop any running worker and wait for its thread to exit."""
+        for worker in (self._worker, self._batch_worker):
+            if worker is not None and worker.isRunning():
+                worker.request_stop()
+                worker.wait(timeout_ms)
+
+    def _set_run_state(self, running: bool) -> None:
+        self.bus.emit("run_state_changed", running)
 
     # -- public handlers -------------------------------------------------- #
 
     def on_auto_fit(self) -> None:
         if not self.state.images:
             return
-
-        from bubbletrack.model.conventions import display_to_frame
+        if self.is_busy():
+            self.w.header.set_status("A fit is already running", "#f59e0b")
+            return
 
         start, end = self.w.left_panel.automatic_tab.get_range()
         if start > end:
@@ -63,7 +95,11 @@ class AutoController(BaseController):
         start_idx = display_to_frame(start)
         end_idx = display_to_frame(end)
 
-        self._worker = BatchWorker(
+        protected = self._choose_protected_frames(start_idx, end_idx)
+        if protected is None:  # user cancelled
+            return
+
+        worker = BatchWorker(
             images=self.state.images,
             start=start_idx,
             end=end_idx,
@@ -82,22 +118,35 @@ class AutoController(BaseController):
             area_max_regions=self.state.area_max_regions,
             max_radius=self._get_max_radius(),
         )
-        self._worker.progress.connect(self._on_auto_progress)
-        self._worker.frame_done.connect(self._on_auto_frame_done)
-        self._worker.finished.connect(self._on_auto_finished)
-        self._worker.error.connect(
+        # Every slot is bound to *this* worker: results from an older run
+        # (e.g. one still draining after Stop) can never reach new arrays.
+        worker.progress.connect(partial(self._on_worker_progress, worker))
+        worker.frame_done.connect(partial(self._on_worker_frame_done, worker))
+        worker.frame_error.connect(partial(self._on_worker_frame_error, worker))
+        worker.finished.connect(partial(self._on_worker_finished, worker))
+        worker.error.connect(
             lambda msg: self.w.header.set_status(msg, "#f59e0b"),
         )
+
+        self._worker = worker
+        self._protected = protected
+        self._stop_requested = False
+        self._frame_errors = 0
+        self._frames_done = 0
+        self._autosave_failed = False
+        self._running = True
+        self._set_run_state(True)
 
         self.w.left_panel.automatic_tab.set_running(True)
         self.w.header.set_status("Processing...", "#f59e0b")
         self.w.status_bar.update_mode("Automatic")
         self._auto_last_display = 0.0  # force first frame to display
         self._auto_start_time = time.monotonic()
-        self._worker.start()
+        worker.start()
 
     def on_auto_stop(self) -> None:
         if self._worker:
+            self._stop_requested = True
             self._worker.request_stop()
             self.w.header.set_status("Stopping...", "#f59e0b")
         if self._batch_worker:
@@ -105,6 +154,8 @@ class AutoController(BaseController):
             self.w.header.set_status("Stopping batch...", "#f59e0b")
 
     def on_auto_clear(self) -> None:
+        if self.is_busy():
+            return
         if self.state.images:
             self.state = self.state.with_results_initialized(len(self.state.images))
         self.w.left_panel.automatic_tab.reset_progress()
@@ -115,10 +166,66 @@ class AutoController(BaseController):
         )
         self.w.header.set_status("Cleared", "#10b981")
 
+    # -- manual-fix protection -------------------------------------------- #
+
+    def _choose_protected_frames(self, start_idx: int, end_idx: int) -> frozenset[int] | None:
+        """Frames Fit All must not overwrite, or None if the user cancelled."""
+        source = self.state.fit_source
+        if source is None:
+            return frozenset()
+        in_range = np.arange(start_idx, end_idx + 1)
+        manual = [int(i) for i in in_range if source[i] == FitSource.MANUAL]
+        if not manual:
+            return frozenset()
+        policy = self._ask_manual_policy(len(manual))
+        if policy == "cancel":
+            return None
+        if policy == "overwrite":
+            return frozenset()
+        return frozenset(manual)
+
+    def _ask_manual_policy(self, n_manual: int) -> str:
+        """Ask whether Fit All may overwrite manual fixes: keep/overwrite/cancel."""
+        box = QMessageBox(self.w)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Manual fixes in range")
+        box.setText(
+            f"{n_manual} frame(s) in this range were fitted manually.\n"
+            "Fit All can keep them or replace them with automatic fits."
+        )
+        keep = box.addButton("Keep manual fits", QMessageBox.ButtonRole.AcceptRole)
+        overwrite = box.addButton("Overwrite", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(keep)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is keep:
+            return "keep"
+        if clicked is overwrite:
+            return "overwrite"
+        return "cancel"
+
     # -- internal signal handlers ----------------------------------------- #
     # Thread safety: BatchWorker runs on a QThread and communicates results
-    # via frame_done signal. State mutations happen here on the main thread
-    # (guaranteed by Qt's queued signal/slot connection for cross-thread signals).
+    # via queued signals, so every state mutation below runs on the main thread.
+
+    def _on_worker_progress(self, worker, current: int, total: int) -> None:
+        if worker is self._worker:
+            self._on_auto_progress(current, total)
+
+    def _on_worker_frame_done(self, worker, *result) -> None:
+        if worker is not self._worker:
+            logger.debug("Ignoring result from a stale worker")
+            return
+        self._on_auto_frame_done(*result)
+
+    def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
+        if worker is self._worker:
+            self._frame_errors += 1
+
+    def _on_worker_finished(self, worker) -> None:
+        if worker is self._worker:
+            self._finish_run(stopped=self._stop_requested)
 
     def _on_auto_progress(self, current: int, total: int) -> None:
         # Calculate ETA based on elapsed time
@@ -133,29 +240,32 @@ class AutoController(BaseController):
 
     def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi,
                             rc: float, cc: float, count: int) -> None:
-        # Always update state (fast, no UI)
-        self.state.radius[idx] = radius
+        self._frames_done += 1
+        if idx in self._protected:
+            return  # keep the user's manual fit
+
+        state = self.state
+        state.radius[idx] = radius
         if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
-            self.state.circle_fit_par[idx] = [rc, cc]
-            self.state.circle_xy[idx] = edge_xy
-        if self.state.region_count is not None:
-            self.state.region_count[idx] = count
+            state.circle_fit_par[idx] = [rc, cc]
+            state.circle_xy[idx] = edge_xy
+            source = FitSource.AUTO
+        else:
+            # Do not leave a previous run's centre/edges behind a failed frame.
+            state.circle_fit_par[idx] = [np.nan, np.nan]
+            state.circle_xy[idx] = None
+            source = FitSource.NONE
+        if state.region_count is not None:
+            state.region_count[idx] = count
+        if state.fit_source is not None:
+            state.fit_source[idx] = source
 
-        # Incremental auto-save every AUTOSAVE_INTERVAL frames
-        if (idx + 1) % AUTOSAVE_INTERVAL == 0 and self.state.folder_path:
-            autosave_path = Path(self.state.folder_path) / ".bubbletrack_autosave.mat"
-            try:
-                export_r_data(
-                    str(autosave_path),
-                    self.state.radius,
-                    self.state.circle_fit_par,
-                    self.state.circle_xy,
-                    self.state.region_count,
-                )
-                logger.info("Auto-saved at frame %d to %s", idx, autosave_path)
-            except Exception as exc:
-                logger.warning("Auto-save failed at frame %d: %s", idx, exc)
+        if (idx + 1) % AUTOSAVE_INTERVAL == 0:
+            self._write_autosave()
 
+        self._update_live_view(idx, radius, edge_xy, binary_roi, rc, cc, count)
+
+    def _update_live_view(self, idx, radius, edge_xy, binary_roi, rc, cc, count) -> None:
         # Throttle display updates so the UI thread can process user events
         now = time.monotonic()
         if now - self._auto_last_display < AUTO_DISPLAY_THROTTLE_MS / 1000.0:
@@ -190,7 +300,7 @@ class AutoController(BaseController):
                     self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
                 self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
         except Exception:
-            pass
+            logger.debug("Live view update failed for frame %d", idx, exc_info=True)
 
         # Show binary result from worker (no disk I/O needed). Apply
         # invert_mask as a pure visual swap — same convention as the
@@ -201,30 +311,67 @@ class AutoController(BaseController):
             self.w.binary_panel.set_image(bin_display)
 
         # Update chart periodically (skip quality scoring for speed;
-        # quality coloring is applied once in _on_auto_finished)
+        # quality coloring is applied once when the run finishes)
         if radius > 0 and self.state.radius is not None:
             frames = np.arange(1, len(self.state.radius) + 1)
             self.w.radius_chart.plot_all(frames, self.state.radius)
 
+    def _write_autosave(self) -> bool:
+        """Write the incremental autosave next to the images; never raises."""
+        if not self.state.folder_path or self.state.video_reader is not None:
+            return False
+        path = Path(self.state.folder_path) / AUTOSAVE_NAME
+        try:
+            export_r_data(
+                str(path),
+                self.state.radius,
+                self.state.circle_fit_par,
+                self.state.circle_xy,
+                self.state.region_count,
+            )
+            logger.info("Auto-saved to %s", path)
+            return True
+        except Exception as exc:
+            self._autosave_failed = True
+            logger.warning("Auto-save to %s failed: %s", path, exc)
+            return False
+
     def _on_auto_finished(self) -> None:
+        """Kept for callers that finish a run without a worker reference."""
+        self._finish_run(stopped=self._stop_requested)
+
+    def _finish_run(self, stopped: bool) -> None:
+        self._running = False
+        self._set_run_state(False)
         self.w.left_panel.automatic_tab.set_running(False)
-        self.w.header.set_status("Done", "#10b981")
+        self._write_autosave()  # final state, not just the last multiple of 50
+
         # Final full display update
-        display_frame(
-            self.state, self.w, self.state.image_no, self._set_state,
-            self._cache,
-        )
-        # Refresh chart with quality-based coloring
+        if self.state.images:
+            display_frame(
+                self.state, self.w, self.state.image_no, self._set_state,
+                self._cache,
+            )
         scores = refresh_chart(self.state, self.w)
-        if scores is not None:
+
+        notes: list[str] = []
+        if self._frame_errors:
+            notes.append(f"{self._frame_errors} frame(s) could not be read")
+        if self._autosave_failed:
+            notes.append("autosave failed (is the folder read-only?)")
+        poor_count = 0
+        if scores is not None and self.state.radius is not None:
             valid = self.state.radius > 0
             poor_count = int(np.sum(valid & (scores < QUALITY_WARN_THRESHOLD)))
-            if poor_count > 0:
-                self.w.header.set_status(
-                    f"Done — {poor_count} unreliable fits detected", "#f59e0b",
-                )
             logger.info("Fit quality: %d / %d valid fits below threshold",
                         poor_count, int(valid.sum()))
+        if poor_count and not stopped:
+            notes.append(f"{poor_count} unreliable fits detected")
+
+        head = (f"Stopped after {self._frames_done} frame(s)" if stopped else "Done")
+        text = head + (" — " + "; ".join(notes) if notes else "")
+        warn = stopped or bool(notes)
+        self.w.header.set_status(text, "#f59e0b" if warn else "#10b981")
 
     # ------------------------------------------------------------------ #
     #  Batch multi-folder processing
@@ -232,6 +379,17 @@ class AutoController(BaseController):
 
     def on_batch_folders(self) -> None:
         """Prompt user for a parent directory and process all experiment folders."""
+        if self.is_busy():
+            return
+        if not self.state.images:
+            QMessageBox.information(
+                self.w, "Load a folder first",
+                "Load one experiment folder and tune the ROI and parameters "
+                "on it first.\n\nBatch processing applies exactly those "
+                "settings to every folder.",
+            )
+            return
+
         root = QFileDialog.getExistingDirectory(
             self.w, "Select Parent Directory Containing Experiment Folders",
         )
@@ -268,6 +426,8 @@ class AutoController(BaseController):
         at.set_batch_status(f"Starting batch: {len(cfg.folders)} folders...")
         self.w.header.set_status("Batch processing...", "#f59e0b")
 
+        # Record the parameters actually used, not those current at the end.
+        self._batch_params = (self.state.gridx, self.state.gridy, self.state.img_thr)
         self._batch_worker = BatchFolderWorker(
             folders=cfg.folders,
             sensitivity=self.state.img_thr,
@@ -295,6 +455,8 @@ class AutoController(BaseController):
         self._batch_worker.folder_done.connect(self._on_batch_folder_done)
         self._batch_worker.folder_result_ready.connect(self._on_batch_folder_result)
         self._batch_worker.all_done.connect(self._on_batch_all_done)
+        self._batch_running = True
+        self._set_run_state(True)
         self._batch_worker.start()
 
     def _on_batch_folder_started(self, idx: int, total: int, name: str) -> None:
@@ -312,6 +474,9 @@ class AutoController(BaseController):
     def _on_batch_folder_result(
         self, folder_path: str, n_frames: int, n_fitted: int,
         radius: np.ndarray, quality_scores: np.ndarray,
+        circle_fit_par: np.ndarray | None = None,
+        circle_xy: list | None = None,
+        region_count: np.ndarray | None = None,
     ) -> None:
         from bubbletrack.model.batch_result import FolderResult
         self._batch_results.append(FolderResult(
@@ -323,6 +488,9 @@ class AutoController(BaseController):
             n_fitted=n_fitted,
             radius=radius,
             quality_scores=quality_scores,
+            circle_fit_par=circle_fit_par,
+            circle_xy=circle_xy,
+            region_count=region_count,
         ))
 
     def _on_batch_all_done(self, folders_ok: int, total_fitted: int) -> None:
@@ -335,16 +503,22 @@ class AutoController(BaseController):
             f"Batch done: {folders_ok} folders, {total_fitted} fitted", "#10b981",
         )
         self._batch_worker = None
+        self._batch_running = False
+        self._set_run_state(False)
 
         if self._batch_results:
             from bubbletrack.model.batch_result import BatchResultStore
+            gridx, gridy, sensitivity = self._batch_params or (
+                self.state.gridx, self.state.gridy, self.state.img_thr,
+            )
             store = BatchResultStore(
                 results=tuple(self._batch_results),
                 timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
-                gridx=self.state.gridx,
-                gridy=self.state.gridy,
-                sensitivity=self.state.img_thr,
+                gridx=gridx,
+                gridy=gridy,
+                sensitivity=sensitivity,
             )
+            self._batch_store = store
             self._show_batch_browser(store)
         self._batch_results = []
 
@@ -361,35 +535,51 @@ class AutoController(BaseController):
         Parameters
         ----------
         result : FolderResult
-            The batch result to restore (contains radius + quality_scores).
+            The batch result to restore.
         """
+        if self.is_busy():
+            self.w.header.set_status("Stop the running fit first", "#f59e0b")
+            return
+
         # 1. Load the folder (scans images, initialises blank results, displays frame 0)
         self.bus.emit("load_folder", result.folder_path)
-
-        # 2. Restore batch-fitted radius into state
-        if self.state.radius is None:
+        if self.state.radius is None or self.state.folder_path != result.folder_path:
             return
-        n_state = len(self.state.radius)
-        n_batch = len(result.radius)
-        n_copy = min(n_state, n_batch)
-        self.state.radius[:n_copy] = result.radius[:n_copy]
 
-        # 3. Re-display current frame (to show fitted/unfitted binary correctly)
+        # 2. Restore the ROI the batch actually used
+        store = self._batch_store
+        if store is not None:
+            self._update(gridx=tuple(store.gridx), gridy=tuple(store.gridy))
+            self.w.original_panel.set_roi_text(self.state.gridx, self.state.gridy)
+
+        # 3. Restore batch results into state
+        n_state = len(self.state.radius)
+        n_copy = min(n_state, len(result.radius))
+        state = self.state
+        state.radius[:n_copy] = result.radius[:n_copy]
+        if result.circle_fit_par is not None:
+            state.circle_fit_par[:n_copy] = result.circle_fit_par[:n_copy]
+        if result.circle_xy is not None:
+            for i in range(n_copy):
+                state.circle_xy[i] = result.circle_xy[i]
+        if result.region_count is not None and state.region_count is not None:
+            state.region_count[:n_copy] = result.region_count[:n_copy]
+        if state.fit_source is not None:
+            fitted = state.radius[:n_copy] > 0
+            state.fit_source[:n_copy] = np.where(fitted, FitSource.AUTO, FitSource.NONE)
+
+        # 4. Re-display current frame and chart
         display_frame(
             self.state, self.w, self.state.image_no, self._set_state,
             self._cache,
         )
-
-        # 4. Plot chart with stored quality scores (circle_xy not available
-        #    so refresh_chart cannot recompute quality — use stored scores)
-        frames = np.arange(1, n_state + 1)
-        if n_state == n_batch:
-            scores = result.quality_scores
+        if result.circle_xy is not None:
+            refresh_chart(self.state, self.w)
         else:
-            # Frame count changed since batch; pad/truncate scores
+            frames = np.arange(1, n_state + 1)
             scores = np.zeros(n_state)
             scores[:n_copy] = result.quality_scores[:n_copy]
-        self.w.radius_chart.plot_all(frames, self.state.radius, scores)
+            self.w.radius_chart.plot_all(frames, self.state.radius, scores)
 
         n_fitted = int(np.sum(self.state.radius[:n_copy] > 0))
         self.w.header.set_status(

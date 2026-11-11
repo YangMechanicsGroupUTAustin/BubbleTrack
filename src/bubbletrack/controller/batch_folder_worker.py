@@ -38,7 +38,8 @@ class BatchFolderWorker(QThread):
     folder_done = pyqtSignal(str, bool, str)
     all_done = pyqtSignal(int, int)
     # (folder_path, n_frames, n_fitted, radius_copy, quality_scores)
-    folder_result_ready = pyqtSignal(str, int, int, object, object)
+    # (folder, n_frames, n_fitted, radius, quality, circle_fit_par, circle_xy, region_count)
+    folder_result_ready = pyqtSignal(str, int, int, object, object, object, object, object)
 
     def __init__(
         self,
@@ -178,6 +179,7 @@ class BatchFolderWorker(QThread):
                 q_scores[radius > 0] = np.nan
             self.folder_result_ready.emit(
                 str(folder), n, n_fitted, radius.copy(), q_scores,
+                circle_fit_par.copy(), list(circle_xy), region_count.copy(),
             )
 
             messages: list[str] = []

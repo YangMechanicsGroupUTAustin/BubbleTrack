@@ -77,6 +77,7 @@ class AppState:
     circle_fit_par: object = None  # np.ndarray (N, 2) [row_c, col_c]
     circle_xy: object = None       # list of (M, 2) arrays | None
     region_count: object = None     # np.ndarray (N,) number of selected regions
+    fit_source: object = None       # np.ndarray (N,) int8 FitSource codes
 
     # Display parameters
     img_grayscale_max: int = 65535
@@ -117,6 +118,7 @@ class AppState:
             circle_fit_par=np.full((n, 2), np.nan),
             circle_xy=[None] * n,
             region_count=np.zeros(n, dtype=int),
+            fit_source=np.zeros(n, dtype=np.int8),
         )
 
 

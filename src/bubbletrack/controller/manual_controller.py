@@ -16,6 +16,7 @@ from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
+from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.undo import UndoStack
 
 logger = logging.getLogger(__name__)
@@ -124,6 +125,8 @@ class ManualController(BaseController):
             self.state.circle_xy[idx] = xy
             if self.state.region_count is not None:
                 self.state.region_count[idx] = 0
+            if self.state.fit_source is not None:
+                self.state.fit_source[idx] = FitSource.MANUAL
 
             # Clear old overlays before drawing new results
             redraw_original(self.state, self.w)
@@ -164,6 +167,8 @@ class ManualController(BaseController):
             self.state.circle_xy[idx] = None
         if self.state.region_count is not None:
             self.state.region_count[idx] = 0
+        if self.state.fit_source is not None:
+            self.state.fit_source[idx] = FitSource.NONE
 
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 

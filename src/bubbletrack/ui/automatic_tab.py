@@ -131,6 +131,11 @@ class AutomaticTab(QWidget):
         if not running:
             self._progress_label.setText("Done" if self._progress.value() > 0 else "Ready")
 
+    def set_editing_enabled(self, enabled: bool) -> None:
+        """Clear / Batch are disabled while a fit runs (Stop stays available)."""
+        self._clear_btn.setEnabled(enabled)
+        self._batch_btn.setEnabled(enabled)
+
     def reset_progress(self):
         self._progress.setValue(0)
         self._progress_label.setText("Ready")

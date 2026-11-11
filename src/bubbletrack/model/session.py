@@ -14,7 +14,35 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-SESSION_VERSION = "3.0"
+SESSION_VERSION = "3.1"  # 3.1 adds circle_xy + fit_source; 3.0 files still load
+MIN_SUPPORTED_VERSION = (3, 0)
+
+
+def _parse_version(value) -> tuple[int, ...]:
+    """'3.10' -> (3, 10).  Compared as numbers, not strings ('10.0' > '3.0')."""
+    try:
+        return tuple(int(part) for part in str(value).split("."))
+    except (TypeError, ValueError):
+        return (0,)
+
+
+def _to_json_array(values) -> list | None:
+    """Array -> nested lists with non-finite values as null (strict JSON)."""
+    if values is None:
+        return None
+    arr = np.asarray(values, dtype=np.float64)
+    out = arr.astype(object)
+    out[~np.isfinite(arr)] = None
+    return out.tolist()
+
+
+def _from_json_array(values) -> np.ndarray:
+    """Nested lists with nulls -> float array with NaN."""
+    def _fix(v):
+        if isinstance(v, list):
+            return [_fix(x) for x in v]
+        return np.nan if v is None else v
+    return np.array(_fix(values), dtype=np.float64)
 
 
 def save_session(filepath: str, state) -> None:
@@ -53,17 +81,23 @@ def save_session(filepath: str, state) -> None:
         "um2px": state.um2px,
         "fps": state.fps,
         "rmax_fit_length": state.rmax_fit_length,
-        "radius": state.radius.tolist() if state.radius is not None else None,
-        "circle_fit_par": (
-            state.circle_fit_par.tolist()
-            if state.circle_fit_par is not None
-            else None
-        ),
+        "radius": _to_json_array(state.radius),
+        "circle_fit_par": _to_json_array(state.circle_fit_par),
         "region_count": (
             state.region_count.tolist() if state.region_count is not None else None
         ),
+        "circle_xy": (
+            [None if xy is None else _to_json_array(np.asarray(xy).reshape(-1, 2))
+             for xy in state.circle_xy]
+            if state.circle_xy is not None else None
+        ),
+        "fit_source": (
+            state.fit_source.tolist() if state.fit_source is not None else None
+        ),
     }
-    Path(filepath).write_text(json.dumps(data, indent=2), encoding="utf-8")
+    # allow_nan=False guarantees strict JSON (MATLAB's jsondecode rejects NaN)
+    Path(filepath).write_text(json.dumps(data, indent=2, allow_nan=False),
+                              encoding="utf-8")
     logger.info("Session saved to %s", filepath)
 
 
@@ -100,18 +134,26 @@ def load_session(filepath: str) -> dict:
         raise ValueError(f"Session file '{filepath}' is not a JSON object")
 
     version = data.get("version", "0.0")
-    if version < SESSION_VERSION:
+    if _parse_version(version) < MIN_SUPPORTED_VERSION:
+        min_text = ".".join(map(str, MIN_SUPPORTED_VERSION))
         raise ValueError(
-            f"Session file version {version} is too old (need >= {SESSION_VERSION})"
+            f"Session file version {version} is too old (need >= {min_text})"
         )
 
-    # Reconstruct NumPy arrays from JSON lists
+    # Reconstruct NumPy arrays from JSON lists (null -> NaN)
     if data.get("radius") is not None:
-        data["radius"] = np.array(data["radius"], dtype=np.float64)
+        data["radius"] = _from_json_array(data["radius"])
     if data.get("circle_fit_par") is not None:
-        data["circle_fit_par"] = np.array(data["circle_fit_par"], dtype=np.float64)
+        data["circle_fit_par"] = _from_json_array(data["circle_fit_par"])
     if data.get("region_count") is not None:
         data["region_count"] = np.array(data["region_count"], dtype=int)
+    if data.get("circle_xy") is not None:
+        data["circle_xy"] = [
+            None if xy is None else _from_json_array(xy).reshape(-1, 2)
+            for xy in data["circle_xy"]
+        ]
+    if data.get("fit_source") is not None:
+        data["fit_source"] = np.array(data["fit_source"], dtype=np.int8)
 
     # Reconstruct tuples from lists
     if "gridx" in data and isinstance(data["gridx"], list):
