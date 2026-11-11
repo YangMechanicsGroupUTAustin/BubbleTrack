@@ -43,6 +43,14 @@ def _run(folder, out, *extra: str) -> None:
     cli.main(["--folder", str(folder), "--output", str(out), *extra])
 
 
+def _run_params_only(folder, out, *extra: str) -> None:
+    """Run for the parameters passed; a run that fits nothing (exit 1) is fine."""
+    try:
+        _run(folder, out, *extra)
+    except SystemExit as exc:
+        assert exc.code == 1
+
+
 def _csv_radii(path) -> list[float]:
     with open(path, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
@@ -62,7 +70,7 @@ class TestModes:
 
     def test_default_mode_is_intensity(self, frames, tmp_path, monkeypatch):
         seen = _spy_params(monkeypatch)
-        _run(frames, tmp_path / "out.csv")
+        _run_params_only(frames, tmp_path / "out.csv")
         assert [p.mode for p in seen] == ["intensity"] * 3
 
     def test_unknown_mode_is_a_usage_error(self, frames, tmp_path):
@@ -91,20 +99,20 @@ class TestRemovingFactor:
     def test_rf_is_mapped_like_the_gui_slider(self, frames, tmp_path, monkeypatch, rf):
         seen = _spy_params(monkeypatch)
         extra = () if rf is None else ("--rf", rf)
-        _run(frames, tmp_path / "out.csv", *extra)
+        _run_params_only(frames, tmp_path / "out.csv", *extra)
         slider = DEFAULT_REMOVING_FACTOR if rf is None else float(rf)
         expected = compute_removing_factor(slider, (1, SHAPE[0]), (1, SHAPE[1]))
         assert {p.removing_factor for p in seen} == {expected}
 
     def test_rf_mapping_uses_the_roi(self, frames, tmp_path, monkeypatch):
         seen = _spy_params(monkeypatch)
-        _run(frames, tmp_path / "out.csv", "--roi", "11", "110", "21", "140")
+        _run_params_only(frames, tmp_path / "out.csv", "--roi", "11", "110", "21", "140")
         expected = compute_removing_factor(DEFAULT_REMOVING_FACTOR, (11, 110), (21, 140))
         assert {p.removing_factor for p in seen} == {expected}
 
     def test_rf_area_is_a_raw_pixel_override(self, frames, tmp_path, monkeypatch):
         seen = _spy_params(monkeypatch)
-        _run(frames, tmp_path / "out.csv", "--rf", "10", "--rf-area", "90")
+        _run_params_only(frames, tmp_path / "out.csv", "--rf", "10", "--rf-area", "90")
         assert {p.removing_factor for p in seen} == {90}
 
     def test_help_explains_the_change(self, capsys):
@@ -116,6 +124,65 @@ class TestRemovingFactor:
         assert "slider" in text
         assert "raw pixel area" in text
         assert "Changed in 3.1" in text
+
+
+class TestEarlyValidation:
+    """Bad arguments fail before any frame is processed, with a clear message."""
+
+    @pytest.mark.parametrize("extra", [
+        ("--fps", "0"), ("--fps", "-5"),
+        ("--scale", "0"), ("--scale", "-1"),
+        ("--threshold", "1.5"), ("--threshold", "-0.1"),
+        ("--rf", "101"), ("--rf", "-1"), ("--rf-area", "-1"),
+        ("--edges", "2", "0", "0", "0"),
+        ("--roi", "0", "50", "1", "50"),          # below 1 (1-based)
+        ("--roi", "1", "121", "1", "50"),         # past the image height (120)
+        ("--roi", "1", "50", "1", "161"),         # past the image width (160)
+        ("--roi", "60", "10", "1", "50"),         # reversed rows
+        ("--roi", "1", "50", "90", "20"),         # reversed columns
+    ])
+    def test_invalid_argument_exits_2(self, frames, tmp_path, monkeypatch, capsys, extra):
+        seen = _spy_params(monkeypatch)
+        with pytest.raises(SystemExit) as exc:
+            _run(frames, tmp_path / "out.csv", *extra)
+        assert exc.value.code == 2
+        assert extra[0] in capsys.readouterr().err
+        assert seen == []
+        assert not (tmp_path / "out.csv").exists()
+
+    def test_missing_output_directory(self, frames, tmp_path, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _run(frames, tmp_path / "no_such_dir" / "out.csv")
+        assert exc.value.code == 2
+        assert "--output" in capsys.readouterr().err
+
+    def test_full_image_roi_is_valid(self, frames, tmp_path, capsys):
+        _run(frames, tmp_path / "out.csv", "--threshold", "0.58",
+             "--roi", "1", str(SHAPE[0]), "1", str(SHAPE[1]))
+        assert "3/3 frames fitted" in capsys.readouterr().out
+
+    def test_missing_folder_exits_1(self, tmp_path, capsys):
+        with pytest.raises(SystemExit) as exc:
+            _run(tmp_path / "missing", tmp_path / "out.csv")
+        assert exc.value.code == 1
+
+
+class TestZeroFitted:
+    def test_no_fitted_frame_exits_1_without_writing(self, frames, tmp_path, monkeypatch, capsys):
+        monkeypatch.setattr(
+            frame_pipeline, "measure_detection", lambda *a, **k: (-1.0, 0.0, 0.0, 0),
+        )
+        out = tmp_path / "out.csv"
+        with pytest.raises(SystemExit) as exc:
+            _run(frames, out)
+        assert exc.value.code == 1
+        assert "0/3 frames fitted" in capsys.readouterr().out
+        assert not out.exists()
+
+    def test_success_returns_normally(self, frames, tmp_path):
+        out = tmp_path / "out.csv"
+        _run(frames, out, "--threshold", "0.58")  # no SystemExit
+        assert out.exists()
 
 
 class TestRadiusFilter:
@@ -131,9 +198,5 @@ class TestRadiusFilter:
             frame_pipeline, "measure_detection",
             lambda *args, **kwargs: (fake_radius, 60.0, 80.0, 0),
         )
-        out = tmp_path / "out.csv"
-        try:
-            _run(frames, out)
-        except SystemExit:
-            pass  # a run with no fitted frame may exit non-zero
+        _run_params_only(frames, tmp_path / "out.csv")
         assert f"{fitted}/3 frames fitted" in capsys.readouterr().out

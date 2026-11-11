@@ -20,8 +20,8 @@ from bubbletrack.model.removing_factor import compute_removing_factor
 logger = logging.getLogger(__name__)
 
 
-def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
-    """Build the argument parser and return parsed arguments."""
+def _build_parser() -> argparse.ArgumentParser:
+    """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog="bubbletrack-cli",
         description="BubbleTrack -- headless batch bubble radius fitting",
@@ -59,7 +59,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="ROI bounds: row_start row_end col_start col_end (1-indexed inclusive)",
     )
     parser.add_argument(
-        "--edges", nargs=4, type=int, default=[0, 0, 0, 0],
+        "--edges", nargs=4, type=int, choices=(0, 1), default=[0, 0, 0, 0],
         metavar=("T", "R", "D", "L"),
         help="Bubble crosses edge flags: top right down left (0 or 1)",
     )
@@ -83,7 +83,41 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--verbose", "-v", action="store_true",
         help="Enable debug-level logging",
     )
-    return parser.parse_args(argv)
+    return parser
+
+
+def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
+    """Reject bad arguments before any frame is read (exits with status 2)."""
+    if not 0.0 <= args.threshold <= 1.0:
+        parser.error(f"--threshold must be in [0, 1], got {args.threshold}")
+    if not 0.0 <= args.rf <= 100.0:
+        parser.error(f"--rf must be a slider value in [0, 100], got {args.rf}")
+    if args.rf_area is not None and args.rf_area < 0:
+        parser.error(f"--rf-area must be >= 0, got {args.rf_area}")
+    if not args.fps > 0:
+        parser.error(f"--fps must be > 0, got {args.fps}")
+    if not args.scale > 0:
+        parser.error(f"--scale must be > 0, got {args.scale}")
+    out_dir = Path(args.output).resolve().parent
+    if not out_dir.is_dir():
+        parser.error(f"--output directory does not exist: {out_dir}")
+
+
+def _validate_roi(
+    parser: argparse.ArgumentParser,
+    roi: list[int] | None,
+    shape: tuple[int, int],
+) -> None:
+    """Check a 1-based inclusive ROI against the image size, like the GUI."""
+    if roi is None:
+        return
+    r0, r1, c0, c1 = roi
+    h, w = shape
+    if not (1 <= r0 <= r1 <= h and 1 <= c0 <= c1 <= w):
+        parser.error(
+            f"--roi {r0} {r1} {c0} {c1} must satisfy 1 <= R0 <= R1 <= {h} and "
+            f"1 <= C0 <= C1 <= {w} (1-based inclusive, image is {h}x{w})"
+        )
 
 
 def _detect_format(output_path: str, explicit_format: str | None) -> str:
@@ -178,8 +212,14 @@ def _write_output(
 
 
 def main(argv: list[str] | None = None) -> None:
-    """Entry point for the CLI."""
-    args = _parse_args(argv)
+    """Entry point for the CLI.
+
+    Exit status: 0 on success, 1 if no frame could be read or fitted, 2 for
+    invalid arguments.
+    """
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    _validate_args(parser, args)
 
     log_level = logging.DEBUG if args.verbose else logging.INFO
     setup_logging(level=log_level)
@@ -193,6 +233,7 @@ def main(argv: list[str] | None = None) -> None:
     if shape is None:
         print(f"Cannot read the first image: {images[0]}", file=sys.stderr)
         sys.exit(1)
+    _validate_roi(parser, args.roi, shape)
     gridx, gridy = _resolve_roi(args, shape)
     params = FrameParams(
         sensitivity=args.threshold,
@@ -208,13 +249,18 @@ def main(argv: list[str] | None = None) -> None:
         images, params, args.verbose,
     )
 
+    n_valid = int((radius > 0).sum())
+    if n_valid == 0:
+        # Do not overwrite a previous result with an all-invalid file.
+        print(f"Done. 0/{len(images)} frames fitted.")
+        print("No frame was fitted; output not written.", file=sys.stderr)
+        sys.exit(1)
+
     fmt = _detect_format(args.output, args.format)
     _write_output(
         fmt, args.output, radius, centers, edge_pts, args.fps, args.scale,
         region_count if args.mode == "area" else None,
     )
-
-    n_valid = int((radius > 0).sum())
     print(f"Done. {n_valid}/{len(images)} frames fitted. Output: {args.output}")
 
 
