@@ -14,6 +14,7 @@ from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.detection import detect_bubble
 from bubbletrack.model.export import export_csv, export_excel, export_r_data
 from bubbletrack.model.image_io import (
+    imread_unicode,
     load_and_normalize,
     scan_folder,
 )
@@ -89,8 +90,7 @@ def _resolve_roi(
         return (args.roi[0], args.roi[1]), (args.roi[2], args.roi[3])
 
     # Use full image dimensions from the first frame
-    import cv2
-    sample = cv2.imread(images[0], cv2.IMREAD_UNCHANGED)
+    sample = imread_unicode(images[0])
     if sample is not None:
         h, w = sample.shape[:2]
         return (1, h), (1, w)

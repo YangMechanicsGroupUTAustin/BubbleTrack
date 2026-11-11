@@ -19,6 +19,46 @@ class ImageLoadError(Exception):
     """Raised when an image file cannot be loaded or is corrupted."""
 
 
+def imread_unicode(
+    path: str | os.PathLike,
+    flags: int = cv2.IMREAD_UNCHANGED,
+) -> np.ndarray | None:
+    """Read an image like ``cv2.imread``, but from any path, including non-ASCII ones.
+
+    ``cv2.imread`` cannot open paths with characters outside the ANSI code
+    page on Windows (CJK, ``µ``, ``Å``, emoji, ...) and silently returns None.
+    Reading the bytes with numpy and decoding them in memory avoids the
+    problem on every platform.
+
+    Parameters
+    ----------
+    path : str or path-like
+        Image file to read.
+    flags : int
+        ``cv2.IMREAD_*`` flags, as for ``cv2.imread``.  Defaults to
+        ``IMREAD_UNCHANGED`` so the bit depth and channels are kept.
+
+    Returns
+    -------
+    ndarray or None
+        The decoded image, or None when the file is missing, empty, not a
+        regular file, or cannot be decoded (the ``cv2.imread`` contract).
+        For multi-page files only the first page is returned.
+    """
+    try:
+        buf = np.fromfile(os.fspath(path), dtype=np.uint8)
+    except (OSError, ValueError) as exc:
+        logger.debug("Cannot read file bytes %s: %s", path, exc)
+        return None
+    if buf.size == 0:
+        return None
+    try:
+        return cv2.imdecode(buf, flags)
+    except cv2.error as exc:
+        logger.debug("Cannot decode %s: %s", path, exc)
+        return None
+
+
 # Supported extensions in priority order
 _EXTENSIONS = (".tiff", ".tif", ".png", ".jpg", ".jpeg", ".bmp")
 
@@ -70,7 +110,7 @@ def scan_folder(folder: str) -> list[str]:
 
 def detect_bit_depth(path: str) -> int:
     """Read the first image and return its max grey value (255 or 65535)."""
-    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    img = imread_unicode(path, cv2.IMREAD_UNCHANGED)
     if img is None:
         return 255
     if img.dtype == np.uint16:
@@ -83,6 +123,11 @@ class VideoFrameReader:
 
     def __init__(self, path: str) -> None:
         self._path = path
+        # Unlike cv2.imread, VideoCapture copes with non-ASCII paths on
+        # Windows: the default FFmpeg backend opens UTF-8 paths (checked with
+        # CJK, "µ", "Å" and emoji; see tests/test_unicode_paths.py).  Only the
+        # Media Foundation backend (cv2.CAP_MSMF) fails on them, and it is
+        # not selected for files by default.
         self._cap = cv2.VideoCapture(str(path))
         if not self._cap.isOpened():
             raise ImageLoadError(f"Cannot open video: {path}")
@@ -253,7 +298,7 @@ def load_and_normalize(
         ROI slice of *cur_img_binary*.
     """
     logger.debug("Loading image: %s", image_path)
-    raw = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+    raw = imread_unicode(image_path, cv2.IMREAD_UNCHANGED)
     if raw is None:
         logger.warning("Cannot read image: %s", image_path)
         raise ImageLoadError(
