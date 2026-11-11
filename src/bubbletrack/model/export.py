@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -87,6 +88,119 @@ def rmax_fit_half_window(rmax_fit_length: int) -> int:
     return max(0, (int(rmax_fit_length) - 1) // 2)
 
 
+@dataclass(frozen=True)
+class RmaxEstimate:
+    """Location and value of the maximum bubble radius.
+
+    Frame positions are **1-based** (frame 1 is the first image), matching
+    the ``Frame`` column of the CSV/XLSX export and the MATLAB convention of
+    the RofT ``.mat`` export.
+
+    Attributes
+    ----------
+    frame : float
+        1-based frame position of Rmax.  Fractional when the parabola
+        vertex is accepted, otherwise equal to ``peak_frame``.
+    radius : float
+        Rmax in pixels (parabola vertex value or discrete maximum).
+    peak_frame : int
+        1-based frame of the discrete maximum among valid frames.
+    window : tuple[int, int]
+        Inclusive 1-based fit window, clamped to ``[1, N]``.
+    fitted : bool
+        True when the parabola vertex was accepted.
+    """
+
+    frame: float
+    radius: float
+    peak_frame: int
+    window: tuple[int, int]
+    fitted: bool
+
+
+def _valid_frame_mask(radius: np.ndarray) -> np.ndarray:
+    """Return True for frames with a usable radius (> 0 and not NaN)."""
+    return (radius > 0) & ~np.isnan(radius)
+
+
+def _fit_parabola_vertex(
+    frames: np.ndarray,
+    values: np.ndarray,
+    window: tuple[int, int],
+) -> tuple[float, float] | None:
+    """Fit a parabola and return its vertex ``(frame, value)``, or None.
+
+    The vertex is rejected (None) when fewer than 3 points are given, the
+    parabola is not concave, or the vertex falls outside *window*.
+    """
+    if len(frames) < 3:
+        return None
+    try:
+        p = np.polyfit(frames, values, 2)
+    except (np.linalg.LinAlgError, ValueError):
+        return None
+    if p[0] >= 0:
+        return None  # not concave
+    vertex_frame = -p[1] / (2.0 * p[0])
+    vertex_value = (4 * p[0] * p[2] - p[1] ** 2) / (4 * p[0])
+    # Only trust the vertex inside the window it was fitted on.
+    if vertex_frame < window[0] or vertex_frame > window[1]:
+        return None
+    return float(vertex_frame), float(vertex_value)
+
+
+def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
+    """Locate the maximum radius with a local quadratic fit.
+
+    The discrete maximum among valid frames (radius > 0, not NaN) is
+    refined by fitting a parabola to the valid frames of a window of
+    ``rmax_fit_half_window(L)`` frames on each side, clamped to the data.
+    The vertex is accepted only if the parabola is concave and the vertex
+    lies inside that window; otherwise the discrete maximum is used.
+
+    Parameters
+    ----------
+    radius : (N,) array
+        Radii in pixels; invalid frames (<= 0 or NaN) are ignored.
+    rmax_fit_length : int
+        Fit window length L (see :func:`rmax_fit_half_window`).
+
+    Returns
+    -------
+    RmaxEstimate
+        Positions are 1-based frame numbers.
+
+    Raises
+    ------
+    ValueError
+        If *radius* contains no valid frame.
+    """
+    R = np.asarray(radius, dtype=np.float64).ravel()
+    valid_mask = _valid_frame_mask(R)
+    valid_indices = np.flatnonzero(valid_mask)  # 0-based
+    if len(valid_indices) == 0:
+        raise ValueError("No valid frames to locate Rmax")
+
+    peak_idx = int(valid_indices[np.argmax(R[valid_indices])])
+    peak_frame = peak_idx + 1  # 1-based
+    half = rmax_fit_half_window(rmax_fit_length)
+    window = (max(1, peak_frame - half), min(len(R), peak_frame + half))
+
+    window_frames = np.arange(window[0], window[1] + 1)
+    fit_frames = window_frames[valid_mask[window_frames - 1]]
+    vertex = _fit_parabola_vertex(fit_frames, R[fit_frames - 1], window)
+
+    if vertex is None:
+        return RmaxEstimate(
+            frame=float(peak_frame), radius=float(R[peak_idx]),
+            peak_frame=peak_frame, window=window, fitted=False,
+        )
+    return RmaxEstimate(
+        frame=vertex[0], radius=vertex[1],
+        peak_frame=peak_frame, window=window, fitted=True,
+    )
+
+
 def export_rof_t_data(
     save_path: str,
     radius: np.ndarray,
@@ -119,55 +233,18 @@ def export_rof_t_data(
     """
     deltax = um2px
     deltat = 1.0 / fps
-    half = rmax_fit_half_window(rmax_fit_length)
 
-    R = radius.copy().ravel().astype(np.float64)
-    t = np.arange(1, len(R) + 1, dtype=np.float64)
+    R = np.asarray(radius, dtype=np.float64).ravel()
+    t = np.arange(1, len(R) + 1, dtype=np.float64)  # 1-based frame numbers
 
-    # Filter out invalid frames (radius <= 0 or NaN) before Rmax fitting
-    valid_mask = (R > 0) & ~np.isnan(R)
+    valid_mask = _valid_frame_mask(R)
     n_valid = int(valid_mask.sum())
     if n_valid < 3:
         return False, f"Not enough valid frames (need >= 3, got {n_valid})"
 
-    # Find Rmax among valid frames only
-    valid_R = R[valid_mask]
-    valid_indices = np.where(valid_mask)[0]  # 0-indexed
-    rmax_valid_pos = int(valid_R.argmax())
-    rmax_val = valid_R[rmax_valid_pos]
-    rmax_loc = int(valid_indices[rmax_valid_pos]) + 1  # 1-indexed
-
-    # Clamp fit window to data range (fallback for boundary cases)
-    win_left = max(1, rmax_loc - half)
-    win_right = min(len(R), rmax_loc + half)
-
-    # Build fit window, using only valid (radius > 0, non-NaN) frames
-    window_indices_1based = np.arange(win_left, win_right + 1)
-    window_mask = valid_mask[window_indices_1based - 1]
-    fit_indices = window_indices_1based[window_mask]
-    fit_vals = R[fit_indices - 1]  # back to 0-indexed for array access
-
-    # Quadratic fit requires >= 3 points; fall back to discrete max otherwise
-    if len(fit_indices) >= 3:
-        try:
-            p = np.polyfit(fit_indices, fit_vals, 2)
-            if p[0] >= 0:
-                # Not concave — use discrete max
-                rmax_all = rmax_val
-            else:
-                fit_time_loc = -p[1] / (2.0 * p[0])
-                fit_rmax = (4 * p[0] * p[2] - p[1] ** 2) / (4 * p[0])
-                # Only trust the vertex inside the window it was fitted on.
-                if fit_time_loc < win_left or fit_time_loc > win_right:
-                    rmax_all = rmax_val
-                else:
-                    rmax_loc = fit_time_loc
-                    rmax_all = fit_rmax
-        except Exception:
-            rmax_all = rmax_val
-    else:
-        # Too few points for quadratic fit — use discrete max
-        rmax_all = rmax_val
+    estimate = locate_rmax(R, rmax_fit_length)
+    rmax_loc = estimate.frame
+    rmax_all = estimate.radius
 
     # Build output arrays — insert Rmax at the peak and shift time.
     # Failed frames are exported as NaN (not a scaled -1 sentinel) so that

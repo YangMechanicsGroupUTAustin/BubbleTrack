@@ -6,7 +6,12 @@ import numpy as np
 import pytest
 from scipy.io import loadmat
 
-from bubbletrack.model.export import export_r_data, export_rof_t_data, safe_loadmat
+from bubbletrack.model.export import (
+    export_r_data,
+    export_rof_t_data,
+    locate_rmax,
+    safe_loadmat,
+)
 
 
 class TestExportRData:
@@ -146,6 +151,60 @@ class TestExportRofTData:
         ok, msg = export_rof_t_data(str(tmp_path / "few.mat"), R, 1.0, 1.0, 3)
         assert not ok
         assert "Not enough valid frames" in msg
+
+
+class TestLocateRmax:
+    """Pure Rmax location helper shared by the MAT and CSV/XLSX exports."""
+
+    def test_parabola_peak_is_fitted(self):
+        t = np.arange(1, 51, dtype=float)
+        R = 100.0 - 0.5 * (t - 25.3) ** 2
+        est = locate_rmax(R, 11)
+        assert est.fitted
+        assert est.peak_frame == 25
+        assert est.window == (20, 30)
+        assert est.frame == pytest.approx(25.3)
+        assert est.radius == pytest.approx(100.0)
+
+    def test_vertex_outside_window_uses_discrete_max(self):
+        R = np.array([
+            32.4, 32.15, 31.92, 31.72, 31.38, 75.42, 73.91,
+            72.16, 70.15, 67.92, 65.35, 62.0, 58.0, 54.0,
+        ])
+        est = locate_rmax(R, 11)
+        assert not est.fitted
+        assert est.window == (1, 11)
+        assert est.frame == 6.0
+        assert est.radius == pytest.approx(75.42)
+
+    def test_window_is_clamped_at_boundary(self):
+        est = locate_rmax(np.array([100.0, 90.0, 80.0]), 5)
+        assert est.window == (1, 3)
+        assert est.frame == 1.0
+        assert est.radius == pytest.approx(100.0)
+
+    def test_invalid_frames_are_ignored(self):
+        R = np.array([-1.0, 10.0, np.nan, 20.0, 0.0, 30.0, 25.0])
+        est = locate_rmax(R, 1)
+        assert est.peak_frame == 6
+        assert est.radius == pytest.approx(30.0)
+
+    def test_even_lengths_give_distinct_windows(self):
+        t = np.arange(1, 51, dtype=float)
+        R = 100.0 - 0.5 * (t - 25) ** 2
+        assert locate_rmax(R, 4).window == (24, 26)
+        assert locate_rmax(R, 5).window == (23, 27)
+        assert locate_rmax(R, 6).window == (23, 27)
+
+    def test_no_valid_frames_raises(self):
+        with pytest.raises(ValueError, match="valid"):
+            locate_rmax(np.array([-1.0, 0.0, np.nan]), 11)
+
+    def test_does_not_mutate_input(self):
+        R = np.array([-1.0, 10.0, 30.0, 20.0, -1.0])
+        before = R.copy()
+        locate_rmax(R, 3)
+        np.testing.assert_array_equal(R, before)
 
 
 class TestRmaxFitWindow:
