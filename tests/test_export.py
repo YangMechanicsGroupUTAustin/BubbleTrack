@@ -109,6 +109,30 @@ class TestExportRofTData:
         assert "Not enough valid frames" in msg
 
 
+class TestRmaxFitWindow:
+    """The fit window uses ``half = (L - 1) // 2`` frames on each side."""
+
+    # Asymmetric peak at frame 6: 3-point and 5-point fits disagree.
+    R = np.array([50.0, 70.0, 85.0, 95.0, 99.0, 100.0, 97.0, 90.0, 80.0, 65.0, 45.0])
+
+    def _rmax(self, tmp_path, fit_length):
+        out = str(tmp_path / f"L{fit_length}.mat")
+        ok, msg = export_rof_t_data(out, self.R, 1.0, 1.0, fit_length)
+        assert ok, msg
+        data = loadmat(out)
+        return data["RmaxAll"].item(), data["RmaxTimeLoc"].item()
+
+    def test_even_length_uses_one_point_fewer(self, tmp_path):
+        assert self._rmax(tmp_path, 4) == pytest.approx(self._rmax(tmp_path, 3))
+        assert self._rmax(tmp_path, 6) == pytest.approx(self._rmax(tmp_path, 5))
+
+    def test_even_lengths_give_different_windows(self, tmp_path):
+        rmax4, loc4 = self._rmax(tmp_path, 4)
+        rmax6, loc6 = self._rmax(tmp_path, 6)
+        assert rmax4 != pytest.approx(rmax6)
+        assert loc4 != pytest.approx(loc6)
+
+
 class TestSafeLoadmat:
     def test_safe_loadmat_valid_file(self, tmp_path):
         """A valid .mat file with expected keys loads successfully."""

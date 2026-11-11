@@ -77,6 +77,16 @@ def export_r_data(
     savemat(save_path, data)
 
 
+def rmax_fit_half_window(rmax_fit_length: int) -> int:
+    """Return the number of frames on each side of the peak in the Rmax fit.
+
+    The rule ``(L - 1) // 2`` is monotonic in L: an odd L gives a window of
+    exactly L frames, an even L gives L - 1 frames (never more than L).
+    L < 1 gives 0, i.e. no fit (the discrete maximum is used).
+    """
+    return max(0, (int(rmax_fit_length) - 1) // 2)
+
+
 def export_rof_t_data(
     save_path: str,
     radius: np.ndarray,
@@ -97,7 +107,9 @@ def export_rof_t_data(
     fps : float
         Frames per second.
     rmax_fit_length : int
-        Window length for quadratic Rmax fitting (must be odd).
+        Window length L for quadratic Rmax fitting.  The window spans
+        ``(L - 1) // 2`` frames on each side of the discrete peak, so an
+        odd L uses L points and an even L uses L - 1 points.
 
     Returns
     -------
@@ -105,7 +117,7 @@ def export_rof_t_data(
     """
     deltax = um2px
     deltat = 1.0 / fps
-    half = int(round((rmax_fit_length - 1) / 2))
+    half = rmax_fit_half_window(rmax_fit_length)
 
     R = radius.copy().ravel().astype(np.float64)
     t = np.arange(1, len(R) + 1, dtype=np.float64)
