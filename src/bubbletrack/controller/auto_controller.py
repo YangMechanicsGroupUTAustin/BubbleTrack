@@ -54,6 +54,12 @@ class AutoController(BaseController):
         from bubbletrack.model.conventions import display_to_frame
 
         start, end = self.w.left_panel.automatic_tab.get_range()
+        if start > end:
+            self.w.header.set_status(
+                f"Start frame ({start}) must not be after end frame ({end})",
+                "#ef4444",
+            )
+            return
         start_idx = display_to_frame(start)
         end_idx = display_to_frame(end)
 

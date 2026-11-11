@@ -17,6 +17,7 @@ class PostProcessing(QWidget):
     export_r_data_clicked = pyqtSignal()
     export_rof_t_clicked = pyqtSignal()
     generate_report_clicked = pyqtSignal()
+    physical_params_changed = pyqtSignal()  # user edited fps / unit / scale / fit length
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -33,7 +34,7 @@ class PostProcessing(QWidget):
         grid.addWidget(QLabel("FPS:"), 0, 0)
         self._fps_spin = QDoubleSpinBox()
         self._fps_spin.setRange(0.001, 99999)
-        self._fps_spin.setDecimals(1)
+        self._fps_spin.setDecimals(3)  # e.g. 1.25 M must be enterable
         self._fps_spin.setValue(10)
         grid.addWidget(self._fps_spin, 0, 1)
         self._fps_unit = QComboBox()
@@ -101,6 +102,14 @@ class PostProcessing(QWidget):
         for control in self._no_wheel_controls:
             control.installEventFilter(self)
 
+        self._physical_controls = (
+            self._fps_spin, self._fps_unit, self._scale_spin, self._fit_len_spin,
+        )
+        self._fps_spin.valueChanged.connect(self.physical_params_changed)
+        self._fps_unit.currentIndexChanged.connect(self.physical_params_changed)
+        self._scale_spin.valueChanged.connect(self.physical_params_changed)
+        self._fit_len_spin.valueChanged.connect(self.physical_params_changed)
+
     def eventFilter(self, watched, event):
         if watched in self._no_wheel_controls and event.type() == QEvent.Type.Wheel:
             return True
@@ -124,17 +133,23 @@ class PostProcessing(QWidget):
 
     def set_physical_params(self, fps: float, scale: float, fit_length: int) -> None:
         """Set persisted physical parameters without emitting signals."""
-        if fps >= 1_000_000:
-            self._fps_unit.setCurrentText("M")
-            self._fps_spin.setValue(fps / 1_000_000)
-        elif fps >= 1_000:
-            self._fps_unit.setCurrentText("k")
-            self._fps_spin.setValue(fps / 1_000)
-        else:
-            self._fps_unit.setCurrentText("Hz")
-            self._fps_spin.setValue(fps)
-        self._scale_spin.setValue(scale)
-        self._fit_len_spin.setValue(fit_length)
+        for control in self._physical_controls:
+            control.blockSignals(True)
+        try:
+            if fps >= 1_000_000:
+                self._fps_unit.setCurrentText("M")
+                self._fps_spin.setValue(fps / 1_000_000)
+            elif fps >= 1_000:
+                self._fps_unit.setCurrentText("k")
+                self._fps_spin.setValue(fps / 1_000)
+            else:
+                self._fps_unit.setCurrentText("Hz")
+                self._fps_spin.setValue(fps)
+            self._scale_spin.setValue(scale)
+            self._fit_len_spin.setValue(fit_length)
+        finally:
+            for control in self._physical_controls:
+                control.blockSignals(False)
 
     def set_status(self, text: str, success: bool = True):
         colour = "#10b981" if success else "#ef4444"

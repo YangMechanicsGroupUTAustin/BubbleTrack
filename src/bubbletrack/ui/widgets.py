@@ -10,6 +10,14 @@ from PyQt6.QtWidgets import (
 )
 
 
+def _to_ticks(value: float, scale: int) -> int:
+    """Convert a value to integer slider ticks, rounding (not truncating).
+
+    Truncation turned a saved threshold of 0.58 (57.999... ticks) into 57.
+    """
+    return int(round(value * scale))
+
+
 # ------------------------------------------------------------------ #
 # SliderInput  (label + spinbox + slider, synchronised)
 # ------------------------------------------------------------------ #
@@ -45,17 +53,17 @@ class SliderInput(QWidget):
             self._spin.setDecimals(decimals)
         else:
             self._spin = QSpinBox()
-        self._spin.setRange(int(min_val * self._scale), int(max_val * self._scale))
+        self._spin.setRange(_to_ticks(min_val, self._scale), _to_ticks(max_val, self._scale))
         self._spin.setSingleStep(step if decimals > 0 else int(step))
-        self._spin.setValue(int(default * self._scale))
+        self._spin.setValue(_to_ticks(default, self._scale))
         self._spin.setFixedWidth(72)
         layout.addWidget(self._spin)
 
         self._slider = QSlider(Qt.Orientation.Horizontal)
-        self._slider.setRange(int(min_val * self._scale), int(max_val * self._scale))
-        self._slider.setSingleStep(max(1, int(step * self._scale)))
-        self._slider.setPageStep(max(1, int(step * self._scale)))
-        self._slider.setValue(int(default * self._scale))
+        self._slider.setRange(_to_ticks(min_val, self._scale), _to_ticks(max_val, self._scale))
+        self._slider.setSingleStep(max(1, _to_ticks(step, self._scale)))
+        self._slider.setPageStep(max(1, _to_ticks(step, self._scale)))
+        self._slider.setValue(_to_ticks(default, self._scale))
         layout.addWidget(self._slider, 1)
 
         # Sync
@@ -70,7 +78,7 @@ class SliderInput(QWidget):
         self.value_changed.emit(v / self._scale)
 
     def _spin_changed(self, v):
-        iv = int(float(v) * self._scale) if self._decimals > 0 else int(v)
+        iv = _to_ticks(float(v), self._scale) if self._decimals > 0 else int(v)
         self._slider.blockSignals(True)
         self._slider.setValue(iv)
         self._slider.blockSignals(False)
@@ -81,11 +89,11 @@ class SliderInput(QWidget):
         return self._spin.value() / self._scale if self._decimals > 0 else self._spin.value()
 
     def set_value(self, v: float):
-        self._spin.setValue(int(v * self._scale))
+        self._spin.setValue(_to_ticks(v, self._scale))
 
     def set_range(self, lo: float, hi: float):
-        self._spin.setRange(int(lo * self._scale), int(hi * self._scale))
-        self._slider.setRange(int(lo * self._scale), int(hi * self._scale))
+        self._spin.setRange(_to_ticks(lo, self._scale), _to_ticks(hi, self._scale))
+        self._slider.setRange(_to_ticks(lo, self._scale), _to_ticks(hi, self._scale))
 
 
 # ------------------------------------------------------------------ #
@@ -130,15 +138,15 @@ class ToggleSliderInput(QWidget):
         else:
             self._spin = QSpinBox()
             self._spin.setSingleStep(int(step))
-        self._spin.setRange(int(min_val * self._scale), int(max_val * self._scale))
-        self._spin.setValue(int(default * self._scale))
+        self._spin.setRange(_to_ticks(min_val, self._scale), _to_ticks(max_val, self._scale))
+        self._spin.setValue(_to_ticks(default, self._scale))
         self._spin.setFixedWidth(72)
         self._spin.setEnabled(False)
         layout.addWidget(self._spin)
 
         self._slider = QSlider(Qt.Orientation.Horizontal)
-        self._slider.setRange(int(min_val * self._scale), int(max_val * self._scale))
-        self._slider.setValue(int(default * self._scale))
+        self._slider.setRange(_to_ticks(min_val, self._scale), _to_ticks(max_val, self._scale))
+        self._slider.setValue(_to_ticks(default, self._scale))
         self._slider.setEnabled(False)
         layout.addWidget(self._slider, 1)
 
@@ -154,7 +162,7 @@ class ToggleSliderInput(QWidget):
         self.value_changed.emit(v / self._scale)
 
     def _spin_changed(self, v):
-        iv = int(float(v) * self._scale) if self._decimals > 0 else int(v)
+        iv = _to_ticks(float(v), self._scale) if self._decimals > 0 else int(v)
         self._slider.blockSignals(True)
         self._slider.setValue(iv)
         self._slider.blockSignals(False)
@@ -182,7 +190,7 @@ class ToggleSliderInput(QWidget):
         self._check.setChecked(enabled)
         self._spin.setEnabled(enabled)
         self._slider.setEnabled(enabled)
-        iv = int(v * self._scale)
+        iv = _to_ticks(v, self._scale)
         self._spin.setValue(iv)
         self._slider.setValue(iv)
         self._check.blockSignals(False)

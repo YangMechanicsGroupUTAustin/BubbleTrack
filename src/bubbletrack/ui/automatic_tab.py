@@ -107,7 +107,9 @@ class AutomaticTab(QWidget):
 
     # -- Public API --
     def set_range(self, total: int):
+        """Reset the fit range to the full new source (1..total)."""
         self._start_spin.setMaximum(total)
+        self._start_spin.setValue(1)
         self._end_spin.setMaximum(total)
         self._end_spin.setValue(total)
 

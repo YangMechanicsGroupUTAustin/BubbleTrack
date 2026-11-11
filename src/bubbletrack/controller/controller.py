@@ -182,6 +182,7 @@ class AppController:
         pp.export_r_data_clicked.connect(self.export_ctrl.on_export_r_data)
         pp.export_rof_t_clicked.connect(self.export_ctrl.on_export_rof_t)
         pp.generate_report_clicked.connect(self.export_ctrl.on_generate_report)
+        pp.physical_params_changed.connect(self._on_physical_params_changed)
 
         # ROI: button click → enter selection mode, drag complete → apply ROI
         self.w.original_panel.select_roi_clicked.connect(self.pretune_ctrl.on_select_roi)
@@ -226,6 +227,17 @@ class AppController:
             self._state.fps,
             self._state.um2px,
             self._state.rmax_fit_length,
+        )
+
+    def _on_physical_params_changed(self) -> None:
+        """Keep fps / scale / fit length in state so sessions, config and
+        reports record the values the user actually exports with."""
+        pp = self.w.left_panel.post_processing
+        self._state = update_state(
+            self._state,
+            fps=pp.get_fps(),
+            um2px=pp.get_scale(),
+            rmax_fit_length=pp.get_fit_length(),
         )
 
     # ------------------------------------------------------------------ #
@@ -307,6 +319,7 @@ class AppController:
                 area_max_regions=self._state.area_max_regions,
             )
 
+            fit = None
             if edge_xy.shape[0] >= 3:
                 r, rc, cc, count = measure_detection(
                     processed, edge_xy, self._state.detection_mode,
@@ -314,45 +327,37 @@ class AppController:
                 )
                 # Reject fits that exceed max radius
                 if np.isfinite(r) and r > 0 and r <= self._max_radius:
-                    self._state.radius[idx] = r
-                    self._state.circle_fit_par[idx] = [rc, cc]
-                    if self._state.region_count is not None:
-                        self._state.region_count[idx] = count
-                    if self._state.circle_xy is not None:
-                        self._state.circle_xy[idx] = edge_xy
-                else:
-                    self._state.radius[idx] = -1.0
-                    self._state.circle_fit_par[idx] = [np.nan, np.nan]
-                    if self._state.region_count is not None:
-                        self._state.region_count[idx] = 0
-                    if self._state.circle_xy is not None:
-                        self._state.circle_xy[idx] = None
-            else:
-                self._state.radius[idx] = -1.0
-                self._state.circle_fit_par[idx] = [np.nan, np.nan]
+                    fit = (r, rc, cc, count)
+
+            # A failed refit must not destroy the existing (possibly manual) result.
+            previous = float(self._state.radius[idx])
+            if fit is not None:
+                r, rc, cc, count = fit
+                self._state.radius[idx] = r
+                self._state.circle_fit_par[idx] = [rc, cc]
                 if self._state.region_count is not None:
-                    self._state.region_count[idx] = 0
+                    self._state.region_count[idx] = count
                 if self._state.circle_xy is not None:
-                    self._state.circle_xy[idx] = None
-
-            self._refresh_chart()
-
-            # Refresh display if we are viewing the refitted frame
-            if self._state.image_no == idx:
-                display_frame(
-                    self._state, self.w, idx, self._set_state, self._image_cache,
-                )
-
-            r_val = self._state.radius[idx]
-            if r_val > 0:
+                    self._state.circle_xy[idx] = edge_xy
+                self._refresh_chart()
+                if self._state.image_no == idx:
+                    display_frame(
+                        self._state, self.w, idx, self._set_state, self._image_cache,
+                    )
                 self.w.header.set_status(
-                    f"Refit frame {idx + 1}: r = {r_val:.1f} px", "#10b981",
+                    f"Refit frame {idx + 1}: r = {r:.1f} px", "#10b981",
+                )
+            elif previous > 0:
+                self.w.header.set_status(
+                    f"Refit frame {idx + 1}: fit failed, kept previous result "
+                    f"(r = {previous:.1f} px)", "#f59e0b",
                 )
             else:
                 self.w.header.set_status(
                     f"Refit frame {idx + 1}: fit failed", "#f59e0b",
                 )
-            logger.info("Refit frame %d: radius = %s", idx + 1, r_val)
+            logger.info("Refit frame %d: %s", idx + 1,
+                        f"radius = {fit[0]:.3f}" if fit else "failed")
 
         except Exception as exc:
             logger.error("Refit frame %d failed: %s", idx + 1, exc)

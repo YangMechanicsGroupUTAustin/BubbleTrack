@@ -53,16 +53,35 @@ class ManualController(BaseController):
         self._get_max_radius = get_max_radius
         self._undo_stack = UndoStack()
         self._cache = cache
+        self._selecting = False
+        bus.subscribe("frame_changed", self._on_frame_changed)
 
     # -- public handlers -------------------------------------------------- #
 
     def on_manual_select(self) -> None:
         self._manual_points.clear()
         self._undo_stack.clear()
+        self._selecting = True
         self.w.left_panel.manual_tab.set_point_count(0)
         self.w.original_panel.set_mode("point")
         self.w.header.set_status("Click on bubble edge", "#f59e0b")
         self.w.status_bar.update_mode("Manual")
+
+    def _on_frame_changed(self, _idx: int) -> None:
+        """Points belong to the frame they were clicked on: cancel on navigation."""
+        if not self._selecting and not self._manual_points:
+            return
+        self._end_selection()
+        self.w.header.set_status(
+            "Manual selection cancelled: the frame changed", "#f59e0b",
+        )
+
+    def _end_selection(self) -> None:
+        self._selecting = False
+        self._manual_points.clear()
+        self._undo_stack.clear()
+        self.w.left_panel.manual_tab.reset()
+        self.w.original_panel.set_mode("normal")
 
     def on_point_clicked(self, x: float, y: float) -> None:
         """x = col, y = row in scene coordinates."""
@@ -81,6 +100,10 @@ class ManualController(BaseController):
 
     def on_manual_done(self) -> None:
         self.w.original_panel.set_mode("normal")
+        if not self.state.images or self.state.radius is None:
+            self._end_selection()
+            self.w.header.set_status("Load images before fitting", "#ef4444")
+            return
         if len(self._manual_points) < 3:
             self.w.header.set_status("Need at least 3 points", "#ef4444")
             return
@@ -109,8 +132,8 @@ class ManualController(BaseController):
             refresh_chart(self.state, self.w)
             self.w.header.set_status(f"R = {radius:.1f} px", "#10b981")
 
-        self._manual_points.clear()
-        self.w.left_panel.manual_tab.reset()
+        # The fit is committed: Ctrl+Z must not resurrect its points.
+        self._end_selection()
 
     def undo_last_point(self) -> None:
         """Undo the last point click, restoring the previous points list."""
@@ -128,17 +151,15 @@ class ManualController(BaseController):
         logger.info("Undo: %d points remaining", n)
 
     def on_manual_clear(self) -> None:
-        self._manual_points.clear()
-        self._undo_stack.clear()
-        self.w.left_panel.manual_tab.reset()
-        self.w.original_panel.set_mode("normal")
+        self._end_selection()
 
-        # Clear current frame's fit results before redraw
+        # Mark the current frame as unprocessed, using the same sentinels as
+        # everywhere else (-1 / NaN): a 0 radius exported as a 0 um point.
         idx = self.state.image_no
         if self.state.radius is not None:
-            self.state.radius[idx] = 0
+            self.state.radius[idx] = -1.0
         if self.state.circle_fit_par is not None:
-            self.state.circle_fit_par[idx] = [0, 0]
+            self.state.circle_fit_par[idx] = [np.nan, np.nan]
         if self.state.circle_xy is not None:
             self.state.circle_xy[idx] = None
         if self.state.region_count is not None:
@@ -155,5 +176,6 @@ class ManualController(BaseController):
 
     def clear_points(self) -> None:
         """Clear the manual points list (called on tab change)."""
+        self._selecting = False
         self._manual_points.clear()
         self._undo_stack.clear()

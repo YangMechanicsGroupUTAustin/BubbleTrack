@@ -101,8 +101,14 @@ class ManualTab(QWidget):
         self.set_point_count(0)
 
     def set_frame_range(self, total: int):
-        """Set the max frame number for the frame selector."""
+        """Set the max frame number without emitting a frame change.
+
+        Shrinking the maximum clamps the value, which would otherwise emit
+        frame_selected for a frame of the previous source.
+        """
+        self._frame_spin.blockSignals(True)
         self._frame_spin.setMaximum(total)
+        self._frame_spin.blockSignals(False)
         self._frame_total_label.setText(f"/ {total}")
 
     def set_frame_value(self, idx: int):
