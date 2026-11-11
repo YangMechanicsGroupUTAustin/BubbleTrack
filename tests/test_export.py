@@ -7,6 +7,7 @@ import pytest
 from scipy.io import loadmat
 
 from bubbletrack.model.export import (
+    build_export_metadata,
     export_r_data,
     export_rof_t_data,
     locate_rmax,
@@ -409,6 +410,92 @@ class TestMatMetadata:
             export_r_data(  # type: ignore[misc]
                 str(tmp_path / "r.mat"), radius, centers, [None] * 3, None, META,
             )
+
+
+class TestBuildExportMetadata:
+    """Provenance dict assembled from the app state plus panel values."""
+
+    @staticmethod
+    def _state():
+        from bubbletrack.model.state import AppState
+
+        return AppState(
+            folder_path="C:/data/run1",
+            detection_mode="gradient",
+            img_thr=0.42,
+            removing_factor=77,
+            gaussian_sigma=1.5,
+            clahe_clip=2.0,
+            opening_radius=2,
+            closing_radius=3,
+            bubble_cross_edges=(True, False, False, True),
+            gridx=(5, 300),
+            gridy=(7, 400),
+            fps=1.0,   # stale state defaults: the panel values must win
+            um2px=1.0,
+        )
+
+    def test_contains_detection_settings_and_panel_values(self):
+        from datetime import datetime
+
+        stamp = datetime(2026, 11, 11, 9, 30, 0)
+        meta = build_export_metadata(
+            self._state(), fps=2e5, um2px=3.2, rmax_fit_length=9,
+            timestamp=stamp,
+        )
+        expected = {
+            "detection_mode": "gradient",
+            "img_thr": 0.42,
+            "removing_factor": 77,
+            "gaussian_sigma": 1.5,
+            "clahe_clip": 2.0,
+            "opening_radius": 2,
+            "closing_radius": 3,
+            "bubble_cross_edges": [True, False, False, True],
+            "gridx": [5, 300],
+            "gridy": [7, 400],
+            "folder_path": "C:/data/run1",
+            "fps": 2e5,
+            "um2px": 3.2,
+            "rmax_fit_length": 9,
+            "exported_at": "2026-11-11T09:30:00",
+        }
+        for key, value in expected.items():
+            assert meta[key] == value, key
+
+    def test_app_version_and_iso_timestamp(self):
+        from datetime import datetime
+
+        import bubbletrack
+
+        meta = build_export_metadata(
+            self._state(), fps=1e6, um2px=3.2, rmax_fit_length=11,
+        )
+        assert meta["app_version"] == bubbletrack.__version__
+        parsed = datetime.fromisoformat(meta["exported_at"])
+        assert parsed.tzinfo is not None  # local time with UTC offset
+
+    def test_version_falls_back_to_package_metadata(self, monkeypatch):
+        import importlib.metadata
+
+        import bubbletrack
+
+        monkeypatch.delattr(bubbletrack, "__version__")
+        monkeypatch.setattr(importlib.metadata, "version", lambda _name: "9.9.9")
+        meta = build_export_metadata(
+            self._state(), fps=1e6, um2px=3.2, rmax_fit_length=11,
+        )
+        assert meta["app_version"] == "9.9.9"
+
+    def test_round_trips_through_mat_export(self, tmp_path):
+        meta = build_export_metadata(
+            self._state(), fps=1e6, um2px=3.2, rmax_fit_length=11,
+        )
+        out = str(tmp_path / "r.mat")
+        export_r_data(out, np.array([1.0]), np.zeros((1, 2)), [None], metadata=meta)
+        loaded = loadmat(out, simplify_cells=True)["BubbleTrackMeta"]
+        assert loaded["detection_mode"] == "gradient"
+        assert loaded["fps"] == pytest.approx(1e6)
 
 
 class TestSafeLoadmat:

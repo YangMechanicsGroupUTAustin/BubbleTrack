@@ -9,6 +9,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import numpy as np
+import pytest
 
 from bubbletrack.controller import export_controller as ec
 from bubbletrack.event_bus import EventBus
@@ -146,3 +147,71 @@ class TestRofTStatus:
         text, success = panel.statuses[-1]
         assert not success
         assert "Not enough valid frames" in text
+
+
+def _smooth_radius(n: int = 30) -> np.ndarray:
+    t = np.arange(1, n + 1, dtype=float)
+    return 100.0 - 0.05 * (t - n / 2) ** 2
+
+
+class TestExportMetadata:
+    """Every export carries provenance built from state + panel values."""
+
+    def _check_meta(self, meta: dict, panel: _FakePanel) -> None:
+        import bubbletrack
+
+        assert meta["fps"] == pytest.approx(panel.get_fps())
+        assert meta["um2px"] == pytest.approx(panel.get_scale())
+        assert meta["rmax_fit_length"] == panel.get_fit_length()
+        assert meta["detection_mode"] == "intensity"
+        assert meta["app_version"] == bubbletrack.__version__
+        assert meta["exported_at"]
+
+    def test_pixel_mat_export(self, monkeypatch, tmp_path):
+        from scipy.io import loadmat
+
+        panel = _FakePanel(fmt="mat", fps=5e5, scale=2.5, fit_length=7)
+        out = tmp_path / "r.mat"
+        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+
+        ctrl.on_export_r_data()
+
+        meta = loadmat(str(out), simplify_cells=True)["BubbleTrackMeta"]
+        self._check_meta(meta, panel)
+
+    def test_rof_t_mat_export(self, monkeypatch, tmp_path):
+        from scipy.io import loadmat
+
+        panel = _FakePanel(fmt="mat", fps=5e5, scale=2.5, fit_length=7)
+        out = tmp_path / "rt.mat"
+        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+
+        ctrl.on_export_rof_t()
+
+        meta = loadmat(str(out), simplify_cells=True)["BubbleTrackMeta"]
+        self._check_meta(meta, panel)
+
+    def test_csv_export_writes_sidecar(self, monkeypatch, tmp_path):
+        import json
+
+        panel = _FakePanel(fmt="csv", fps=5e5, scale=2.5, fit_length=7)
+        ctrl = _make_controller(
+            monkeypatch, str(tmp_path / "run.csv"), _smooth_radius(), panel,
+        )
+
+        ctrl.on_export_rof_t()
+
+        meta = json.loads((tmp_path / "run.meta.json").read_text(encoding="utf-8"))
+        self._check_meta(meta, panel)
+
+    def test_xlsx_pixel_export_writes_metadata_sheet(self, monkeypatch, tmp_path):
+        from openpyxl import load_workbook
+
+        panel = _FakePanel(fmt="xlsx", fps=5e5, scale=2.5, fit_length=7)
+        out = tmp_path / "run.xlsx"
+        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+
+        ctrl.on_export_r_data()
+
+        rows = list(load_workbook(str(out))["Metadata"].iter_rows(values_only=True))
+        self._check_meta(dict(rows[1:]), panel)

@@ -3,20 +3,27 @@
 from __future__ import annotations
 
 import csv
+import importlib.metadata
 import json
 from collections.abc import Iterator
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 import scipy.io
 from scipy.io import savemat
 
+import bubbletrack
 from bubbletrack.model.constants import (
     DEFAULT_RMAX_FIT_LENGTH,
     RMAX_OUTLIER_NEIGHBOURS,
     RMAX_OUTLIER_TOLERANCE,
 )
+
+if TYPE_CHECKING:
+    from bubbletrack.model.state import AppState
 
 
 def safe_loadmat(filepath: str, expected_keys: frozenset[str]) -> dict:
@@ -122,6 +129,70 @@ def _write_json_sidecar(filepath: str, metadata: dict) -> None:
     with open(_sidecar_path(filepath), "w", encoding="utf-8") as f:
         json.dump(_plain_metadata(metadata), f, indent=2, ensure_ascii=False)
         f.write("\n")
+
+
+def _app_version() -> str:
+    """Return the BubbleTrack version, falling back to package metadata."""
+    version = getattr(bubbletrack, "__version__", None)
+    if version:
+        return str(version)
+    try:
+        return importlib.metadata.version("bubbletrack")
+    except importlib.metadata.PackageNotFoundError:
+        return "unknown"
+
+
+def build_export_metadata(
+    state: AppState,
+    *,
+    fps: float,
+    um2px: float,
+    rmax_fit_length: int,
+    timestamp: datetime | None = None,
+) -> dict:
+    """Assemble provenance metadata for an export.
+
+    Parameters
+    ----------
+    state : AppState
+        Current state; supplies the source path, ROI and detection settings.
+    fps, um2px, rmax_fit_length
+        Post-processing values as shown in the panel (they take precedence
+        over the possibly stale copies in *state*).
+    timestamp : datetime or None
+        Export time; defaults to the current local time.
+
+    Returns
+    -------
+    dict
+        Plain data keyed like the session file.  ``bubble_cross_edges`` is
+        ordered ``[Top, Right, Down, Left]``; ``gridx``/``gridy`` are the
+        1-based inclusive ROI row/column bounds.
+    """
+    stamp = timestamp or datetime.now().astimezone()
+    return _plain_metadata({
+        "app_version": _app_version(),
+        "exported_at": stamp.isoformat(timespec="seconds"),
+        "folder_path": state.folder_path,
+        "video_path": state.video_path,
+        "detection_mode": state.detection_mode,
+        "img_thr": state.img_thr,
+        "removing_factor": state.removing_factor,
+        "gaussian_sigma": state.gaussian_sigma,
+        "clahe_clip": state.clahe_clip,
+        "opening_radius": state.opening_radius,
+        "closing_radius": state.closing_radius,
+        "removing_obj_radius": state.removing_obj_radius,
+        "area_max_regions": state.area_max_regions,
+        "gradient_boundary": state.gradient_boundary,
+        "temporal_refine": state.temporal_refine,
+        "bubble_cross_edges": state.bubble_cross_edges,
+        "gridx": state.gridx,
+        "gridy": state.gridy,
+        "fps": fps,
+        "um2px": um2px,
+        "rmax_fit_length": rmax_fit_length,
+    })
 
 
 def export_r_data(

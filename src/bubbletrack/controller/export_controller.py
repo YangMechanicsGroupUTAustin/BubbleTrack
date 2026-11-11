@@ -13,6 +13,7 @@ from bubbletrack.controller.base import BaseController
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import (
+    build_export_metadata,
     export_csv,
     export_excel,
     export_r_data,
@@ -80,7 +81,7 @@ class ExportController(BaseController):
             return  # user cancelled
 
         try:
-            self._do_export_r_data(path, fmt)
+            self._do_export_r_data(path, fmt, metadata=self._export_metadata(pp))
             logger.info("Export: %s", path)
             pp.set_status(f"Exported: {os.path.basename(path)}", True)
         except Exception as exc:
@@ -106,12 +107,14 @@ class ExportController(BaseController):
             return  # user cancelled
 
         try:
+            metadata = self._export_metadata(pp)
             if fmt in ("csv", "xlsx"):
                 warning = self._do_export_r_data(
                     path, fmt,
                     fps=pp.get_fps(),
                     um2px=pp.get_scale(),
                     rmax_fit_length=pp.get_fit_length(),
+                    metadata=metadata,
                 )
                 logger.info("Export: %s", path)
                 _show_export_success(pp, path, warning)
@@ -123,6 +126,7 @@ class ExportController(BaseController):
                     pp.get_scale(),
                     pp.get_fps(),
                     pp.get_fit_length(),
+                    metadata=metadata,
                 )
                 if ok:
                     logger.info("Export: %s", path)
@@ -199,6 +203,7 @@ class ExportController(BaseController):
         fps: float | None = None,
         um2px: float | None = None,
         rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+        metadata: dict | None = None,
     ) -> str:
         """Dispatch pixel-data export to the correct format handler.
 
@@ -213,6 +218,7 @@ class ExportController(BaseController):
                 um2px=um2px,
                 region_count=self.state.region_count,
                 rmax_fit_length=rmax_fit_length,
+                metadata=metadata,
             )
         if fmt == "xlsx":
             return export_excel(
@@ -223,6 +229,7 @@ class ExportController(BaseController):
                 um2px=um2px,
                 region_count=self.state.region_count,
                 rmax_fit_length=rmax_fit_length,
+                metadata=metadata,
             )
         export_r_data(
             path,
@@ -230,8 +237,18 @@ class ExportController(BaseController):
             self.state.circle_fit_par,
             self.state.circle_xy,
             self.state.region_count,
+            metadata=metadata,
         )
         return ""
+
+    def _export_metadata(self, pp) -> dict:
+        """Provenance for an export: current state plus the panel values."""
+        return build_export_metadata(
+            self.state,
+            fps=pp.get_fps(),
+            um2px=pp.get_scale(),
+            rmax_fit_length=pp.get_fit_length(),
+        )
 
     def _default_export_dir(self) -> str:
         """Return the image folder as default export directory, or home."""
