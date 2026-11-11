@@ -12,6 +12,7 @@ import scipy.io
 from scipy.io import savemat
 
 from bubbletrack.model.constants import (
+    DEFAULT_RMAX_FIT_LENGTH,
     RMAX_OUTLIER_NEIGHBOURS,
     RMAX_OUTLIER_TOLERANCE,
 )
@@ -376,7 +377,11 @@ _FMT_LENGTH = ".4f"
 def _build_header(
     *, has_fps: bool, has_scale: bool, has_region_count: bool = False,
 ) -> list[str]:
-    """Build the column header list for CSV/Excel export."""
+    """Build the column header list for CSV/Excel export.
+
+    New columns are only ever appended, so existing column positions stay
+    stable for downstream scripts.
+    """
     header: list[str] = ["Frame"]
     if has_fps:
         header.append("Time_s")
@@ -385,6 +390,8 @@ def _build_header(
         header.extend(["Radius_um", "Center_Row_um", "Center_Col_um"])
     if has_region_count:
         header.append("Region_Count")
+    if has_fps:
+        header.append("Time_from_Rmax_s")
     return header
 
 
@@ -397,8 +404,12 @@ def _build_cells(
     fps: float | None,
     um2px: float | None,
     region_count: int | None = None,
+    rmax_frame: float | None = None,
 ) -> list[_Cell]:
-    """Build the cells of a single data row for CSV/Excel export."""
+    """Build the cells of a single data row for CSV/Excel export.
+
+    *frame_idx* is 0-based; *rmax_frame* is the 1-based Rmax position.
+    """
     cells: list[_Cell] = [(frame_idx + 1, _FMT_INT)]
     if fps is not None:
         cells.append((frame_idx / fps, _FMT_TIME))
@@ -415,6 +426,9 @@ def _build_cells(
         ])
     if region_count is not None:
         cells.append((region_count, _FMT_INT))
+    if fps is not None and rmax_frame is not None:
+        # Same expression as the RofT .mat ``t``: (frame - RmaxFrame) * dt.
+        cells.append(((frame_idx + 1 - rmax_frame) * (1.0 / fps), _FMT_TIME))
     return cells
 
 
@@ -425,6 +439,7 @@ def _iter_data_rows(
     fps: float | None,
     um2px: float | None,
     region_count: np.ndarray | None,
+    rmax_frame: float | None,
 ) -> Iterator[list[_Cell]]:
     """Yield the cells of every processed frame, skipping ``radius <= 0``."""
     for i in range(len(radius)):
@@ -438,7 +453,47 @@ def _iter_data_rows(
             region_count=(
                 None if region_count is None else int(region_count[i])
             ),
+            rmax_frame=rmax_frame,
         )
+
+
+def _build_table(
+    radius: np.ndarray,
+    circle_fit_par: np.ndarray,
+    *,
+    fps: float | None,
+    um2px: float | None,
+    region_count: np.ndarray | None,
+    rmax_fit_length: int,
+) -> tuple[list[str], Iterator[list[_Cell]], str]:
+    """Return ``(header, rows, warning)`` shared by the CSV and Excel writers.
+
+    With *fps*, Rmax is located by :func:`locate_rmax` (the same estimate
+    as the RofT ``.mat`` export) to fill ``Time_from_Rmax_s``; *warning*
+    carries its caveats, or is empty.
+    """
+    rmax_frame: float | None = None
+    warning = ""
+    if fps is not None:
+        R = np.asarray(radius, dtype=np.float64).ravel()
+        if _valid_frame_mask(R).any():
+            estimate = locate_rmax(R, rmax_fit_length)
+            rmax_frame = estimate.frame
+            warning = " ".join(estimate.warnings)
+        else:
+            rmax_frame = float("nan")  # no valid frame: time is undefined
+
+    header = _build_header(
+        has_fps=fps is not None,
+        has_scale=um2px is not None,
+        has_region_count=region_count is not None,
+    )
+    rows = _iter_data_rows(
+        radius, circle_fit_par,
+        fps=fps, um2px=um2px, region_count=region_count,
+        rmax_frame=rmax_frame,
+    )
+    return header, rows, warning
 
 
 def export_csv(
@@ -449,7 +504,8 @@ def export_csv(
     fps: float | None = None,
     um2px: float | None = None,
     region_count: np.ndarray | None = None,
-) -> None:
+    rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+) -> str:
     """Export results to CSV format.
 
     Parameters
@@ -461,18 +517,32 @@ def export_csv(
     circle_fit_par : (N, 2) array
         Circle centres ``[row, col]``.
     fps : float or None
-        Frames per second.  If provided, a Time_s column is included.
+        Frames per second.  If provided, the Time_s column and a trailing
+        Time_from_Rmax_s column are included.
     um2px : float or None
         Micrometres per pixel.  If provided, physical-unit columns are included.
+    region_count : (N,) int array or None
+        Selected region count per frame; adds a Region_Count column.
+    rmax_fit_length : int
+        Rmax fit window length used for Time_from_Rmax_s.
+
+    Returns
+    -------
+    str
+        Warnings about the Rmax estimate (empty when none, or without fps).
+
+    Notes
+    -----
+    Frame and time conventions: ``Frame`` is the 1-based frame number.
+    ``Time_s = (Frame - 1) / fps``, so the first image is at t = 0.
+    ``Time_from_Rmax_s = (Frame - RmaxFrame) / fps``, where RmaxFrame is
+    the 1-based (possibly fractional) Rmax position from
+    :func:`locate_rmax`; this equals ``t`` of the RofT ``.mat`` export.
     """
-    header = _build_header(
-        has_fps=fps is not None,
-        has_scale=um2px is not None,
-        has_region_count=region_count is not None,
-    )
-    rows = _iter_data_rows(
+    header, rows, warning = _build_table(
         radius, circle_fit_par,
         fps=fps, um2px=um2px, region_count=region_count,
+        rmax_fit_length=rmax_fit_length,
     )
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
@@ -480,6 +550,7 @@ def export_csv(
         writer.writerow(header)
         for cells in rows:
             writer.writerow([format(value, spec) for value, spec in cells])
+    return warning
 
 
 def export_excel(
@@ -490,8 +561,9 @@ def export_excel(
     fps: float | None = None,
     um2px: float | None = None,
     region_count: np.ndarray | None = None,
-) -> None:
-    """Export results to Excel (.xlsx) format.
+    rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+) -> str:
+    """Export results to Excel (.xlsx) format with numeric cells.
 
     Parameters
     ----------
@@ -502,21 +574,31 @@ def export_excel(
     circle_fit_par : (N, 2) array
         Circle centres ``[row, col]``.
     fps : float or None
-        Frames per second.  If provided, a Time_s column is included.
+        Frames per second.  If provided, the Time_s column and a trailing
+        Time_from_Rmax_s column are included.
     um2px : float or None
         Micrometres per pixel.  If provided, physical-unit columns are included.
+    region_count : (N,) int array or None
+        Selected region count per frame; adds a Region_Count column.
+    rmax_fit_length : int
+        Rmax fit window length used for Time_from_Rmax_s.
+
+    Returns
+    -------
+    str
+        Warnings about the Rmax estimate (empty when none, or without fps).
+
+    Notes
+    -----
+    Columns and frame/time conventions are identical to :func:`export_csv`.
     """
     # Lazy import to avoid hard dependency
     from openpyxl import Workbook  # type: ignore[import-untyped]
 
-    header = _build_header(
-        has_fps=fps is not None,
-        has_scale=um2px is not None,
-        has_region_count=region_count is not None,
-    )
-    rows = _iter_data_rows(
+    header, rows, warning = _build_table(
         radius, circle_fit_par,
         fps=fps, um2px=um2px, region_count=region_count,
+        rmax_fit_length=rmax_fit_length,
     )
 
     wb = Workbook()
@@ -528,3 +610,4 @@ def export_excel(
         ws.append([value for value, _spec in cells])
 
     wb.save(filepath)
+    return warning

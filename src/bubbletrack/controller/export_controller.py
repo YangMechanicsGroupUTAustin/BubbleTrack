@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import QFileDialog
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.event_bus import EventBus
+from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import (
     export_csv,
     export_excel,
@@ -106,13 +107,14 @@ class ExportController(BaseController):
 
         try:
             if fmt in ("csv", "xlsx"):
-                self._do_export_r_data(
+                warning = self._do_export_r_data(
                     path, fmt,
                     fps=pp.get_fps(),
                     um2px=pp.get_scale(),
+                    rmax_fit_length=pp.get_fit_length(),
                 )
                 logger.info("Export: %s", path)
-                pp.set_status(f"Exported: {os.path.basename(path)}", True)
+                _show_export_success(pp, path, warning)
                 self.w.status_bar.update_scale(pp.get_scale())
             else:
                 ok, msg = export_rof_t_data(
@@ -196,34 +198,40 @@ class ExportController(BaseController):
         *,
         fps: float | None = None,
         um2px: float | None = None,
-    ) -> None:
-        """Dispatch pixel-data export to the correct format handler."""
+        rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
+    ) -> str:
+        """Dispatch pixel-data export to the correct format handler.
+
+        Returns the exporter's warning message ("" when there is none).
+        """
         if fmt == "csv":
-            export_csv(
+            return export_csv(
                 path,
                 self.state.radius,
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
                 region_count=self.state.region_count,
+                rmax_fit_length=rmax_fit_length,
             )
-        elif fmt == "xlsx":
-            export_excel(
+        if fmt == "xlsx":
+            return export_excel(
                 path,
                 self.state.radius,
                 self.state.circle_fit_par,
                 fps=fps,
                 um2px=um2px,
                 region_count=self.state.region_count,
+                rmax_fit_length=rmax_fit_length,
             )
-        else:
-            export_r_data(
-                path,
-                self.state.radius,
-                self.state.circle_fit_par,
-                self.state.circle_xy,
-                self.state.region_count,
-            )
+        export_r_data(
+            path,
+            self.state.radius,
+            self.state.circle_fit_par,
+            self.state.circle_xy,
+            self.state.region_count,
+        )
+        return ""
 
     def _default_export_dir(self) -> str:
         """Return the image folder as default export directory, or home."""

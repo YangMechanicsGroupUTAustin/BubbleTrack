@@ -120,6 +120,7 @@ class TestExportCSV:
             "Frame", "Time_s",
             "Radius_px", "Center_Row_px", "Center_Col_px",
             "Radius_um", "Center_Row_um", "Center_Col_um",
+            "Time_from_Rmax_s",
         ]
         assert header == expected
 
@@ -157,15 +158,135 @@ class TestExportCSV:
             str(out), radius, centers,
             fps=3000.0, um2px=3.2, region_count=region_count,
         )
+        # Time_from_Rmax_s is appended last; Rmax is the discrete max at
+        # frame 3 (only two valid frames, too few for a parabola).
         expected = (
             b"Frame,Time_s,Radius_px,Center_Row_px,Center_Col_px,"
-            b"Radius_um,Center_Row_um,Center_Col_um,Region_Count\r\n"
+            b"Radius_um,Center_Row_um,Center_Col_um,Region_Count,"
+            b"Time_from_Rmax_s\r\n"
             b"1,0.00000000,12.3457,100.9877,200.1234,"
-            b"39.5061,323.1605,640.3950,2\r\n"
+            b"39.5061,323.1605,640.3950,2,-0.00066667\r\n"
             b"3,0.00066667,20.5000,51.5000,61.2500,"
-            b"65.6000,164.8000,196.0000,1\r\n"
+            b"65.6000,164.8000,196.0000,1,0.00000000\r\n"
         )
         assert out.read_bytes() == expected
+
+    def test_exact_bytes_without_fps(self, tmp_path, full_data):
+        """Without fps there is no time column at all."""
+        radius, centers, region_count = full_data
+        out = tmp_path / "pinned.csv"
+        export_csv(str(out), radius, centers, um2px=3.2, region_count=region_count)
+        expected = (
+            b"Frame,Radius_px,Center_Row_px,Center_Col_px,"
+            b"Radius_um,Center_Row_um,Center_Col_um,Region_Count\r\n"
+            b"1,12.3457,100.9877,200.1234,39.5061,323.1605,640.3950,2\r\n"
+            b"3,20.5000,51.5000,61.2500,65.6000,164.8000,196.0000,1\r\n"
+        )
+        assert out.read_bytes() == expected
+
+
+class TestTimeFromRmax:
+    """Time_from_Rmax_s uses the same Rmax location as the RofT .mat export."""
+
+    @staticmethod
+    def _peak_data():
+        t = np.arange(1, 41, dtype=float)
+        radius = 100.0 - 0.07 * (t - 20.4) ** 2
+        radius[[3, 30]] = -1.0  # failed frames are skipped as rows
+        centers = np.full((40, 2), 50.0)
+        return radius, centers
+
+    def _read_csv(self, path):
+        with open(path, newline="", encoding="utf-8") as f:
+            rows = list(csv.reader(f))
+        return rows[0], rows[1:]
+
+    def test_column_appended_last_when_fps_given(self, tmp_path):
+        radius, centers = self._peak_data()
+        out = str(tmp_path / "t.csv")
+        export_csv(out, radius, centers, fps=1e6, um2px=2.0)
+        header, _ = self._read_csv(out)
+        assert header == [
+            "Frame", "Time_s",
+            "Radius_px", "Center_Row_px", "Center_Col_px",
+            "Radius_um", "Center_Row_um", "Center_Col_um",
+            "Time_from_Rmax_s",
+        ]
+
+    def test_no_column_without_fps(self, tmp_path):
+        radius, centers = self._peak_data()
+        out = str(tmp_path / "t.csv")
+        export_csv(out, radius, centers, um2px=2.0)
+        header, _ = self._read_csv(out)
+        assert "Time_from_Rmax_s" not in header
+
+    def test_matches_rof_t_mat_time(self, tmp_path):
+        from scipy.io import loadmat
+
+        from bubbletrack.model.export import export_rof_t_data
+
+        radius, centers = self._peak_data()
+        fps, fit_length = 2e5, 9
+        csv_path = str(tmp_path / "t.csv")
+        mat_path = str(tmp_path / "t.mat")
+        export_csv(csv_path, radius, centers, fps=fps, rmax_fit_length=fit_length)
+        ok, _ = export_rof_t_data(mat_path, radius, 1.0, fps, fit_length)
+        assert ok
+
+        header, rows = self._read_csv(csv_path)
+        col = header.index("Time_from_Rmax_s")
+        csv_t = np.array([float(r[col]) for r in rows])
+        frames = np.array([int(r[0]) for r in rows])
+
+        mat = loadmat(mat_path)
+        rmax_frame = mat["RmaxTimeLoc"].item() * fps  # 1-based frame position
+        assert rmax_frame == pytest.approx(20.4, abs=1e-6)
+        np.testing.assert_allclose(csv_t, (frames - rmax_frame) / fps, atol=1e-8)
+        # Every CSV time also appears in the MAT t vector.
+        mat_t = mat["t"].ravel()
+        for value in csv_t:
+            assert np.min(np.abs(mat_t - value)) < 1e-8
+
+    def test_fit_length_changes_rmax_location(self, tmp_path):
+        radius = np.array(
+            [50.0, 70.0, 85.0, 95.0, 99.0, 100.0, 97.0, 90.0, 80.0, 65.0, 45.0],
+        )
+        centers = np.zeros((11, 2))
+        a, b = str(tmp_path / "a.csv"), str(tmp_path / "b.csv")
+        export_csv(a, radius, centers, fps=1.0, rmax_fit_length=3)
+        export_csv(b, radius, centers, fps=1.0, rmax_fit_length=5)
+        assert self._read_csv(a)[1] != self._read_csv(b)[1]
+
+    def test_returns_rmax_warnings(self, tmp_path, full_data):
+        radius, centers, _ = full_data
+        msg = export_csv(str(tmp_path / "w.csv"), radius, centers, fps=1.0)
+        assert "boundary" in msg
+        assert export_csv(str(tmp_path / "n.csv"), radius, centers) == ""
+
+    def test_excel_column_is_numeric(self, tmp_path):
+        from openpyxl import load_workbook
+
+        radius, centers = self._peak_data()
+        out = str(tmp_path / "t.xlsx")
+        msg = export_excel(out, radius, centers, fps=1e6)
+        assert msg == ""
+        ws = load_workbook(out).active
+        header = [cell.value for cell in ws[1]]
+        assert header[-1] == "Time_from_Rmax_s"
+        col = header.index("Time_from_Rmax_s") + 1
+        cells = [row[col - 1] for row in ws.iter_rows(min_row=2)]
+        assert all(cell.data_type == "n" for cell in cells)
+        frames = [row[0].value for row in ws.iter_rows(min_row=2)]
+        expected = (np.array(frames) - 20.4) / 1e6
+        np.testing.assert_allclose([c.value for c in cells], expected, atol=1e-12)
+
+    def test_all_invalid_with_fps_is_header_only(self, tmp_path):
+        out = str(tmp_path / "e.csv")
+        msg = export_csv(out, np.array([-1.0, -1.0]), np.zeros((2, 2)), fps=1e6)
+        assert msg == ""
+        header, rows = self._read_csv(out)
+        assert header[-1] == "Time_from_Rmax_s"
+        assert rows == []
 
 
 # ---------------------------------------------------------------------------
@@ -258,6 +379,7 @@ class TestExportExcel:
             "Frame", "Time_s",
             "Radius_px", "Center_Row_px", "Center_Col_px",
             "Radius_um", "Center_Row_um", "Center_Col_um",
+            "Time_from_Rmax_s",
         ]
         assert header == expected
 

@@ -112,6 +112,30 @@ class TestRofTStatus:
         assert "boundary" in text
         assert AMBER in panel._status.style
 
+    def test_csv_passes_panel_values_and_shows_warning(self, monkeypatch, tmp_path):
+        radius = np.array([100.0, 90.0, 80.0, 70.0, 60.0])  # peak at frame 1
+        panel = _FakePanel(fmt="csv", fps=2e5, scale=1.5, fit_length=7)
+        out = tmp_path / "d.csv"
+        ctrl = _make_controller(monkeypatch, str(out), radius, panel)
+        calls = []
+        real_export_csv = ec.export_csv
+
+        def _spy(*args, **kwargs):
+            calls.append(kwargs)
+            return real_export_csv(*args, **kwargs)
+
+        monkeypatch.setattr(ec, "export_csv", _spy)
+
+        ctrl.on_export_rof_t()
+
+        assert out.exists()
+        assert calls[0]["fps"] == 2e5
+        assert calls[0]["um2px"] == 1.5
+        assert calls[0]["rmax_fit_length"] == 7
+        text, _success = panel.statuses[-1]
+        assert text.startswith("Exported with warning: ")
+        assert AMBER in panel._status.style
+
     def test_failure_is_shown_in_red(self, monkeypatch, tmp_path):
         radius = np.array([-1.0, 10.0, -1.0])
         panel = _FakePanel()
