@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from bubbletrack.model.conventions import roi_to_slice
+from bubbletrack.model.folder_scan import ScanResult, scan_folder_report  # noqa: F401  (re-export)
 
 logger = logging.getLogger(__name__)
 
@@ -98,9 +98,6 @@ def imread_unicode(
         return None
 
 
-# Supported extensions in priority order
-_EXTENSIONS = (".tiff", ".tif", ".png", ".jpg", ".jpeg", ".bmp")
-
 # Video file extensions
 VIDEO_EXTS = {".avi", ".mp4", ".mov", ".mkv"}
 
@@ -110,46 +107,16 @@ def is_video_file(path: str) -> bool:
     return Path(path).suffix.lower() in VIDEO_EXTS
 
 
-def _natural_sort_key(s: str):
-    """Sort key that handles embedded numbers naturally."""
-    return [
-        int(part) if part.isdigit() else part.lower()
-        for part in re.split(r"(\d+)", s)
-    ]
-
-
 def scan_folder(folder: str) -> list[str]:
-    """Return sorted image paths from *folder*.
+    """Return the natural-sorted frame paths of *folder*.
 
-    Scans for the first extension group that has files, in priority order
-    (tiff > tif > png > jpg > bmp).  Files are natural-sorted by name.
-
-    Validates that *folder* is an existing directory and skips symlinked
-    files during iteration to avoid following potentially unsafe links.
-    Hidden files (names starting with ``.``) are skipped too: macOS writes
-    ``._<name>`` AppleDouble companions next to every frame on shared or
-    FAT/exFAT drives, and they would otherwise sort first and shift every
-    frame index.
+    Thin wrapper around :func:`~bubbletrack.model.folder_scan.scan_folder_report`
+    for callers that only need the paths: one extension group is loaded
+    (tif/tiff > png > jpg/jpeg > bmp, any letter case), and hidden files and
+    symlinks are skipped.  Use ``scan_folder_report`` to also learn which
+    files were ignored.
     """
-    p = Path(folder).resolve()
-    if not p.is_dir():
-        logger.warning("Not a directory: %s", folder)
-        return []
-
-    for ext in _EXTENSIONS:
-        files = []
-        for f in p.iterdir():
-            if f.name.startswith("."):
-                continue
-            if f.is_symlink():
-                logger.warning("Skipping symlink: %s", f)
-                continue
-            if f.name.lower().endswith(ext):
-                files.append(str(f))
-        if files:
-            files.sort(key=lambda fp: _natural_sort_key(os.path.basename(fp)))
-            return files
-    return []
+    return list(scan_folder_report(folder).images)
 
 
 def detect_bit_depth(path: str) -> int:
