@@ -9,6 +9,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from bubbletrack.model.constants import UINT16_DIVISOR, UINT16_PACKED_DEPTHS
 from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.model.folder_scan import (  # noqa: F401  (re-exported)
     ScanResult,
@@ -186,6 +187,114 @@ class VideoFrameReader:
         self.close()
 
 
+_CV_COLOR_DTYPES = (np.uint8, np.uint16, np.float32)  # types cv2.cvtColor accepts
+_BGR_TO_GRAY_WEIGHTS = np.array([0.114, 0.587, 0.299])  # same weights as cv2
+
+
+def to_grayscale(raw: np.ndarray) -> np.ndarray:
+    """Return the single-channel version of *raw*, keeping its dtype.
+
+    Parameters
+    ----------
+    raw : ndarray
+        2-D grey image (returned as is), or 3-D with 1 (grey), 2 (grey +
+        alpha), 3 (BGR) or 4 (BGRA) channels, as ``cv2.imdecode`` returns
+        them.  Alpha is ignored.
+
+    Returns
+    -------
+    ndarray
+        2-D image of the same dtype.
+
+    Raises
+    ------
+    ImageLoadError
+        For any other layout.
+    """
+    if raw.ndim == 2:
+        return raw
+    channels = raw.shape[2] if raw.ndim == 3 else 0
+    if channels in (1, 2):
+        return raw[:, :, 0]
+    if channels in (3, 4):
+        if raw.dtype in _CV_COLOR_DTYPES:
+            code = cv2.COLOR_BGR2GRAY if channels == 3 else cv2.COLOR_BGRA2GRAY
+            return cv2.cvtColor(raw, code)
+        gray = raw[:, :, :3].astype(np.float64) @ _BGR_TO_GRAY_WEIGHTS
+        return gray.astype(raw.dtype)
+    raise ImageLoadError(f"Unsupported image layout {raw.shape} ({raw.dtype})")
+
+
+def _replace_non_finite(values: np.ndarray) -> np.ndarray:
+    """Return a copy of float *values* with NaN/-inf set to the finite minimum
+    and +inf to the finite maximum (all zeros if nothing is finite).
+    *values* itself is returned when it is already all finite."""
+    finite = np.isfinite(values)
+    if finite.all():
+        return values
+    if not finite.any():
+        return np.zeros_like(values)
+    lo, hi = values[finite].min(), values[finite].max()
+    return np.nan_to_num(values, nan=lo, posinf=hi, neginf=lo)
+
+
+def _counts_divisor(peak: float) -> int:
+    """Divisor that maps camera counts with this peak to 8 bits.
+
+    10-bit (peak <= 1023) -> 4, 12-bit (<= 4095) -> 16, otherwise 16-bit -> 256
+    (see ``UINT16_PACKED_DEPTHS``).
+    """
+    for max_value, divisor in UINT16_PACKED_DEPTHS:
+        if peak <= max_value:
+            return divisor
+    return UINT16_DIVISOR
+
+
+def to_threshold_uint8(gray: np.ndarray) -> np.ndarray:
+    """Convert a 2-D grey frame to the uint8 image used for adaptive thresholding.
+
+    The adaptive-threshold offset is in absolute 8-bit grey levels, so camera
+    data keeps its absolute brightness: a fixed divisor, never a per-frame
+    contrast stretch, which would change the effective threshold from frame
+    to frame as the bubble changes size.
+
+    * ``uint8``: unchanged.
+    * ``uint16`` with frame max > 4095 (real 16-bit data): ``gray / 256``,
+      the original conversion, unchanged bit for bit.
+    * ``uint16`` with max <= 4095 (12-bit) or <= 1023 (10-bit data stored in
+      uint16): divided by 16 or 4 instead, so the frame spans 256 grey
+      levels rather than 16 or 4.  The choice is made per frame.
+    * floats whose finite values all lie in [0, 1]: normalised intensities,
+      multiplied by 255.
+    * other types (floats, signed or 32-bit integers) whose values lie in
+      [0, 65535]: camera counts (e.g. an ImageJ "32-bit" export of 16-bit
+      data), converted exactly like uint16 data with the same peak.
+    * anything else (negative values, or beyond 65535): min-max scaled to
+      [0, 255].
+
+    NaN and inf are replaced by the finite min/max first.  Results are
+    truncated towards zero, like the integer paths always were.  The input
+    is never modified.
+    """
+    if gray.dtype == np.uint8:
+        return gray.astype(np.uint8)
+    if gray.dtype == np.uint16:
+        return (gray / _counts_divisor(int(gray.max()))).astype(np.uint8)
+
+    is_float = np.issubdtype(gray.dtype, np.floating)
+    values = _replace_non_finite(gray.astype(np.float64)) if is_float else gray.astype(np.float64)
+    lo, hi = float(values.min()), float(values.max())
+    if is_float and lo >= 0.0 and hi <= 1.0:
+        scaled = values * 255.0
+    elif lo >= 0.0 and hi <= np.iinfo(np.uint16).max:
+        scaled = values / _counts_divisor(hi)
+    elif hi > lo:
+        scaled = (values - lo) / (hi - lo) * 255.0
+    else:
+        scaled = np.zeros_like(values)
+    return np.clip(scaled, 0.0, 255.0).astype(np.uint8)
+
+
 def normalize_frame(
     raw: np.ndarray,
     sensitivity: float,
@@ -203,7 +312,9 @@ def normalize_frame(
     Parameters
     ----------
     raw : ndarray
-        Raw greyscale image (uint8 or uint16, 2-D).
+        Raw frame: 2-D grey, or 3-D grey / grey+alpha / BGR / BGRA, of any
+        integer or float type (see :func:`to_grayscale` and
+        :func:`to_threshold_uint8`).
     sensitivity : float
         Adaptive threshold sensitivity in [0, 1].  Higher = more white.
     gridx : (row_start, row_end)
@@ -222,9 +333,9 @@ def normalize_frame(
     cur_img_binary_roi : ndarray
         ROI slice of *cur_img_binary*.
     """
-    # Convert to greyscale if needed
-    if raw.ndim == 3:
-        raw = cv2.cvtColor(raw, cv2.COLOR_BGR2GRAY)
+    raw = to_grayscale(raw)
+    if np.issubdtype(raw.dtype, np.floating):
+        raw = _replace_non_finite(raw)
 
     # Normalise to [0, 1]
     img_f = raw.astype(np.float64)
@@ -243,10 +354,7 @@ def normalize_frame(
     block_size = max(block_size, 3)
 
     # For adaptive thresholding we need uint8 input
-    if raw.dtype == np.uint16:
-        raw_8 = (raw / 256).astype(np.uint8)
-    else:
-        raw_8 = raw.astype(np.uint8)
+    raw_8 = to_threshold_uint8(raw)
 
     # Pre-threshold filters
     if gaussian_sigma > 0:
