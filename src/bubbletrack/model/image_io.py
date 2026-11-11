@@ -14,6 +14,45 @@ from bubbletrack.model.conventions import roi_to_slice
 
 logger = logging.getLogger(__name__)
 
+# cv::utils::logging::LOG_LEVEL_ERROR, for builds without cv2.utils.logging.
+_CV_LOG_LEVEL_ERROR = 2
+
+
+def quiet_opencv_logging(cv2_module=cv2) -> bool:
+    """Lower OpenCV's native log level to ERROR.  Never raises.
+
+    The lab camera writes TIFFs without a StripByteCounts tag, so libtiff
+    prints a warning through OpenCV on every single frame read.  Errors are
+    still shown.  An explicit ``OPENCV_LOG_LEVEL`` environment variable wins,
+    so the warnings can be brought back for debugging.
+
+    Parameters
+    ----------
+    cv2_module : module
+        The OpenCV module (injectable for tests).
+
+    Returns
+    -------
+    bool
+        True if the level was changed.
+    """
+    if os.environ.get("OPENCV_LOG_LEVEL"):
+        return False
+    try:
+        cv_logging = getattr(getattr(cv2_module, "utils", None), "logging", None)
+        if cv_logging is not None and hasattr(cv_logging, "setLogLevel"):
+            cv_logging.setLogLevel(cv_logging.LOG_LEVEL_ERROR)
+            return True
+        if hasattr(cv2_module, "setLogLevel"):
+            cv2_module.setLogLevel(_CV_LOG_LEVEL_ERROR)
+            return True
+    except Exception as exc:  # never let log tuning break the import
+        logger.debug("Could not lower the OpenCV log level: %s", exc)
+    return False
+
+
+quiet_opencv_logging()
+
 
 class ImageLoadError(Exception):
     """Raised when an image file cannot be loaded or is corrupted."""
