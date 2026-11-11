@@ -6,11 +6,19 @@ import json
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
+    QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from bubbletrack.ui.edge_options import EdgeOptionsBox
 from bubbletrack.ui.widgets import CollapsibleSection, SliderInput, ToggleSliderInput
+
+_METHODS = (
+    ("Intensity mask", "intensity"),
+    ("Gradient rings", "gradient"),
+    ("Dark region area", "area"),
+    ("Edge (new)", "edge"),
+)
 
 
 class PreTuneTab(QWidget):
@@ -47,6 +55,28 @@ class PreTuneTab(QWidget):
         frame_row.addWidget(self._frame_total_label)
         frame_row.addStretch()
         layout.addLayout(frame_row)
+
+        # -- Detection method --
+        method_row = QHBoxLayout()
+        method_row.addWidget(QLabel("Method:"))
+        self._method_combo = QComboBox()
+        for label, value in _METHODS:
+            self._method_combo.addItem(label, value)
+        self._method_combo.setToolTip(
+            "Intensity mask: threshold + circle fit (classic).\n"
+            "Gradient rings: choose a ring when a dark halo surrounds the bubble.\n"
+            "Dark region area: area-equivalent radius for irregular bubbles.\n"
+            "Edge (new): places the wall at the 50% brightness crossing against a\n"
+            "bubble-free reference frame; no threshold tuning, reports confidence."
+        )
+        self._method_combo.currentIndexChanged.connect(self._on_method_changed)
+        method_row.addWidget(self._method_combo, 1)
+        layout.addLayout(method_row)
+
+        self.edge_box = EdgeOptionsBox()
+        self.edge_box.options_changed.connect(self.filters_changed)
+        self.edge_box.setVisible(False)
+        layout.addWidget(self.edge_box)
 
         # -- Threshold slider --
         self._threshold = SliderInput("Threshold", 0, 100, 50, 1, 0)
@@ -102,6 +132,7 @@ class PreTuneTab(QWidget):
             edge_layout.addWidget(cb)
             self._edge_checks.append(cb)
         layout.addWidget(edge_group)
+        self._edge_group = edge_group
 
         # -- Advanced Filters (collapsible) --
         filters_section = CollapsibleSection("Advanced Filters", collapsed=True)
@@ -139,18 +170,6 @@ class PreTuneTab(QWidget):
             "Removes thin protrusions and spurs on the bubble edge.\n"
             "Radius controls the structuring element size: higher = removes larger spurs."
         )
-        self._gradient_detection = QCheckBox("Gradient Edge Detection")
-        self._gradient_detection.setToolTip(
-            "Use image gradients and circle RANSAC instead of the dark-region mask.\n"
-            "Useful when the bubble and its surrounding shadow are both dark."
-        )
-        self._gradient_detection.toggled.connect(lambda _: self.filters_changed.emit())
-        self._area_detection = QCheckBox("Dark Region Area")
-        self._area_detection.setToolTip(
-            "Segment connected dark regions and calculate an area-equivalent radius."
-        )
-        self._area_detection.toggled.connect(self._on_area_mode_toggled)
-        self._gradient_detection.toggled.connect(self._on_gradient_mode_toggled)
         self._area_regions = QSpinBox()
         self._area_regions.setRange(1, 20)
         self._area_regions.setValue(1)
@@ -162,6 +181,7 @@ class PreTuneTab(QWidget):
         area_row.addStretch()
         area_widget = QWidget()
         area_widget.setLayout(area_row)
+        self._area_widget = area_widget
         self._gradient_boundary = SliderInput(
             "Gradient Ring", 1, 3, 1, 1, 0,
         )
@@ -183,9 +203,7 @@ class PreTuneTab(QWidget):
                   self._close_slider, self._open_slider):
             filters_section.add_widget(s)
             s.value_changed.connect(lambda _: self.filters_changed.emit())
-        filters_section.add_widget(self._gradient_detection)
         filters_section.add_widget(self._gradient_boundary)
-        filters_section.add_widget(self._area_detection)
         filters_section.add_widget(area_widget)
         filters_section.add_widget(self._temporal_refine)
 
@@ -227,6 +245,7 @@ class PreTuneTab(QWidget):
         layout.addWidget(self._quality_label)
 
         layout.addStretch()
+        self._apply_method("intensity")
 
     # -- Public getters --
 
@@ -291,28 +310,33 @@ class PreTuneTab(QWidget):
             "clahe_clip": self._clahe_slider.value(),
             "closing_radius": int(self._close_slider.value()),
             "opening_radius": int(self._open_slider.value()),
-            "detection_mode": (
-                "area" if self._area_detection.isChecked() else
-                "gradient" if self._gradient_detection.isChecked() else "intensity"
-            ),
+            "detection_mode": self._method_combo.currentData(),
+            "edge_definition": self.edge_box.edge_definition(),
+            "edge_polarity": self.edge_box.polarity(),
             "area_max_regions": self._area_regions.value(),
             "gradient_boundary": (self._gradient_boundary.value() - 1) / 2.0,
             "temporal_refine": self._temporal_refine.isChecked(),
         }
 
-    def _on_area_mode_toggled(self, checked: bool) -> None:
-        if checked:
-            self._gradient_detection.blockSignals(True)
-            self._gradient_detection.setChecked(False)
-            self._gradient_detection.blockSignals(False)
+    def _on_method_changed(self, _index: int) -> None:
+        self._apply_method(self._method_combo.currentData())
         self.filters_changed.emit()
 
-    def _on_gradient_mode_toggled(self, checked: bool) -> None:
-        if checked:
-            self._area_detection.blockSignals(True)
-            self._area_detection.setChecked(False)
-            self._area_detection.blockSignals(False)
-        self.filters_changed.emit()
+    def _apply_method(self, mode: str) -> None:
+        """Show only the controls the selected method uses.
+
+        The Edge engine has no threshold, removal, filters or edge flags to
+        tune (clipped arcs are excluded automatically), so they are disabled.
+        """
+        edge = mode == "edge"
+        for widget in (self._threshold, self._removing_factor, self._invert_btn,
+                       self._edge_group, self._gauss_slider, self._clahe_slider,
+                       self._close_slider, self._open_slider):
+            widget.setEnabled(not edge)
+        self.edge_box.setVisible(edge)
+        self._gradient_boundary.setVisible(mode == "gradient")
+        self._area_widget.setVisible(mode == "area")
+        self._autotune_btn.setEnabled(mode == "intensity")
 
     def set_filter_params(self, params: dict) -> None:
         """Set advanced filter controls without emitting signals."""
@@ -326,14 +350,14 @@ class PreTuneTab(QWidget):
             v = params.get(key, 0)
             slider.set_value(v if v > 0 else slider._default, enabled=v > 0)
 
-        self._gradient_detection.blockSignals(True)
-        self._gradient_detection.setChecked(
-            params.get("detection_mode", "intensity") == "gradient"
-        )
-        self._gradient_detection.blockSignals(False)
-        self._area_detection.blockSignals(True)
-        self._area_detection.setChecked(params.get("detection_mode") == "area")
-        self._area_detection.blockSignals(False)
+        mode = params.get("detection_mode", "intensity")
+        index = self._method_combo.findData(mode)
+        self._method_combo.blockSignals(True)
+        self._method_combo.setCurrentIndex(max(index, 0))
+        self._method_combo.blockSignals(False)
+        self.edge_box.set_options(params.get("edge_definition", "steep"),
+                                  params.get("edge_polarity", "dark"))
+        self._apply_method(self._method_combo.currentData())
         self._area_regions.blockSignals(True)
         self._area_regions.setValue(int(params.get("area_max_regions", 1)))
         self._area_regions.blockSignals(False)

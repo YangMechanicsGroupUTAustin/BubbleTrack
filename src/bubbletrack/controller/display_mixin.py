@@ -117,21 +117,27 @@ def display_frame(
         # morphology, so the binary panel was path-dependent — dragging
         # threshold off and back gave a different visual than dragging RF
         # off and back, even though both ended at the same (a, b) state.
-        rf = compute_removing_factor(
-            state.removing_factor,
-            state.gridx, state.gridy,
-        )
-        processed, edge_xy = detect_bubble_with_mode(
-            binary_roi, cur_img_roi, state.detection_mode, state.img_thr,
-            list(state.bubble_cross_edges), rf,
-            state.gridx, state.gridy,
-            state.removing_obj_radius,
-            opening_radius=state.opening_radius,
-            closing_radius=state.closing_radius,
-            gaussian_sigma=state.gaussian_sigma,
-            gradient_boundary=state.gradient_boundary,
-            area_max_regions=state.area_max_regions,
-        )
+        if state.detection_mode == "edge":
+            # The Edge engine has no threshold binary; never show the
+            # intensity-mode mask as if it were its result.
+            processed = np.zeros_like(binary_roi, dtype=bool)
+            edge_xy = np.empty((0, 2))
+        else:
+            rf = compute_removing_factor(
+                state.removing_factor,
+                state.gridx, state.gridy,
+            )
+            processed, edge_xy = detect_bubble_with_mode(
+                binary_roi, cur_img_roi, state.detection_mode, state.img_thr,
+                list(state.bubble_cross_edges), rf,
+                state.gridx, state.gridy,
+                state.removing_obj_radius,
+                opening_radius=state.opening_radius,
+                closing_radius=state.closing_radius,
+                gaussian_sigma=state.gaussian_sigma,
+                gradient_boundary=state.gradient_boundary,
+                area_max_regions=state.area_max_regions,
+            )
         # Apply invert_mask as the final visual step — pure bit flip on the
         # detect_bubble output, so the binary panel mirrors black<->white
         # without affecting the detected edge points or radius.
@@ -220,6 +226,14 @@ def refresh_chart(state: AppState, window) -> np.ndarray | None:
         Quality scores with full-frame indexing (length == len(state.radius)).
         Frames with radius <= 0 have score 0.0.  None if no radius data.
     """
+    if state.radius is not None and state.detection_mode == "edge" \
+            and state.fit_confidence is not None:
+        # The Edge engine scores its own fits; its confidence is the validated
+        # measure (the geometric quality score rates wrong fits highly).
+        frames = np.arange(1, len(state.radius) + 1)
+        scores = np.where(state.radius > 0, state.fit_confidence, 0.0)
+        window.radius_chart.plot_all(frames, state.radius, scores)
+        return scores
     if state.radius is not None:
         frames = np.arange(1, len(state.radius) + 1)
         scores = compute_all_quality_scores(

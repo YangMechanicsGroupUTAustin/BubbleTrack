@@ -9,6 +9,7 @@ import numpy as np
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
+from bubbletrack.controller import edge_support
 from bubbletrack.controller.auto_controller import AutoController
 from bubbletrack.controller.display_mixin import (
     current_source, display_frame, refresh_chart,
@@ -180,6 +181,13 @@ class AppController:
         mt.clear_clicked.connect(self.manual_ctrl.on_manual_clear)
         mt.frame_selected.connect(self.file_ctrl.on_tab_frame_selected)
         self.w.original_panel.point_clicked.connect(self.manual_ctrl.on_point_clicked)
+        self.w.original_panel.point_clicked.connect(self.pretune_ctrl.on_point_clicked)
+        eb = pt.edge_box
+        eb.use_current_reference_clicked.connect(self.pretune_ctrl.on_use_current_as_reference)
+        eb.auto_reference_clicked.connect(self.pretune_ctrl.on_auto_reference)
+        eb.pick_seed_clicked.connect(self.pretune_ctrl.on_pick_seed)
+        eb.clear_seed_clicked.connect(self.pretune_ctrl.on_clear_seed)
+        self.bus.subscribe("source_loaded", lambda _n: self.pretune_ctrl.refresh_edge_labels())
 
         # Tab switching
         lp.tab_bar.tab_changed.connect(self.file_ctrl.on_tab_changed)
@@ -235,7 +243,10 @@ class AppController:
             "area_max_regions": self._state.area_max_regions,
             "gradient_boundary": self._state.gradient_boundary,
             "temporal_refine": self._state.temporal_refine,
+            "edge_definition": self._state.edge_definition,
+            "edge_polarity": self._state.edge_polarity,
         })
+        self.pretune_ctrl.refresh_edge_labels()
 
         self.w.left_panel.post_processing.set_physical_params(
             self._state.fps,
@@ -315,6 +326,9 @@ class AppController:
         if not self._state.images or idx < 0 or idx >= len(self._state.images):
             return
         if self._state.radius is None:
+            return
+        if self._state.detection_mode == "edge":
+            self._edge_refit(idx, FitSource.REFIT)
             return
 
         try:
@@ -409,6 +423,9 @@ class AppController:
                 f"No neighbouring fits for frame {idx + 1}", "#f59e0b",
             )
             return
+        if self._state.detection_mode == "edge":
+            self._edge_refit(idx, FitSource.NEIGHBOR, prior=prior)
+            return
 
         try:
             _, _, cur_img_roi, _ = normalize_source(
@@ -467,6 +484,27 @@ class AppController:
         except Exception as exc:
             logger.error("Neighbor refit frame %d failed: %s", idx + 1, exc)
             self.w.header.set_status(f"Neighbor refit failed: {exc}", "#ef4444")
+
+    def _edge_refit(self, idx: int, source: FitSource, *,
+                    prior: tuple[float, float, float] | None = None) -> None:
+        """Refit one frame with the Edge engine; a rejected fit keeps the old result."""
+        try:
+            fit = edge_support.fit_frame(self._state, idx, self._max_radius, prior=prior)
+        except Exception as exc:
+            logger.error("Edge refit frame %d failed: %s", idx + 1, exc)
+            self.w.header.set_status(f"Refit failed: {exc}", "#ef4444")
+            return
+        if fit.radius > 0:
+            edge_support.store_fit(self._state, idx, fit, source)
+            self._refresh_chart()
+            if self._state.image_no == idx:
+                display_frame(self._state, self.w, idx, self._set_state, self._image_cache)
+        elif self._state.fit_confidence is not None:
+            self._state.fit_confidence[idx] = fit.confidence
+        text, colour = edge_support.status_text(idx, fit)
+        if fit.radius <= 0 and self._state.radius[idx] > 0:
+            text += f"; kept previous result (r = {self._state.radius[idx]:.1f} px)"
+        self.w.header.set_status(text, colour)
 
     def _neighbor_circle_prior(
         self,

@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from bubbletrack.ui.batch_config_dialog import BatchConfigDialog
 
+from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.batch_folder_worker import BatchFolderWorker
 from bubbletrack.controller.display_mixin import (
@@ -101,6 +102,14 @@ class AutoController(BaseController):
         if protected is None:  # user cancelled
             return
 
+        edge_job = None
+        if self.state.detection_mode == "edge":
+            try:
+                edge_job = edge_support.build_job(self.state, self._get_max_radius())
+            except Exception as exc:
+                self.w.header.set_status(f"Cannot prepare Edge fit: {exc}", "#ef4444")
+                return
+
         worker = BatchWorker(
             images=self.state.images,
             start=start_idx,
@@ -121,12 +130,14 @@ class AutoController(BaseController):
             max_radius=self._get_max_radius(),
             video_path=(self.state.video_path
                         if self.state.video_reader is not None else None),
+            edge_job=edge_job,
         )
         # Every slot is bound to *this* worker: results from an older run
         # (e.g. one still draining after Stop) can never reach new arrays.
         worker.progress.connect(partial(self._on_worker_progress, worker))
         worker.frame_done.connect(partial(self._on_worker_frame_done, worker))
         worker.frame_error.connect(partial(self._on_worker_frame_error, worker))
+        worker.frame_meta.connect(partial(self._on_worker_frame_meta, worker))
         worker.finished.connect(partial(self._on_worker_finished, worker))
         worker.error.connect(
             lambda msg: self.w.header.set_status(msg, "#f59e0b"),
@@ -222,6 +233,11 @@ class AutoController(BaseController):
             logger.debug("Ignoring result from a stale worker")
             return
         self._on_auto_frame_done(*result)
+
+    def _on_worker_frame_meta(self, worker, idx: int, confidence: float) -> None:
+        if (worker is self._worker and idx not in self._protected
+                and self.state.fit_confidence is not None):
+            self.state.fit_confidence[idx] = confidence
 
     def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
         if worker is self._worker:

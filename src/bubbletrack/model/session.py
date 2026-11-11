@@ -79,6 +79,10 @@ def save_session(filepath: str, state) -> None:
         "area_max_regions": state.area_max_regions,
         "gradient_boundary": state.gradient_boundary,
         "temporal_refine": state.temporal_refine,
+        "edge_definition": state.edge_definition,
+        "edge_polarity": state.edge_polarity,
+        "reference_frame": state.reference_frame,
+        "edge_seed": list(state.edge_seed) if state.edge_seed is not None else None,
         "um2px": state.um2px,
         "fps": state.fps,
         "rmax_fit_length": state.rmax_fit_length,
@@ -95,6 +99,7 @@ def save_session(filepath: str, state) -> None:
         "fit_source": (
             state.fit_source.tolist() if state.fit_source is not None else None
         ),
+        "fit_confidence": _to_json_array(state.fit_confidence),
     }
     # allow_nan=False guarantees strict JSON (MATLAB's jsondecode rejects NaN)
     Path(filepath).write_text(json.dumps(data, indent=2, allow_nan=False),
@@ -153,6 +158,10 @@ def load_session(filepath: str) -> dict:
             None if xy is None else _from_json_array(xy).reshape(-1, 2)
             for xy in data["circle_xy"]
         ]
+    if data.get("fit_confidence") is not None:
+        data["fit_confidence"] = _from_json_array(data["fit_confidence"])
+    if data.get("edge_seed") is not None:
+        data["edge_seed"] = tuple(float(v) for v in data["edge_seed"])
     if data.get("fit_source") is not None:
         data["fit_source"] = np.array(data["fit_source"], dtype=np.int8)
 

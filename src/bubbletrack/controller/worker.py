@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import FIRST_COMPLETED, ProcessPoolExecutor, wait
+from concurrent.futures import (
+    FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, wait,
+)
 
 import numpy as np
 
@@ -60,6 +62,18 @@ def _process_single_frame(args: tuple):
     return idx, radius, edge_xy, processed, rc, cc, count
 
 
+def _process_single_frame_edge(args: tuple):
+    """Edge-engine counterpart of ``_process_single_frame`` (module-level, picklable).
+
+    Returns the same 7 fields plus the fit confidence.
+    """
+    idx, source, gridx, gridy, job = args
+    from bubbletrack.model.edge_pipeline import fit_edge, read_raw
+
+    fit = fit_edge(read_raw(source), gridx, gridy, job)
+    return (idx, fit.radius, fit.edge_xy, fit.mask, fit.rc, fit.cc, 0, fit.confidence)
+
+
 class BatchWorker(QThread):
     """Process a range of frames in the background using multiple processes.
 
@@ -74,6 +88,11 @@ class BatchWorker(QThread):
     progress = pyqtSignal(int, int)
     frame_done = pyqtSignal(int, float, object, object, float, float, int)
     frame_error = pyqtSignal(int, str)  # (frame_idx, error_message)
+    frame_meta = pyqtSignal(int, float)  # (frame_idx, confidence) — Edge engine only
+
+    # Run frames in this process (threads) instead of a process pool.
+    # Used by tests that inject fakes, and handy when debugging.
+    inline = False
     finished = pyqtSignal()
     error = pyqtSignal(str)
 
@@ -97,8 +116,10 @@ class BatchWorker(QThread):
         area_max_regions: int = 1,
         max_radius: float = float("inf"),
         video_path: str | None = None,
+        edge_job=None,
     ):
         super().__init__()
+        self._edge_job = edge_job  # EdgeJob when detection_mode == "edge"
         self._images = images
         self._video_path = video_path  # decode frames here instead of by path
         self._start = start        # 0-indexed
@@ -123,6 +144,8 @@ class BatchWorker(QThread):
         self._stop = True
 
     def _frame_args(self, i: int, source) -> tuple:
+        if self._edge_job is not None:
+            return (i, source, self._gridx, self._gridy, self._edge_job)
         # Tuple order MUST match _process_single_frame.
         return (
             i, source, self._sensitivity, self._gridx, self._gridy,
@@ -165,7 +188,10 @@ class BatchWorker(QThread):
         max_in_flight = 2 * n_workers
         done_count = 0
         try:
-            with ProcessPoolExecutor(max_workers=n_workers) as pool:
+            executor = ThreadPoolExecutor if self.inline else ProcessPoolExecutor
+            process = (_process_single_frame_edge if self._edge_job is not None
+                       else _process_single_frame)
+            with executor(max_workers=n_workers) as pool:
                 pending: dict = {}
 
                 def submit_next() -> bool:
@@ -178,8 +204,7 @@ class BatchWorker(QThread):
                             done_count += 1
                             self.progress.emit(done_count, total)
                             continue
-                        pending[pool.submit(_process_single_frame,
-                                            self._frame_args(i, source))] = i
+                        pending[pool.submit(process, self._frame_args(i, source))] = i
                         return True
                     return False
 
@@ -191,7 +216,10 @@ class BatchWorker(QThread):
                     for fut in finished:
                         idx = pending.pop(fut)
                         try:
-                            self.frame_done.emit(*fut.result())
+                            result = fut.result()
+                            self.frame_done.emit(*result[:7])
+                            if len(result) > 7:
+                                self.frame_meta.emit(idx, float(result[7]))
                         except Exception as exc:
                             self._emit_failure(idx, exc)
                         done_count += 1

@@ -28,6 +28,8 @@ PERSIST_KEYS: frozenset[str] = frozenset({
     "closing_radius",
     "opening_radius",
     "detection_mode",
+    "edge_definition",
+    "edge_polarity",
     "area_max_regions",
     "gradient_boundary",
     "temporal_refine",
@@ -36,7 +38,9 @@ PERSIST_KEYS: frozenset[str] = frozenset({
     "rmax_fit_length",
 })
 
-DETECTION_MODES: tuple[str, ...] = ("intensity", "gradient", "area")
+DETECTION_MODES: tuple[str, ...] = ("intensity", "gradient", "area", "edge")
+EDGE_DEFINITIONS: tuple[str, ...] = ("steep", "outer")
+EDGE_POLARITIES: tuple[str, ...] = ("dark", "bright")
 
 
 # ------------------------------------------------------------------ #
@@ -116,6 +120,15 @@ def _as_detection_mode(value: Any) -> str:
     return mode
 
 
+def _one_of(choices: tuple[str, ...]) -> Callable[[Any], str]:
+    def check(value: Any) -> str:
+        text = value.strip().lower() if isinstance(value, str) else None
+        if text not in choices:
+            raise ValueError(f"expected one of {', '.join(choices)}")
+        return text
+    return check
+
+
 def _as_gradient_boundary(value: Any) -> float:
     """Ring fraction in [0, 1]; values > 1 are a legacy ring stage 1..3.
 
@@ -137,6 +150,8 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "closing_radius": _int_in(0, 30),                 # Morph Close, 0 = off
     "opening_radius": _int_in(0, 20),                 # Morph Open, 0 = off
     "detection_mode": _as_detection_mode,
+    "edge_definition": _one_of(EDGE_DEFINITIONS),
+    "edge_polarity": _one_of(EDGE_POLARITIES),
     "area_max_regions": _int_in(1, 20),               # Max regions spin box
     "gradient_boundary": _as_gradient_boundary,       # Gradient Ring 1-3
     "temporal_refine": _as_flag,

@@ -57,10 +57,16 @@ class AppState:
     clahe_clip: float = 0.0
     closing_radius: int = 0
     opening_radius: int = 0
-    detection_mode: str = "intensity"  # "intensity" or "gradient"
+    detection_mode: str = "intensity"  # "intensity" | "gradient" | "area" | "edge"
     area_max_regions: int = 1
     gradient_boundary: float = 0.0  # gradient mode ring index: 0/0.5/1 -> 1st/2nd/3rd
     temporal_refine: bool = False  # use neighbouring frames to repair weak fits
+
+    # Edge engine (detection_mode == "edge")
+    edge_definition: str = "steep"  # "steep" (50% of the steep edge) | "outer" extent
+    edge_polarity: str = "dark"  # "dark" bubble on bright background | "bright"
+    reference_frame: int | None = None  # bubble-free frame index; None = auto-select
+    edge_seed: tuple[float, float] | None = None  # (row, col) 1-based, picks the bubble
 
     # Visual binary polarity swap (session-only, NOT persisted across launches).
     # When True, the binary panel displays ``~processed`` instead of
@@ -78,6 +84,7 @@ class AppState:
     circle_xy: object = None       # list of (M, 2) arrays | None
     region_count: object = None     # np.ndarray (N,) number of selected regions
     fit_source: object = None       # np.ndarray (N,) int8 FitSource codes
+    fit_confidence: object = None   # np.ndarray (N,) float, NaN = not scored (Edge engine)
 
     # Display parameters
     img_grayscale_max: int = 65535
@@ -119,6 +126,7 @@ class AppState:
             circle_xy=[None] * n,
             region_count=np.zeros(n, dtype=int),
             fit_source=np.zeros(n, dtype=np.int8),
+            fit_confidence=np.full(n, np.nan),
         )
 
 

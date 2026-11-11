@@ -86,6 +86,8 @@ class ManualController(BaseController):
 
     def on_point_clicked(self, x: float, y: float) -> None:
         """x = col, y = row in scene coordinates."""
+        if not self._selecting:
+            return  # clicks while not selecting belong to someone else (e.g. seed pick)
         new_pt = np.array([y, x])  # row, col
         if is_duplicate_point(new_pt, self._manual_points):
             logger.info("Ignoring duplicate point near (%.1f, %.1f)", x, y)

@@ -18,7 +18,9 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
+from bubbletrack.controller import edge_support
 from bubbletrack.model.frame_source import normalize_source
+from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.quality import compute_fit_quality
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.state import update_state
@@ -79,7 +81,10 @@ class PretuneController(BaseController):
             area_max_regions=p["area_max_regions"],
             gradient_boundary=p["gradient_boundary"],
             temporal_refine=p["temporal_refine"],
+            edge_definition=p["edge_definition"],
+            edge_polarity=p["edge_polarity"],
         )
+        self.refresh_edge_labels()
         self._invalidate_binary_cache()
         if self._cache is not None:
             self._cache.invalidate()
@@ -106,8 +111,8 @@ class PretuneController(BaseController):
         When only removing_factor changes, the cached binary_roi is reused
         to skip the expensive load_and_normalize step.
         """
-        if not self.state.images:
-            return
+        if not self.state.images or self.state.detection_mode == "edge":
+            return  # Edge mode has no threshold preview; use Fit Current Frame
         idx = self.state.image_no
         rf = compute_removing_factor(
             self.state.removing_factor, self.state.gridx, self.state.gridy,
@@ -174,6 +179,67 @@ class PretuneController(BaseController):
             self._cache,
         )
 
+    # -- Edge engine: reference frame and seed -------------------------- #
+
+    def refresh_edge_labels(self) -> None:
+        box = self.w.left_panel.pretune_tab.edge_box
+        if self.state.detection_mode != "edge":
+            return
+        try:
+            box.set_reference_text(edge_support.reference_text(self.state))
+        except Exception as exc:  # unreadable frames while auto-selecting
+            box.set_reference_text(f"Error: {exc}")
+        box.set_seed_text(edge_support.seed_text(self.state))
+
+    def on_use_current_as_reference(self) -> None:
+        if self.state.images:
+            self._update(reference_frame=self.state.image_no)
+            self.refresh_edge_labels()
+
+    def on_auto_reference(self) -> None:
+        self._update(reference_frame=None)
+        self.refresh_edge_labels()
+
+    def on_pick_seed(self) -> None:
+        if not self.state.images:
+            return
+        self._picking_seed = True
+        self.w.original_panel.set_mode("point")
+        self.w.header.set_status("Click once on the bubble", "#f59e0b")
+
+    def on_point_clicked(self, x: float, y: float) -> None:
+        """Scene click (x = col, y = row, 0-based scene); used while picking a seed."""
+        if not getattr(self, "_picking_seed", False):
+            return
+        self._picking_seed = False
+        self.w.original_panel.set_mode("normal")
+        # Scene pixel i spans [i, i+1); its 1-based index coordinate is i + 1.
+        self._update(edge_seed=(y + 0.5, x + 0.5))
+        self.refresh_edge_labels()
+        self.w.header.set_status("Seed set", "#10b981")
+
+    def on_clear_seed(self) -> None:
+        self._update(edge_seed=None)
+        self.refresh_edge_labels()
+
+    def _fit_current_edge(self, idx: int) -> None:
+        try:
+            fit = edge_support.fit_frame(self.state, idx, self._get_max_radius())
+        except Exception as exc:
+            logger.exception("Edge fit failed for frame %d", idx)
+            self.w.header.set_status(f"Error: {exc}", "#ef4444")
+            return
+        edge_support.store_fit(self.state, idx, fit, FitSource.REFIT)
+        if fit.mask is not None:
+            self.w.binary_panel.set_image(fit.mask)
+        redraw_original(self.state, self.w)
+        if fit.radius > 0:
+            self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1")
+            self.w.original_panel.draw_points(fit.edge_xy, "#ef4444", 2.0)
+        refresh_chart(self.state, self.w)
+        self.w.left_panel.pretune_tab.hide_quality()
+        self.w.header.set_status(*edge_support.status_text(idx, fit))
+
     def on_pretune_fit(self) -> None:
         """Detect + fit circle for the current single frame."""
         if not self.state.images:
@@ -181,6 +247,9 @@ class PretuneController(BaseController):
 
         self.w.header.set_status("Fitting...", "#f59e0b")
         idx = self.state.image_no
+        if self.state.detection_mode == "edge":
+            self._fit_current_edge(idx)
+            return
         rf = compute_removing_factor(
             self.state.removing_factor, self.state.gridx, self.state.gridy,
         )
@@ -226,6 +295,8 @@ class PretuneController(BaseController):
                     self.state.circle_xy[idx] = edge_xy
                     if self.state.region_count is not None:
                         self.state.region_count[idx] = count
+                    if self.state.fit_source is not None:
+                        self.state.fit_source[idx] = FitSource.REFIT
 
                     # Clear old overlays before drawing new results
                     redraw_original(self.state, self.w)
