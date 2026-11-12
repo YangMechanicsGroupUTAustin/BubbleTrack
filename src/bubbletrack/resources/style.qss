@@ -133,6 +133,47 @@ QPushButton#dangerBtn {
 QPushButton#dangerBtn:hover {
     background: #dc2626;
 }
+/* An idle Stop button must not shout: outline only, red text kept faint. */
+QPushButton#dangerBtn:disabled {
+    background: transparent;
+    color: #71717a;
+    border: 1px solid rgba(239, 68, 68, 0.25);
+}
+QPushButton#secondaryBtn:disabled {
+    background: #16171f;
+    color: #52525b;
+}
+
+/* ---------- Segmented control (image view modes) ---------- */
+QPushButton#segmentBtn {
+    background: #1a1b23;
+    color: #a1a1aa;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 0;
+    padding: 3px 14px;
+    min-height: 22px;
+    font-weight: 600;
+}
+QPushButton#segmentBtn[segment="first"] {
+    border-top-left-radius: 6px;
+    border-bottom-left-radius: 6px;
+}
+QPushButton#segmentBtn[segment="last"] {
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+QPushButton#segmentBtn[segment="single"] {
+    border-radius: 6px;
+}
+QPushButton#segmentBtn:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #e4e4e7;
+}
+QPushButton#segmentBtn:checked {
+    background: #6366f1;
+    color: #ffffff;
+    border: 1px solid #6366f1;
+}
 QPushButton#successBtn {
     background: #10b981;
 }
@@ -284,6 +325,67 @@ QWidget#TabBar QPushButton:hover {
     color: #a1a1aa;
 }
 
+/* ---------- Pinned Pre-tune actions (below the scrolling sidebar) ---------- */
+QWidget#PinnedFooter {
+    background: #13141b;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+QWidget#PinnedFooter QWidget#pinnedActions {
+    background: transparent;
+}
+
+/* ---------- Images / chart splitter ---------- */
+QSplitter#contentSplitter::handle {
+    background: transparent;
+}
+QSplitter#contentSplitter::handle:hover {
+    background: rgba(99, 102, 241, 0.35);
+    border-radius: 2px;
+}
+
+/* ---------- Frame counter ---------- */
+QLabel#frameLabel {
+    color: #e4e4e7;
+    font-weight: 600;
+}
+
+/* ---------- Key-frame filmstrip ---------- */
+QWidget#Filmstrip {
+    background: #0f1117;
+}
+QWidget#Filmstrip QScrollArea, QWidget#FilmstripStrip {
+    background: transparent;
+}
+QPushButton#filmstripToggle {
+    background: transparent;
+    color: #a1a1aa;
+    border: none;
+    text-align: left;
+    padding: 2px 4px;
+    min-height: 18px;
+    font-weight: 600;
+}
+QToolButton#thumbBtn {
+    background: transparent;
+    color: #a1a1aa;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    padding: 2px;
+    font-size: 10px;
+}
+QToolButton#thumbBtn:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    color: #e4e4e7;
+}
+QToolButton#thumbBtn:checked {
+    border: 1px solid #818cf8;
+    color: #e4e4e7;
+}
+QPushButton#filmstripToggle:hover {
+    color: #e4e4e7;
+}
+
 /* ---------- Scroll area ---------- */
 QScrollArea {
     border: none;
@@ -368,6 +470,7 @@ QPushButton#sidebarToggle {
     background: #13141b;
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 0;
+    padding: 0;
     min-width: 20px;
     max-width: 20px;
     color: #71717a;
