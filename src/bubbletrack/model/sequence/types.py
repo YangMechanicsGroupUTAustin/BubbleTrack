@@ -20,12 +20,12 @@ SOURCE_NONE = "none"          # no bubble: before nucleation, after a cloud, or 
 SOURCES = (SOURCE_RAW, SOURCE_TRACKED, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE)
 
 FLAG_DISAGREE = "disagree"            # the solution differs from the single-frame result (or the two passes differ)
-FLAG_REACQUIRED = "reacquired"        # first accepted frame after a loss
+FLAG_REACQUIRED = "reacquired"        # first accepted frame after a loss or a cloud (a re-formed bubble)
 FLAG_LOST = "lost"
 FLAG_COLLAPSE = "collapse"            # a collapse (radius minimum) frame
 FLAG_LOW_CONFIDENCE = "low_confidence"
 FLAG_JUMP = "jump"                    # accepted outside the tight gate (sudden change)
-FLAG_CLOUD = "cloud"                  # post-collapse fragment cloud: tracking stopped
+FLAG_CLOUD = "cloud"                  # post-collapse fragment cloud: no bubble until one re-forms
 
 RAW_REVIEW_FLAGS = ("fragmented", "non_circular", "clipped_completed")
 CONTEXT_FLAGS = frozenset({"fragmented", "clipped_completed", "shoulder"})

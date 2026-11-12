@@ -19,14 +19,14 @@ from bubbletrack.model.sequence.types import (
 
 REASON_WEIGHT = {
     FLAG_LOST: 100.0,          # no verified measurement
-    FLAG_REACQUIRED: 80.0,     # first frame after a loss: may be another object
+    FLAG_REACQUIRED: 80.0,     # first frame after a loss or a cloud: may be another object
     FLAG_JUMP: 70.0,           # accepted only by the wide gate
     FLAG_LOW_CONFIDENCE: 60.0,
     FLAG_DISAGREE: 50.0,       # the single-frame result was replaced (or the passes differ)
     "fragmented": 40.0,
     "non_circular": 35.0,
     "clipped_completed": 30.0,
-    FLAG_CLOUD: 20.0,          # where tracking stopped
+    FLAG_CLOUD: 20.0,          # where a cloud starts (tracking pauses)
     FLAG_COLLAPSE: 10.0,       # collapse frame or its neighbour
 }
 _EXTRA_REASON_BONUS = 1.0

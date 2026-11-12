@@ -164,13 +164,56 @@ def test_a_persistent_weak_residual_bubble_is_not_a_cloud():
     assert not any("cloud" in f.flags for f in res.frames)
 
 
-@pytest.mark.xfail(reason="fragments now count as a cloud only around a main body below "
-                          "cloud_radius_frac x Rmax (real-data trade-off); this cloud reports R 12 "
-                          "of Rmax 50. Follow-up in progress", strict=True)
 def test_fragmented_observations_after_a_collapse_are_a_cloud():
+    """R 12 of Rmax 50, confidence 0.4: not small, not weak, but its centre hops between frames."""
     truth, junk = _cloud_world(fragmented=True)
     res = solve_sequence(observe(truth, replace=junk), ScriptedDetector(truth, elsewhere=junk))
     assert all(res.frames[i].source == "none" and "cloud" in res.frames[i].flags for i in range(38, 44))
+
+
+def test_a_small_steady_bubble_among_debris_is_not_a_cloud():
+    """After the collapse a residual bubble (R 6, below 0.15 x Rmax 50) stays put among debris: the
+    engine flags it ``fragmented`` and the single-frame result picks a debris particle 22 px away.
+    One body persists on the track, so this is no cloud (LIC 06: a later pulse on a wall)."""
+    truth = truth_track(rayleigh_radii(60, [(-1, 27, 50.0)], floor=6.0))
+    debris = {i: Observation(5.0, 125.0, 222.0, 0.01, {"fragmented"}) for i in range(35, 60)}
+    body = {i: Observation(6.0, 125.0, 200.0, 0.3, {"fragmented"}) for i in debris}
+    res = solve_sequence(observe(truth, replace=debris), ScriptedDetector(truth, overrides=body))
+    assert not any("cloud" in f.flags for f in res.frames)
+    assert all(close(res.frames[i], truth[i]) for i in range(35, 60))
+
+
+def test_a_bubble_that_reforms_after_a_cloud_is_tracked_again():
+    """Collapse at 26, fragments for five frames, then a bubble at the same place (LIC 05: the cloud
+    re-condenses; or the next pulse).  The cloud ends where two confident raw frames show one body;
+    tracking restarts there, as a new lifetime, without re-detecting inside the cloud."""
+    radii = rayleigh_radii(50, [(-1, 27, 50.0), (31, 18, 30.0)], floor=1.8)
+    radii[27:32] = NAN
+    truth = truth_track(radii)
+    angles = (0.0, 2.5, 5.0, 1.2, 3.7)                  # fragments hop around a 12 px ring
+    junk = {27 + k: Observation(3.0, 125 + 12 * np.sin(a), 200 + 12 * np.cos(a), 0.1) for k, a in enumerate(angles)}
+    det = ScriptedDetector(truth, elsewhere=junk)
+    res = solve_sequence(observe(truth, replace=junk), det)
+    assert all(res.frames[i].source == "none" and "cloud" in res.frames[i].flags for i in range(27, 32))
+    assert res.frames[32].source == "raw" and "reacquired" in res.frames[32].flags
+    assert all_correct(res, truth)
+    assert 26 in res.collapse_frames
+    assert res.frames[20].cycle == 0 and res.frames[40].cycle == 1
+    assert not [i for i, _ in det.calls if 30 <= i <= 31]
+
+
+def test_a_long_lost_small_bubble_is_not_declared_a_cloud():
+    """A weak residual bubble (never confident enough to accept) is missed for three frames long after
+    the collapse.  After ``max_redetect_coast`` lost frames the track's last radius is stale, so the
+    frames stay lost instead of ending the track (LIC hard 04: a small bubble drifting for 190 frames)."""
+    truth = truth_track(rayleigh_radii(60, [(-1, 27, 50.0)], floor=6.0))
+    rng = np.random.default_rng(5)
+    weak = {i: Observation(6.0, 125.0 + rng.normal(0, 0.3), 200.0 + rng.normal(0, 0.3), 0.05) for i in range(27, 60)}
+    weak.update({i: Observation(4.0, 30.0, 350.0, 0.0) for i in (45, 46, 47)})   # missed: something far away
+    det = ScriptedDetector(truth, overrides={i: ScriptedDetector.nothing() for i in weak})
+    res = solve_sequence(observe(truth, replace=weak), det)
+    assert not any("cloud" in f.flags for f in res.frames)
+    assert all(res.frames[i].source == "lost" for i in weak)
 
 
 def test_small_weak_frames_without_a_collapse_are_not_a_cloud():

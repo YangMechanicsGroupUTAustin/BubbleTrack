@@ -56,13 +56,15 @@ class SequenceConfig:
     wide_confidence: float = 0.3
     """Minimum confidence to accept an observation inside the wide gate (flag ``jump``)."""
     reacquire_confidence: float = 0.5
-    """Minimum confidence of a raw observation accepted by the wide gate (sudden jump, re-acquisition)."""
+    """Minimum confidence of a raw observation accepted by the wide gate (sudden jump, re-acquisition),
+    and of the two consecutive raw detections of one body that end a cloud (a bubble re-formed)."""
     refine_below_confidence: float = 0.0
     """Also re-detect a raw observation that passes the tight gate with a confidence below this,
     keeping the more confident of the two.  Off by default: on the LIC sets it costs about
     +50 % redetect calls for one more correct labelled frame in 417."""
     max_redetect_coast: int = 8
-    """After this many consecutive lost frames ``redetect`` is no longer called (raw re-acquisition only)."""
+    """After this many consecutive lost frames ``redetect`` is no longer called (raw re-acquisition only),
+    and the track's last radius no longer counts as cloud evidence (it is stale)."""
 
     # ---- collapse release -------------------------------------------------
     release_ratio: float = 0.75
@@ -75,9 +77,12 @@ class SequenceConfig:
 
     # ---- cloud termination ------------------------------------------------
     cloud_radius_frac: float = 0.15
-    """After a collapse, radii below this fraction of the pass's Rmax count as cloud-like ..."""
+    """After a collapse, a tracked body below this fraction of the bubble's Rmax is fragment evidence,
+    as is a ``fragmented`` flag on the tracked body (of any size); a frame with such evidence is
+    cloud-like when no body near the track stays put since the previous frame ..."""
     cloud_frames: int = 3
-    """... and this many consecutive cloud-like frames stop the track (frames become ``none``)."""
+    """... and this many consecutive cloud-like frames are a fragment cloud: the frames become ``none``
+    until a bubble re-forms."""
     low_confidence: float = 0.3
     """Accepted frames below this confidence are flagged ``low_confidence``."""
 

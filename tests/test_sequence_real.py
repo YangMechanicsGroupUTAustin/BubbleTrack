@@ -18,6 +18,18 @@ Measured at the port (engine edge-1.0.0), single frame -> solved:
   rejected; review list 1111 frames; 293 redetect calls for 2045 frames.
 * solver cost without redetect 0.03-0.2 ms / frame.  Whole module: about 70 s (8 processes).
 
+Engine edge-1.1.0 (region layer: ``fragmented`` also marks debris and satellites within ~2 R),
+after the cloud rule was made size-free and persistence-based (fragments count only on the
+tracked body; a cloud lasts until a bubble re-forms), single frame -> solved, every recording
+no worse than single frame:
+
+* example_1: collapses 43 and 75; 0 redetect calls; review list 6 frames.
+* lic: 203 -> 204 / 235 correct; no-bubble frames rejected 77/85 -> 78/85 (05: the microbubble
+  ring, labelled N, re-forms as a confident body after its cloud, as in the single-frame
+  result); review list 1175 frames; 195 redetect calls.
+* lic_hard: 81 -> 81 / 182 correct; 30/31 -> 30/31 rejected; review list 1799 frames;
+  227 redetect calls.
+
 Most remaining misses are frames where no circle the engine can produce agrees with the
 label (with a perfect prior, the engine fixes 9 of the 57 wrong labelled frames).
 """
@@ -147,9 +159,6 @@ def _report(title: str, rows: dict) -> dict:
     return tot
 
 
-CLOUD_NOTE = ("engine edge-1.1.0 flags debris as fragments: the solver declares a cloud on later, smaller pulses (lic 05/06, lic_hard 04); follow-up in progress")
-
-
 def test_example_1_has_no_gross_errors_and_both_collapses():
     folder = ROOT.parent / "example_1"
     if not folder.is_dir():
@@ -176,10 +185,9 @@ def test_lic_no_regression_against_single_frame():
         jobs.append((name, str(folder), labels["reference_frame_index"], info["seed"], lab, labels["criterion"]))
     tot = _report("lic", _run_set(jobs))
     assert tot["b"] == 235
-    assert tot["app"] >= tot["before"] >= 200
+    assert tot["after"] >= tot["before"] >= 200
+    assert tot["app"] >= tot["before"]
     assert tot["rej_after"] >= tot["rej_before"]
-    if tot["after"] < tot["before"]:
-        pytest.xfail(CLOUD_NOTE)
 
 
 def test_lic_hard_no_regression_against_single_frame():
@@ -193,7 +201,6 @@ def test_lic_hard_no_regression_against_single_frame():
         jobs.append((name, str(folder), info["reference_index"], info["seed"], lab, labels["criterion"]))
     tot = _report("lic_hard", _run_set(jobs))
     assert tot["b"] == 182
+    assert tot["after"] >= tot["before"]
     assert tot["app"] >= tot["before"]
     assert tot["rej_after"] >= tot["rej_before"]
-    if tot["after"] < tot["before"]:
-        pytest.xfail(CLOUD_NOTE)
