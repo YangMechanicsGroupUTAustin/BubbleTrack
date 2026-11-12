@@ -219,7 +219,7 @@ class TestActions:
     def test_session_load_rebuilds_the_queue(self, review, make_sequence, tmp_path):
         _, controller, rc = review
         state = _flag(controller, rc, f3=0.1)
-        state.fit_flags[6] = frozenset({"fragmented"})
+        state.fit_flags[6] = frozenset({"non_circular"})
         path = tmp_path / "s.brt"
         assert controller.save_session_file(str(path))
         controller.file_ctrl.on_folder_selected(str(make_sequence("B", 4)))

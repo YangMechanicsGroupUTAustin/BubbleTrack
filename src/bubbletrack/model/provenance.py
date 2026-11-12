@@ -16,3 +16,4 @@ class FitSource(IntEnum):
     MANUAL = 2  # user-clicked edge points
     REFIT = 3  # single-frame refit from the chart menu or Fit Current Frame
     NEIGHBOR = 4  # refit with a circle prior from neighbouring frames
+    TRACKED = 5  # re-measured by the sequence solver near its tracked circle

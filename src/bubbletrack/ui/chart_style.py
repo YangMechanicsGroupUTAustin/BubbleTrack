@@ -32,14 +32,15 @@ SOURCE_SYMBOLS: dict[int, str] = {
     int(FitSource.MANUAL): "d",
     int(FitSource.REFIT): "s",
     int(FitSource.NEIGHBOR): "t1",
+    int(FitSource.TRACKED): "h",
 }
 LOCKED_SYMBOL = "star"
-SYMBOL_SIZES = {"o": 9, "d": 11, "s": 9, "t1": 11, "star": 14}
+SYMBOL_SIZES = {"o": 9, "d": 11, "s": 9, "t1": 11, "h": 10, "star": 14}
 
 # (glyph, label) pairs for the legend, in display order.
 SHAPE_LEGEND: tuple[tuple[str, str], ...] = (
     ("●", "auto"), ("◆", "manual"), ("■", "refit"),
-    ("▲", "neighbour"), ("★", "locked"),
+    ("▲", "neighbour"), ("⬢", "tracked"), ("★", "locked"),
 )
 
 

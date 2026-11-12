@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import QDockWidget, QMenu
 
 from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.sequence import CONTEXT_FLAGS
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.review_panel import ReviewEntry, ReviewPanel, item_text
 from bubbletrack.ui.shortcuts import ReviewShortcuts
@@ -46,6 +47,9 @@ REASON_WEIGHTS: dict[str, int] = {
 }
 UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
 REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
+# Routine engine flags: they describe a listed frame and add to its rank, but
+# never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
+CONTEXT_REASONS = CONTEXT_FLAGS
 
 MANUAL_TAB = MANUAL  # TabBar name of the Manual tab
 _OK, _WARN = "#10b981", "#f59e0b"
@@ -80,6 +84,7 @@ def build_review_items(state: AppState, extra: Iterable[ReviewItem] | None = Non
     added = _merge_extra(extra, n)
     items = [_make_item(f, own.get(f, ()), added.get(f), float(conf[f]))
              for f in sorted(set(own) | set(added)) if not locked[f]]
+    items = [item for item in items if not CONTEXT_REASONS.issuperset(item.reasons)]
     return sorted(items, key=lambda item: (-item.severity, item.frame))
 
 
@@ -197,6 +202,7 @@ class ReviewController:
         self.panel = panel
         self.dock = dock
         self._extra: tuple[ReviewItem, ...] = ()
+        self._extra_keys: dict[int, tuple] = {}  # frame -> result the item was made for
         self._dismissed: dict[int, tuple] = {}  # frame -> result it was skipped with
         self._running = False
         # (frame, its edge points before, queue order) while a Manual fit runs
@@ -229,14 +235,25 @@ class ReviewController:
         return self.panel.count()
 
     def set_extra(self, items: Iterable[ReviewItem]) -> None:
-        """Merge another review list (e.g. the sequence solver's) and refresh."""
-        self._extra = tuple(items)
+        """Merge another review list (e.g. the sequence solver's) and refresh.
+
+        Each item holds for the result it was made from: once its frame is
+        refitted, fixed or deleted, the item is dropped.
+        """
+        state = self._state()
+        n = 0 if state.radius is None else len(state.radius)
+        self._extra = tuple(item for item in items if 0 <= item.frame < n)
+        self._extra_keys = {item.frame: self._result_key(state, item.frame)
+                            for item in self._extra}
         self.refresh()
 
     def refresh(self) -> None:
         """Rebuild the queue from the current results (cheap; no-op if unchanged)."""
         state = self._state()
-        items = [item for item in build_review_items(state, self._extra)
+        extra = [item for item in self._extra if state.radius is not None
+                 and item.frame < len(state.radius)
+                 and self._extra_keys.get(item.frame) == self._result_key(state, item.frame)]
+        items = [item for item in build_review_items(state, extra)
                  if not self._is_dismissed(state, item.frame)]
         self.panel.set_entries([ReviewEntry(item.frame, item_text(item, state.images),
                                             item.severity) for item in items])
@@ -362,6 +379,7 @@ class ReviewController:
     def _on_source_loaded(self, _n: int) -> None:
         self._dismissed.clear()
         self._extra = ()
+        self._extra_keys = {}
         self._manual_pending = None
         self.refresh()
 

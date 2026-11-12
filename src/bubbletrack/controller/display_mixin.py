@@ -17,6 +17,7 @@ from bubbletrack.model.export import locate_rmax
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
 from bubbletrack.model.removing_factor import compute_removing_factor
+from bubbletrack.model.sequence import detect_cycles
 from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.image_compare import CompareMode, create_overlay, create_wipe
 
@@ -279,6 +280,7 @@ def refresh_chart(state: AppState, window) -> np.ndarray | None:
         chart.set_rmax_info(None)
     else:
         chart.set_rmax_info(*rmax)
+    chart.set_cycles(detect_cycles(state.radius)[0])  # collapse lines (~1 ms / 1k frames)
     return scores
 
 

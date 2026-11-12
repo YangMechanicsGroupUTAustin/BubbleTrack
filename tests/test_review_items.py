@@ -56,11 +56,20 @@ class TestRules:
         state = _state([40.0, 41.0, 42.0, 43.0], conf=[0.9] * 4)
         state.fit_flags[1] = frozenset({"non_circular", "no_reference"})
         state.fit_flags[2] = frozenset({"no_reference", "low_snr"})
-        state.fit_flags[3] = frozenset({"fragmented", "shoulder"})
+        state.fit_flags[3] = frozenset({"fragmented", "shoulder", "non_circular"})
         items = _by_frame(build_review_items(state))
         assert set(items) == {1, 3}
         assert items[1].reasons == ("non_circular",)
-        assert items[3].reasons == ("fragmented", "shoulder")  # most severe first
+        assert items[3].reasons == ("non_circular", "fragmented", "shoulder")  # most severe first
+        assert items[3].severity > items[1].severity  # context adds to the rank
+
+    def test_context_reasons_alone_do_not_list_a_frame(self):
+        state = _state([40.0, 41.0, 42.0], conf=[0.9] * 3)
+        state.fit_flags[0] = frozenset({"fragmented"})
+        state.fit_flags[1] = frozenset({"clipped_completed", "shoulder"})
+        state.fit_flags[2] = frozenset({"fragmented"})
+        extra = [ReviewItem(2, ("collapse",), 0)]
+        assert _frames(build_review_items(state, extra)) == [2]
 
     def test_sequence_flags_are_accepted(self):
         state = _state([40.0] * 4, conf=[0.9] * 4)
@@ -111,8 +120,8 @@ class TestOrderingAndMerge:
     def test_most_likely_wrong_first_then_by_frame(self):
         state = _state([40.0, 40.0, -1.0, 40.0, 40.0, 40.0],
                        conf=[0.9, 0.45, 0.1, 0.05, 0.9, 0.9])
-        state.fit_flags[0] = frozenset({"shoulder"})
-        state.fit_flags[4] = frozenset({"shoulder"})
+        state.fit_flags[0] = frozenset({"non_circular"})
+        state.fit_flags[4] = frozenset({"non_circular"})
         items = build_review_items(state)
         assert _frames(items) == [2, 3, 1, 0, 4]
         severities = [i.severity for i in items]

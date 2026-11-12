@@ -19,6 +19,7 @@ from bubbletrack.controller.batch_folder_worker import BatchFolderWorker
 from bubbletrack.controller.display_mixin import (
     current_source, display_frame, refresh_chart,
 )
+from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
@@ -46,6 +47,7 @@ class AutoController(BaseController):
                  get_max_radius, cache: ImageCache | None = None) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._worker: BatchWorker | None = None
+        self._tracker: TrackingWorker | None = None
         self._batch_worker: BatchFolderWorker | None = None
         self._running = False
         self._batch_running = False
@@ -62,6 +64,8 @@ class AutoController(BaseController):
         self._frame_errors = 0
         self._frames_done = 0
         self._autosave_failed = False
+        self._edge_job = None  # the run's EdgeJob, reused by tracking
+        self._run_notes: list[str] = []  # e.g. what tracking changed
 
     # -- run state -------------------------------------------------------- #
 
@@ -71,7 +75,7 @@ class AutoController(BaseController):
 
     def stop_and_wait(self, timeout_ms: int = 10_000) -> None:
         """Stop any running worker and wait for its thread to exit."""
-        for worker in (self._worker, self._batch_worker):
+        for worker in (self._worker, self._tracker, self._batch_worker):
             if worker is not None and worker.isRunning():
                 worker.request_stop()
                 worker.wait(timeout_ms)
@@ -159,6 +163,9 @@ class AutoController(BaseController):
         )
 
         self._worker = worker
+        self._tracker = None
+        self._edge_job = edge_job
+        self._run_notes = []
         self._protected = protected
         self._stop_requested = False
         self._frame_errors = 0
@@ -178,6 +185,8 @@ class AutoController(BaseController):
         if self._worker:
             self._stop_requested = True
             self._worker.request_stop()
+            if self._tracker is not None:
+                self._tracker.request_stop()
             self.w.header.set_status("Stopping...", "#f59e0b")
         if self._batch_worker:
             self._batch_worker.request_stop()
@@ -267,8 +276,41 @@ class AutoController(BaseController):
             self._frame_errors += 1
 
     def _on_worker_finished(self, worker) -> None:
-        if worker is self._worker:
+        if worker is not self._worker:
+            return
+        if (not self._stop_requested and self._edge_job is not None
+                and self.w.left_panel.automatic_tab.tracking_enabled()):
+            self._start_tracking()
+        else:
             self._finish_run(stopped=self._stop_requested)
+
+    # -- sequence tracking (last step of an Edge-mode run) ----------------- #
+
+    def _start_tracking(self) -> None:
+        tracker = TrackingWorker(self.state, self._edge_job)
+        tracker.solved.connect(partial(self._on_tracking_solved, tracker))
+        tracker.failed.connect(partial(self._on_tracking_ended, tracker, "tracking failed: {}"))
+        tracker.stopped.connect(partial(self._on_tracking_ended, tracker, "tracking stopped", ""))
+        self._tracker = tracker
+        self.w.left_panel.automatic_tab.set_progress_text("Tracking the bubble across frames...")
+        self.w.header.set_status("Tracking the bubble across frames...", "#f59e0b")
+        tracker.start()
+
+    def _on_tracking_solved(self, tracker, outcome) -> None:
+        if tracker is not self._tracker:
+            return
+        changed = apply_tracking(self.state, outcome)
+        logger.info("Tracking re-measured %d frame(s): %s", len(changed), changed[:20])
+        if changed:
+            self._run_notes.append(f"tracking re-measured {len(changed)} frame(s)")
+        self._finish_run(stopped=False, review=review_items(outcome.result))
+
+    def _on_tracking_ended(self, tracker, note: str, detail: str = "") -> None:
+        """Tracking failed or was stopped: keep the single-frame results."""
+        if tracker is not self._tracker:
+            return
+        self._run_notes.append(note.format(detail))
+        self._finish_run(stopped=False)
 
     def _on_auto_progress(self, current: int, total: int) -> None:
         # Calculate ETA based on elapsed time
@@ -392,8 +434,9 @@ class AutoController(BaseController):
         """Kept for callers that finish a run without a worker reference."""
         self._finish_run(stopped=self._stop_requested)
 
-    def _finish_run(self, stopped: bool) -> None:
+    def _finish_run(self, stopped: bool, review=()) -> None:
         self._running = False
+        self._tracker = None
         self._set_run_state(False)
         self.w.left_panel.automatic_tab.set_running(False)
         self._write_autosave()  # final state, not just the last multiple of 50
@@ -406,7 +449,7 @@ class AutoController(BaseController):
             )
         scores = refresh_chart(self.state, self.w)
 
-        notes: list[str] = []
+        notes = list(self._run_notes)
         if self._frame_errors:
             notes.append(f"{self._frame_errors} frame(s) could not be read")
         if self._autosave_failed:
@@ -424,6 +467,10 @@ class AutoController(BaseController):
         text = head + (" — " + "; ".join(notes) if notes else "")
         warn = stopped or bool(notes)
         self.w.header.set_status(text, "#f59e0b" if warn else "#10b981")
+        # The tracking review list (empty when tracking did not run) and the
+        # frames it re-measured.
+        self.bus.emit("tracking_review", tuple(review))
+        self._results_changed()
 
     # ------------------------------------------------------------------ #
     #  Batch processing of many sources (image folders and videos)

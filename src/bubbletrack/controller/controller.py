@@ -123,6 +123,7 @@ class AppController:
         # Review queue dock (suspicious frames, one-key triage)
         from bubbletrack.controller.review_controller import install_review
         self.review = install_review(self.w, self)
+        self.bus.subscribe("tracking_review", self.review.set_extra)
 
         # Key-frame filmstrip above the R(t) chart
         from bubbletrack.controller.filmstrip_controller import install_filmstrip
