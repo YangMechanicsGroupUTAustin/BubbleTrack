@@ -114,8 +114,9 @@ def ramp_gradient_css() -> str:
 
 
 def shape_legend_html() -> str:
-    """Legend text for the marker shapes."""
+    """Legend text for the marker shapes (and the collapse lines' C1, C2 labels)."""
     shapes = "&nbsp;&nbsp;".join(
         f'<span style="color:#e4e4e7;">{glyph}</span> {name}' for glyph, name in SHAPE_LEGEND
     )
-    return f'<span style="color:#a1a1aa; font-size:11px;">{shapes}</span>'
+    return (f'<span style="color:#a1a1aa; font-size:11px;">{shapes}'
+            f'&nbsp;&nbsp;&nbsp;C1, C2 = collapses</span>')

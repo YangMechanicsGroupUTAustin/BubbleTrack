@@ -22,6 +22,8 @@ REVIEW_SPAN_BRUSH = pg.mkBrush(228, 228, 231, 26)  # the selected Review row, un
 # Label positions run along the line from the bottom (0) to the top (1) of the view.
 # Rmax sits high on the curve, so its label goes low; collapses are low, so theirs go high.
 TOP_LABEL = {"position": 0.97, "color": "#a1a1aa", "anchors": [(0, 0), (0, 0)]}
+# Neighbouring collapse labels alternate between two heights so they never overlap.
+LOWER_TOP_LABEL = {**TOP_LABEL, "position": 0.88}
 BOTTOM_LABEL = {"position": 0.03, "color": "#c7d2fe", "anchors": [(0, 1), (0, 1)]}
 
 
@@ -124,7 +126,7 @@ class ChartOverlays:
         for k, x in enumerate(frames_1based, start=1):
             line = pg.InfiniteLine(
                 pos=float(x), angle=90, movable=False, pen=CYCLE_PEN,
-                label=f"collapse {k}", labelOpts=TOP_LABEL,
+                label=f"C{k}", labelOpts=TOP_LABEL if k % 2 else LOWER_TOP_LABEL,
             )
             line.setZValue(-6)
             self._plot.addItem(line, ignoreBounds=True)
