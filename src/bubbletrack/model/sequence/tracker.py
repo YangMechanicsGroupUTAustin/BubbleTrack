@@ -7,20 +7,23 @@ Per frame, in order (the "cv1" prototype rules):
 2. else ``redetect(frame, prior)`` inside the tight gate          -> ``tracked``
 3. else that re-detection inside the wide gate (confidence 0.3)   -> ``tracked`` + ``jump``
 4. else the raw observation inside the wide gate (confidence 0.5) -> ``raw`` + ``jump``
-5. else ``lost``: keep predicting; the gates grow.
+5. else either one centred inside the tight gate, any radius (0.5) -> ``jump``
+   (re-nucleation / growth from a residual bubble, or a collapse seen backwards)
+6. else ``lost``: keep predicting; the gates grow.
 
 An acceptance right after a loss is flagged ``reacquired`` and needs
 ``release_confidence``.  When the predicted radius collapses (below
 ``release_ratio`` of the last one) the radius window is released to
 [0, ceiling] so the minimum and the rebound are accepted.
 
-After such a release, ``cloud_frames`` consecutive cloud-like frames end the
-pass: flagged ``fragmented`` by the detector, or small with nothing solid on the
-track and no object persisting from the previous frame (a weak residual bubble
-persists, fragments do not).  The remaining frames are ``none`` (+ ``cloud``
-forwards; backwards this is the time before nucleation).  At a sequence end, a
-trailing run of such frames, or of lost frames where nothing at all was
-detected, is ``none`` too.
+After such a release, ``cloud_frames`` consecutive cloud-like frames end a
+forward pass: flagged ``fragmented`` by the detector, or small with nothing solid
+on the track and no object persisting from the previous frame (a weak residual
+bubble persists, fragments do not).  The remaining frames are ``none`` +
+``cloud``.  A backward pass is never cut short (a wrong stop would erase whole
+earlier cycles); at either sequence end, a trailing run of cloud-like frames
+(after a release) or of lost frames where nothing at all was detected is
+``none``: no bubble yet / any more.
 """
 
 from __future__ import annotations
@@ -119,6 +122,9 @@ def measure(frame: int, raw: Observation, pred: Prediction, coast: int, cache: R
             return Step(again, SOURCE_TRACKED, extra | {FLAG_JUMP}, again)
     if within(raw, pred, wide) and confident(raw, cfg.reacquire_confidence):
         return Step(raw, SOURCE_RAW, extra | {FLAG_JUMP}, again)
+    for obs, source in ((again, SOURCE_TRACKED), (raw, SOURCE_RAW)):    # same centre, new size
+        if obs is not None and centre_within(obs, pred) and confident(obs, cfg.reacquire_confidence):
+            return Step(obs, source, extra | {FLAG_JUMP}, again)
     return Step(raw, SOURCE_LOST, frozenset({FLAG_LOST}), again)
 
 
@@ -192,8 +198,8 @@ def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, st
                             or (_small_and_unsupported(step, raw[frame], pred, rmax, cfg)
                                 and not _persistent(seen, before)))
         run = run + [frame] if cloudy else []
-        if len(run) >= cfg.cloud_frames:
-            return _terminate(steps, run[0], direction, stop, len(raw), cloud=direction > 0)
+        if direction > 0 and len(run) >= cfg.cloud_frames:
+            return _terminate(steps, run[0], direction, stop, len(raw), cloud=True)
         frame += direction
     if 0 <= frame < len(raw):          # stopped at another anchor: that one's passes take over
         return steps

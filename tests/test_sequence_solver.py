@@ -56,6 +56,11 @@ def test_config_validation(bad):
         SequenceConfig(**bad)
 
 
+def test_config_integer_fields_are_coerced():
+    cfg = SequenceConfig(error_window=5.0, max_redetect_coast=0)
+    assert isinstance(cfg.error_window, int) and cfg.max_redetect_coast == 0
+
+
 def test_result_shape_and_types():
     truth, det = world()
     res = solve_sequence(observe(truth), det)

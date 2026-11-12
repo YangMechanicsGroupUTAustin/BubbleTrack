@@ -186,3 +186,17 @@ def test_frames_before_nucleation_are_none_and_not_reviewed():
     assert all(res.frames[i].source == "none" for i in range(4))
     assert not {0, 1, 2, 3} & {i for i, _ in res.review}
     assert res.cycles[0][0] == 4
+
+
+def test_a_backward_pass_never_stops_early_so_earlier_cycles_survive():
+    """An anchor in the second cycle; between the cycles a small bubble (R 4) is invisible for
+    three frames.  Backwards this looks like a cloud, but the pass must go on to cycle one."""
+    radii = rayleigh_radii(50, [(-1, 27, 60.0), (31, 20, 40.0)], floor=4.0)
+    truth = truth_track(radii)
+    blind = {27, 28, 29}
+    raw = observe(truth, replace={i: Observation(NAN, NAN, NAN, 0.0) for i in blind})
+    det = ScriptedDetector(truth, overrides={i: ScriptedDetector.nothing() for i in blind})
+    res = solve_sequence(raw, det, anchors={41: truth[41]})
+    assert all(res.frames[i].source == "lost" for i in blind)
+    assert all_correct(res, truth, skip=blind | {41})
+    assert "reacquired" in res.frames[26].flags

@@ -106,10 +106,18 @@ def _passes(raw, seeds: dict[int, TrackPoint], hard: list[int], cache, cfg) -> l
     return out
 
 
-def _merge(i: int, passes: list[tuple[int, dict]], cfg: SequenceConfig) -> tuple[Step | None, bool]:
-    """(chosen step, passes disagree) for frame ``i``."""
-    cands = sorted(((abs(i - s), k, steps[i]) for k, (s, steps) in enumerate(passes) if i in steps),
-                   key=lambda c: (c[0], c[1]))
+def _coverage(n: int, passes: list[tuple[int, dict]]) -> list[list[tuple[int, int, Step]]]:
+    """Per frame: (distance to the seed, pass index, step) of every pass that reached it."""
+    cover: list[list[tuple[int, int, Step]]] = [[] for _ in range(n)]
+    for k, (seed, steps) in enumerate(passes):
+        for i, step in steps.items():
+            cover[i].append((abs(i - seed), k, step))
+    return cover
+
+
+def _merge(cands: list[tuple[int, int, Step]], cfg: SequenceConfig) -> tuple[Step | None, bool]:
+    """(chosen step, passes disagree): the nearest seed's accepted result, else its loss."""
+    cands = sorted(cands, key=lambda c: (c[0], c[1]))
     if not cands:
         return None, False
     accepted = [c[2] for c in cands if c[2].accepted]
@@ -180,7 +188,7 @@ def solve_sequence(raw: Sequence[Observation], redetect: Detector, *,
     n = len(frames_in)
     cache = RedetectCache(redetect)
     seeds, auto = _seeds(frames_in, anchor_map, config)
-    passes = _passes(frames_in, seeds, sorted(anchor_map), cache, config)
+    cover = _coverage(n, _passes(frames_in, seeds, sorted(anchor_map), cache, config))
     frames: list[FrameSolution] = []
     for i in range(n):
         if i in anchor_map:
@@ -188,7 +196,7 @@ def solve_sequence(raw: Sequence[Observation], redetect: Detector, *,
         elif i in auto:
             frames.append(_solution(Step(frames_in[i], SOURCE_RAW), frames_in[i], False, config))
         else:
-            step, split = _merge(i, passes, config)
+            step, split = _merge(cover[i], config)
             frames.append(_solution(step, frames_in[i], split, config))
     solved, collapses, cycles = _with_cycles(frames, config)
     review = build_review(solved, collapses, config)

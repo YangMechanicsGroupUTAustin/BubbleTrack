@@ -119,11 +119,13 @@ class SequenceConfig:
                      "collapse_rel_prominence", "collapse_width_level", "review_collapse_weight"):
             if getattr(self, name) > 1:
                 raise ValueError(f"{name} must be in [0, 1], got {getattr(self, name)!r}")
-        for name in ("max_extrapolation", "error_window", "cloud_frames",
-                     "collapse_min_width", "collapse_min_gap"):
+        for name, low in (("max_extrapolation", 1), ("error_window", 1), ("cloud_frames", 1),
+                          ("collapse_min_width", 1), ("collapse_min_gap", 1), ("max_redetect_coast", 0),
+                          ("review_collapse_radius", 0)):
             value = getattr(self, name)
-            if int(value) != value or value < 1:
-                raise ValueError(f"{name} must be an integer >= 1, got {value!r}")
+            if int(value) != value or value < low:
+                raise ValueError(f"{name} must be an integer >= {low}, got {value!r}")
+            object.__setattr__(self, name, int(value))
         if self.wide_gate_factor < 1:
             raise ValueError(f"wide_gate_factor must be >= 1, got {self.wide_gate_factor!r}")
 
