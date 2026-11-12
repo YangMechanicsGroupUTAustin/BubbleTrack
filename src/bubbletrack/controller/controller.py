@@ -19,7 +19,7 @@ from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
 from bubbletrack.controller.pretune_controller import PretuneController
 from bubbletrack.controller.session_controller import SessionController
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
@@ -325,6 +325,7 @@ class AppController:
             )
 
         self.w.header.set_status(f"Deleted result for frame {idx + 1}", "#10b981")
+        self.bus.emit(RESULTS_CHANGED)
         logger.info("Deleted result for frame %d", idx + 1)
 
     def _on_refit_point(self, idx: int) -> None:
@@ -393,6 +394,7 @@ class AppController:
                 if self._state.fit_source is not None:
                     self._state.fit_source[idx] = FitSource.REFIT
                 self._refresh_chart()
+                self.bus.emit(RESULTS_CHANGED)
                 if self._state.image_no == idx:
                     display_frame(
                         self._state, self.w, idx, self._set_state, self._image_cache,
@@ -478,6 +480,7 @@ class AppController:
                 self._state.fit_source[idx] = FitSource.NEIGHBOR
 
             self._refresh_chart()
+            self.bus.emit(RESULTS_CHANGED)
             if self._state.image_no == idx:
                 display_frame(
                     self._state, self.w, idx, self._set_state, self._image_cache,
@@ -511,6 +514,7 @@ class AppController:
         if fit.radius <= 0 and self._state.radius[idx] > 0:
             text += f"; kept previous result (r = {self._state.radius[idx]:.1f} px)"
         self.w.header.set_status(text, colour)
+        self.bus.emit(RESULTS_CHANGED)  # a rejected fit still updates its confidence
 
     def _neighbor_circle_prior(
         self,

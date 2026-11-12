@@ -239,6 +239,7 @@ class PretuneController(BaseController):
         refresh_chart(self.state, self.w)
         self.w.left_panel.pretune_tab.hide_quality()
         self.w.header.set_status(*edge_support.status_text(idx, fit))
+        self._results_changed()
 
     def on_pretune_fit(self) -> None:
         """Detect + fit circle for the current single frame."""
@@ -304,6 +305,7 @@ class PretuneController(BaseController):
                         self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
                     self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
                     refresh_chart(self.state, self.w)
+                    self._results_changed()
                     label = (f"Area-equivalent R = {radius:.1f} px; regions = {count}"
                              if self.state.detection_mode == "area"
                              else f"R = {radius:.1f} px")

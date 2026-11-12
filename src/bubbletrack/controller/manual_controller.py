@@ -137,6 +137,7 @@ class ManualController(BaseController):
             self.w.original_panel.draw_points(xy, "#ef4444", 2.0)
             refresh_chart(self.state, self.w)
             self.w.header.set_status(f"R = {radius:.1f} px", "#10b981")
+            self._results_changed()
 
         # The fit is committed: Ctrl+Z must not resurrect its points.
         self._end_selection()
@@ -182,6 +183,7 @@ class ManualController(BaseController):
             self.w.radius_chart.plot_all(frames, self.state.radius)
 
         self.w.header.set_status("Ready", "#10b981")
+        self._results_changed()
 
     def clear_points(self) -> None:
         """Clear the manual points list (called on tab change)."""

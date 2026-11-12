@@ -8,6 +8,10 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
+# Emitted (no arguments) after anything edits per-frame results in place:
+# autosave, the review queue and the filmstrip listen for it.
+RESULTS_CHANGED = "results_changed"
+
 
 @dataclass
 class _Subscription:

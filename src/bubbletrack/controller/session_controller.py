@@ -24,7 +24,7 @@ import numpy as np
 from PyQt6.QtCore import QTimer
 
 from bubbletrack.controller.base import BaseController
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.session import load_session, save_session
@@ -42,7 +42,7 @@ PREVIOUS_SESSION_NAME = "previous_session.brt"
 AUTOSAVE_MIN_INTERVAL_S = 60.0  # at most one autosave per minute ...
 AUTOSAVE_DEBOUNCE_S = 2.0       # ... starting this long after the first change
 RECOVERY_MTIME_SLACK_S = 2.0    # file-time resolution (FAT: 2 s) vs the clean-exit stamp
-RESULTS_CHANGED_EVENT = "results_changed"  # bus event: any controller edited results
+RESULTS_CHANGED_EVENT = RESULTS_CHANGED  # bus event: any controller edited results
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
 

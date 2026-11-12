@@ -180,6 +180,7 @@ class AutoController(BaseController):
             self._cache,
         )
         self.w.header.set_status("Cleared", "#10b981")
+        self._results_changed()
 
     # -- manual-fix protection -------------------------------------------- #
 
@@ -638,3 +639,4 @@ class AutoController(BaseController):
         self.w.header.set_status(
             f"Loaded {result.folder_name}: {n_fitted}/{n_state} fitted", "#10b981",
         )
+        self._results_changed()

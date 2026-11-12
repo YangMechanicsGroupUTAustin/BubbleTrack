@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.state import AppState, update_state
 
 
@@ -30,3 +30,7 @@ class BaseController:
     def _update(self, **kwargs) -> None:
         """Convenience: update state with new field values."""
         self.state = update_state(self.state, **kwargs)
+
+    def _results_changed(self) -> None:
+        """Announce an in-place edit of the per-frame results."""
+        self.bus.emit(RESULTS_CHANGED)

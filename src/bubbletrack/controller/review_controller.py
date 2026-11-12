@@ -16,6 +16,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDockWidget, QMenu
 
+from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.review_panel import ReviewEntry, ReviewPanel, item_text
@@ -197,7 +198,8 @@ class ReviewController:
         self._extra: tuple[ReviewItem, ...] = ()
         self._dismissed: dict[int, tuple] = {}  # frame -> result it was skipped with
         self._running = False
-        self._manual_pending: tuple[int, object] | None = None
+        # (frame, its edge points before, queue order) while a Manual fit runs
+        self._manual_pending: tuple[int, object, list[int]] | None = None
 
         panel.frame_activated.connect(self._go)
         panel.action_requested.connect(self.perform)
@@ -290,7 +292,8 @@ class ReviewController:
         lp.tab_bar._select(MANUAL_TAB)  # TabBar has no public select yet
         self._app.manual_ctrl.on_manual_select()
         xy = self._state().circle_xy
-        self._manual_pending = (frame, xy[frame] if xy is not None else None)
+        self._manual_pending = (frame, xy[frame] if xy is not None else None,
+                                self.panel.frames())
 
     def _on_manual_done(self) -> None:
         """Runs after ManualController: advance once the manual fit is stored."""
@@ -299,12 +302,14 @@ class ReviewController:
         if pending is None or state.circle_xy is None or state.image_no != pending[0]:
             self.refresh()
             return
-        frame, before = pending
+        frame, before, order = pending
         if state.circle_xy[frame] is before:  # not committed (e.g. < 3 points)
             self._manual_pending = pending
             self.refresh()
             return
-        self._advance(self.panel.frames(), frame)
+        # The queue was already refreshed by RESULTS_CHANGED: advance by the
+        # order it had when the Manual fit started.
+        self._advance(order, frame)
 
     # -- helpers ----------------------------------------------------------- #
 
@@ -339,14 +344,10 @@ class ReviewController:
         return self.dock.isVisible() and not self._running
 
     def _refresh_after_edits(self) -> None:
-        """Edits made outside the queue (chart menu, manual tab, Clear)."""
-        chart, lp = self.w.radius_chart, self.w.left_panel
-        for signal in (chart.delete_requested, chart.refit_requested,
-                       chart.neighbor_refit_requested):
-            signal.connect(lambda _idx: self.refresh())
-        lp.manual_tab.done_clicked.connect(self._on_manual_done)
-        lp.manual_tab.clear_clicked.connect(self.refresh)
-        lp.automatic_tab.clear_clicked.connect(self.refresh)
+        """Edits made anywhere (chart menu, manual tab, Clear, refits)."""
+        self._app.bus.subscribe(RESULTS_CHANGED, lambda *_: self.refresh())
+        # Runs after ManualController's slot (connected earlier).
+        self.w.left_panel.manual_tab.done_clicked.connect(self._on_manual_done)
 
     # -- bus events -------------------------------------------------------- #
 
