@@ -208,13 +208,17 @@ class QualityConfig:
     ambiguous_flag: float = 0.5
     low_snr_ratio: float = 6.0
     non_circular_rel: float = 0.02
+    non_circular_solidity: float = 0.95
     shoulder_flag_px: float = 3.5
-    complete_arc_gap_deg: float = 30.0
-    arc_full: float = 0.5
-    precision_scale: float = 0.01
+    precision_scale: float = 0.02
+    """Precision term = exp(-(sigma_R / R) / scale), sigma_R from the noise along the outline.
+    Calibrated on LIC: 78/85 no-bubble frames below 0.3 (75 before), 182 labelled bubble frames
+    accepted and correct (178 before); synthetic no-bubble frames stay below 0.13."""
     snr_floor: float = 3.0
     snr_span: float = 7.0
     multi_scale: float = 0.3
+    completion_free: float = 0.5
+    """Hidden (extrapolated) area fractions up to this cost no confidence; beyond, linearly to 0 at 1."""
     min_roi_px: int = 8
 
 

@@ -16,6 +16,8 @@ EDGE_DIR = Path(edge.__file__).parent
 
 RESULT_FIELDS = ["radius", "rc", "cc", "radius_sigma", "edge_xy", "confidence", "flags", "r_area",
                  "outer_radius", "shoulder_width", "arc_coverage", "inlier_fraction", "mask", "provenance"]
+REGION_FIELDS = ["r_circle", "area_px", "perimeter_px", "circularity", "solidity", "fragment_count",
+                 "fragment_area_px", "contour", "radius_kind", "centroid"]
 
 
 def test_exports_exactly_the_contract():
@@ -63,7 +65,16 @@ def test_edge_params_rejects_invalid_values(kwargs):
 def test_edge_result_fields_follow_the_contract():
     names = [f.name for f in dataclasses.fields(EdgeResult)]
     assert names[:len(RESULT_FIELDS)] == RESULT_FIELDS
+    assert names[len(RESULT_FIELDS) + 1:] == REGION_FIELDS        # after confidence_gate, all defaulted
     assert EdgeResult.__dataclass_params__.frozen
+
+
+def test_region_fields_default_to_an_empty_measurement():
+    res = _result(10.0, 0.9)
+    assert np.isnan(res.r_circle) and np.isnan(res.area_px) and np.isnan(res.solidity)
+    assert res.fragment_count == 0 and res.fragment_area_px == 0.0
+    assert res.contour.shape == (0, 2) and res.radius_kind == "area"
+    assert all(np.isnan(res.centroid))
 
 
 def _result(radius: float, confidence: float, gate: float = 0.3) -> EdgeResult:

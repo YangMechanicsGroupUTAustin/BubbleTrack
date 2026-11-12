@@ -6,6 +6,8 @@ folder), else by looking for ``test_data/lic`` next to any parent of this file (
 the main checkout and from a ``.claude/worktrees/*`` worktree).  Every test skips without it.
 
 Mode: P2 + reference (frame 2, i.e. index 1) + seed click, single frame (no tracking).
+Since edge-1.1.0 ``radius`` is the area-equivalent radius of the bubble region (circle-completed
+when clipped; the circle fit on frames below the confidence gate).
 """
 
 from __future__ import annotations
@@ -57,7 +59,7 @@ def _series(prefix: str, ref_r: np.ndarray, ref_c: np.ndarray, step: int = 2, **
     files = _frames(folder)
     ref = imread_unicode(files[labels["reference_frame_index"]])
     edge_params = EdgeParams(seed=tuple(labels["sequences"][folder.name]["seed"]), **params)
-    d_r, d_c, n_shoulder = [], [], 0
+    d_r, d_c, d_ac, n_shoulder = [], [], [], 0
     for i in range(0, len(ref_r), step):
         if not np.isfinite(ref_r[i]):
             continue
@@ -66,7 +68,10 @@ def _series(prefix: str, ref_r: np.ndarray, ref_c: np.ndarray, step: int = 2, **
             d_r.append(res.radius - ref_r[i])
             d_c.append(np.hypot(res.rc - ref_c[i, 0], res.cc - ref_c[i, 1]))
             n_shoulder += "shoulder" in res.flags
-    return np.abs(np.array(d_r)), np.array(d_c), n_shoulder
+            if "non_circular" not in res.flags:
+                d_ac.append(res.r_area - res.r_circle)
+    # last: |area radius - circle fit| on round frames
+    return np.abs(np.array(d_r)), np.array(d_c), n_shoulder, np.abs(np.array(d_ac))
 
 
 def _r_data(prefix: str):
@@ -77,27 +82,32 @@ def _r_data(prefix: str):
 
 
 def test_seq04_agrees_with_the_2024_matlab_result():
-    """Measured: 127 frames, median |dR| 0.085 px, median centre distance 0.32 px."""
-    d_r, d_c, _ = _series("04", *_r_data("04"))
+    """Measured (edge-1.1.0, area radius): 126 frames, median |dR| 0.088 px (0.085 with the circle
+    fit of edge-1.0.0), median centre distance 0.32 px; on round frames the area radius is within
+    0.006 px (median) of the circle fit."""
+    d_r, d_c, _, d_ac = _series("04", *_r_data("04"))
     assert len(d_r) > 100
     assert np.median(d_r) < 0.3
     assert np.median(d_c) < 1.0          # both 1-based: the coordinate convention holds on real data
+    assert np.median(d_ac) < 0.3
 
 
 def test_seq02_outer_extent_matches_the_2024_outer_edge():
     """02 has a wide shoulder; the 2024 MATLAB result followed its outer extent (definition B).
 
     Measured (every 4th frame, 63 frames): steep radius 6.3 px inside the 2024 value, outer
-    radius +0.9 px (median |dR| 0.9), median shoulder 7.3 px, flag ``shoulder`` on 63/63.
+    radius +0.9 px (median |dR| 0.9 at edge-1.0.0 and edge-1.1.0, now the area radius of the
+    region at the outer-extent level), median shoulder 7.3 px, flag ``shoulder`` on 63/63.
     """
-    d_r, _, n_shoulder = _series("02", *_r_data("02"), step=4, edge_definition="outer")
+    d_r, _, n_shoulder, _ = _series("02", *_r_data("02"), step=4, edge_definition="outer")
     assert len(d_r) > 50
     assert np.median(d_r) < 1.5
     assert n_shoulder >= 0.9 * len(d_r)
 
 
 def test_seq10_agrees_with_the_2026_app_result():
-    """Measured: 128 frames, median |dR| 1.02 px (the app's edge sits ~1 px outside), centre 0.07 px."""
+    """Measured: 128 frames, median |dR| 1.005 px (1.02 with the circle fit of edge-1.0.0; the app's
+    edge sits ~1 px outside), centre 0.07 px; round frames: area vs circle radius 0.007 px (median)."""
     sio = pytest.importorskip("scipy.io")
     path = ROOT / "lic" / "refs" / "10_gelatin_Rt_132046.mat"
     if not path.exists():
@@ -105,10 +115,11 @@ def test_seq10_agrees_with_the_2026_app_result():
     m = sio.loadmat(path)
     r = m["Radius"].ravel().astype(float)
     r = np.where(np.isfinite(r) & (r > 0), r, np.nan)
-    d_r, d_c, _ = _series("10", r, m["CircleFitPar"].astype(float))
+    d_r, d_c, _, d_ac = _series("10", r, m["CircleFitPar"].astype(float))
     assert len(d_r) > 100
     assert np.median(d_r) < 1.5
     assert np.median(d_c) < 1.0
+    assert np.median(d_ac) < 0.3
 
 
 def _agree(circle, ref, crit) -> bool:
@@ -120,11 +131,16 @@ def _agree(circle, ref, crit) -> bool:
 def test_labelled_bubble_frames_on_lic():
     """Visual labels of the real10 scorecard (32 sampled frames x 10 sequences, 235 bubble frames).
 
-    Measured at the port (edge-1.0.0): 205/235 = 87.2 % correct (same frames as proto3); no-bubble
-    frames rejected (confidence < 0.3) 75/85.  For comparison, prototype P2 without the
-    saturated-speckle fix scored 214/235 (91.1 %): the fix stops masking isolated saturated
-    speckle grains, which costs frames on the uint16 bright-speckle sequences 06 and 08 and
-    helps the 8-bit dense-speckle hard sequences.
+    Measured at the port (edge-1.0.0, circle fit): 205/235 = 87.2 % correct (same frames as proto3);
+    no-bubble frames rejected (confidence < 0.3) 75/85; 184 bubble frames accepted, 178 of them correct.
+    For comparison, prototype P2 without the saturated-speckle fix scored 214/235 (91.1 %).
+
+    Measured with the region layer (edge-1.1.0, area radius): 204/235 = 86.8 % correct; no-bubble
+    frames rejected 77/85; 192 bubble frames accepted, 182 of them correct.  The labels are circles;
+    the frames that differ: 06/65 and 06/73 now correct; 06/49 (half bubble on a wall, the region
+    takes in wall texture), 07/73 (a third of the bubble behind dead reference pixels) and 09/81
+    (low contrast: a third of the bubble is above its own 50 % level, so the dark body is a D)
+    now off by more than the tolerance.
     """
     labels = _labels()
     crit = labels["criterion"]
