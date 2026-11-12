@@ -104,6 +104,7 @@ class RadiusChart(QWidget):
         self._frame_labels: tuple[str, ...] = ()
         self._editing_enabled = True
         self._selection: tuple[int, int] | None = None
+        self._review_span: tuple[int, int] | None = None
         self._current: int | None = None  # 1-based frame under the cursor
         self._set_points(np.array([]), np.array([]))
 
@@ -237,7 +238,7 @@ class RadiusChart(QWidget):
         self.clear_series()
         self._hover_label.hide()
         self._overlays.clear()
-        self._selection = None
+        self._selection = self._review_span = None
 
     def set_current_frame(self, idx: int | None) -> None:
         """Move the current-frame cursor to 0-based *idx* (None hides it)."""
@@ -273,8 +274,8 @@ class RadiusChart(QWidget):
     def export_view(self):
         """Yield the PlotItem with the cursor, highlight, hover text and
         selection hidden, e.g. for ``ImageExporter``; restores them after."""
-        items = (self._overlays.cursor, self._overlays.selection, self._hover_label,
-                 self._highlight)
+        items = (self._overlays.cursor, self._overlays.selection, self._overlays.review_span,
+                 self._hover_label, self._highlight)
         shown = [item.isVisible() for item in items]
         for item in items:
             item.hide()
@@ -312,6 +313,16 @@ class RadiusChart(QWidget):
     def clear_selection(self) -> None:
         self._selection = None
         self._overlays.hide_selection()
+
+    def set_review_span(self, span: tuple[int, int] | None) -> None:
+        """Shade 0-based frames start..end (the selected Review row), or none.
+        Only a marker: clicks and menus never act on it."""
+        self._review_span = None if span is None else tuple(sorted(int(v) for v in span))
+        lo, hi = self._review_span or (None, None)
+        self._overlays.set_review_span(None if lo is None else (lo + 0.5, hi + 1.5))
+
+    def review_span(self) -> tuple[int, int] | None:
+        return self._review_span
 
     def _drag_selection(self, x0: float, x1: float, finished: bool) -> None:
         """Rubber-band a range while dragging; commit and emit on release."""

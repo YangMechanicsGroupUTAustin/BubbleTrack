@@ -57,7 +57,6 @@ class ReviewController:
         self._extra_keys: dict[int, tuple] = {}  # frame -> result the item was made for
         self._dismissed: dict[int, tuple] = {}  # frame -> result it was skipped with
         self._running = False
-        self._chart_range: tuple[int, int] | None = None  # the span we highlighted
         # (frame, its edge points before, queue order, anchor) while a Manual fit runs
         self._manual_pending: tuple[int, object, list[int], int] | None = None
 
@@ -74,7 +73,7 @@ class ReviewController:
             "next": lambda: panel.step(1),
             "prev": lambda: panel.step(-1),
         }, is_active=self._shortcuts_active)
-        dock.visibilityChanged.connect(lambda _visible: self.shortcuts.sync())
+        dock.visibilityChanged.connect(self._on_dock_visibility)
         self.refresh()
 
     # -- public API -------------------------------------------------------- #
@@ -220,19 +219,17 @@ class ReviewController:
     def _advance(self, old: list[int], anchor: int) -> None:
         self.refresh()
         target = next_after_action(old, anchor, self.panel.frames())
-        if target is not None and self.panel.select_frame(target):
+        if target is not None and self.panel.select_frame(target, keep_row=False):
             self._go(target)
 
     def _show_range(self, segment: ReviewSegment | None) -> None:
-        """Highlight the selected run on the R(t) chart (not a single frame)."""
-        chart = self.w.radius_chart
-        if segment is not None and not segment.is_single:
-            self._chart_range = (segment.start, segment.end)
-            chart.set_selection(*self._chart_range)
-            return
-        mine, self._chart_range = self._chart_range, None
-        if mine is not None and chart.selected_range() == mine:
-            chart.clear_selection()  # but never a range the user brushed
+        """Shade the selected run on the R(t) chart while the dock is open.
+
+        A shading of its own, not the chart's range selection: the user's
+        brushed range and the point menus inside a run stay as they were.
+        """
+        shown = segment is not None and not segment.is_single and not self.dock.isHidden()
+        self.w.radius_chart.set_review_span((segment.start, segment.end) if shown else None)
 
     @staticmethod
     def _result_key(state: AppState, frame: int) -> tuple:
@@ -267,12 +264,15 @@ class ReviewController:
             self.refresh()
         self.shortcuts.sync()
 
+    def _on_dock_visibility(self, _visible: bool) -> None:
+        self.shortcuts.sync()
+        self._show_range(self.panel.current_segment())
+
     def _on_source_loaded(self, _n: int) -> None:
         self._dismissed.clear()
         self._extra = ()
         self._extra_keys = {}
         self._manual_pending = None
-        self._chart_range = None  # loading cleared the chart
         self.refresh()
 
     def _on_frame_changed(self, idx: int) -> None:

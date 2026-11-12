@@ -188,15 +188,29 @@ class TestAnnotations:
             assert not chart._overlays.selection.isVisible()
         assert chart._overlays.cursor.isVisible() and chart._overlays.selection.isVisible()
 
+    def test_review_span_is_shaded_but_not_a_selection(self, chart):
+        chart.plot_all(*_series(10))
+        chart.set_review_span((2, 5))  # 0-based frames 2..5
+        assert chart.review_span() == (2, 5) and chart.selected_range() is None
+        assert tuple(chart._overlays.review_span.getRegion()) == (2.5, 6.5)
+        assert not chart._in_selection(4.0)  # its points keep the point menu
+        with chart.export_view():
+            assert not chart._overlays.review_span.isVisible()
+        assert chart._overlays.review_span.isVisible()
+        chart.set_review_span(None)
+        assert chart.review_span() is None
+
     def test_clear_removes_everything(self, chart):
         chart.plot_all(*_series(5))
         chart.set_current_frame(1)
         chart.set_rmax_info(3, 1, 5)
         chart.set_cycles([2])
         chart.set_selection(1, 3)
+        chart.set_review_span((0, 2))
         chart.clear()
         assert len(chart._frames) == 0 and chart.rmax_info() is None
         assert chart.cycle_frames() == [] and chart.selected_range() is None
+        assert chart.review_span() is None
 
 
 class _FakeDrag:

@@ -73,23 +73,39 @@ class TestRows:
 class TestSelection:
     def test_a_row_shows_its_first_frame_and_its_span_on_the_chart(self, review):
         window, controller, rc = review
+        chart = window.radius_chart
         _flag(controller, rc, low=(2, 3, 5), shape=(8,), conf=0.05)
         rc.panel.step(1)
         assert _shown(controller) == 2 and rc.panel.current_frame() == 2
-        assert window.radius_chart.selected_range() == (2, 5)
+        assert chart.review_span() == (2, 5)
         assert rc.panel._detail.text().startswith("Frame 3")
         rc.panel.step(1)  # a single frame: no span to show
         assert _shown(controller) == 8
-        assert window.radius_chart.selected_range() is None
+        assert chart.review_span() is None
 
-    def test_a_range_the_user_brushed_is_left_alone(self, review):
+    def test_the_span_is_not_a_chart_selection(self, review):
         window, controller, rc = review
-        _flag(controller, rc, low=(4,))
+        chart = window.radius_chart
+        _flag(controller, rc, low=(2, 3, 5), shape=(8,), conf=0.05)
         rc.panel.step(1)
-        window.radius_chart.set_selection(0, 7)  # brushed by the user
-        controller.file_ctrl.on_frame_changed(9)  # off the queue
-        assert rc.panel.current_segment() is None
-        assert window.radius_chart.selected_range() == (0, 7)
+        assert chart.selected_range() is None  # right-click keeps the point menu
+        assert not chart._in_selection(4.0)  # frame 4 (1-based) inside the span
+        chart.set_selection(0, 9)  # brushed by the user
+        rc.panel.step(1)
+        rc.panel.step(-1)
+        assert chart.selected_range() == (0, 9) and chart.review_span() == (2, 5)
+
+    def test_no_span_while_the_dock_is_closed(self, qapp, review):
+        window, controller, rc = review
+        window.show()
+        qapp.processEvents()
+        _flag(controller, rc, low=(2, 3, 5))
+        rc.panel.step(1)
+        toggle = rc.dock.toggleViewAction()  # View > Review Queue
+        toggle.trigger()
+        assert rc.dock.isHidden() and window.radius_chart.review_span() is None
+        toggle.trigger()
+        assert window.radius_chart.review_span() == (2, 5)
 
     def test_stepping_through_the_span_keeps_the_row(self, review):
         _, controller, rc = review
@@ -118,7 +134,36 @@ class TestSelection:
         _flag(controller, rc, low=(2, 3, 5))
         window.frame_scrubber.value_changed.emit(3)
         assert rc.panel.current_segment().frames == (2, 3, 5)
-        assert window.radius_chart.selected_range() == (2, 5)
+        assert window.radius_chart.review_span() == (2, 5)
+
+    def test_a_rebuild_keeps_the_row_while_its_span_holds_the_frame(self, review):
+        _, controller, rc = review
+        _flag(controller, rc, low=(4,), shape=(8,), conf=0.3)
+        rc.set_extra([ReviewItem(f, ("lost",), 0) for f in (3, 5)])
+        rc.panel.step(1)  # lost track 3-5
+        controller.file_ctrl.on_frame_changed(4)  # a low-confidence frame inside
+        rc.panel.set_hidden_categories({"shape"})  # an unrelated change rebuilds the list
+        assert rc.panel.current_segment().frames == (3, 5)
+
+    def test_after_an_action_the_row_of_the_next_frame_is_selected(self, review):
+        _, controller, rc = review
+        _flag(controller, rc, low=(4, 6, 8), conf=0.2)
+        rc.set_extra([ReviewItem(5, ("lost",), 0), ReviewItem(7, ("jump",), 0)])
+        assert [s.category for s in rc.panel.segments()] == ["lost", "jump", "low_confidence"]
+        rc.panel.step(1)
+        rc.perform("skip")  # lost 5 goes: the jump at 7 is next
+        assert _shown(controller) == 7
+        assert rc.panel.current_segment().category == "jump"
+
+    def test_j_after_leaving_a_row_continues_from_it(self, review):
+        _, controller, rc = review
+        _flag(controller, rc, low=(1, 4, 7))
+        rc.panel.step(1)
+        rc.panel.step(1)  # the row of frame 4 (rows: 1, 4, 7)
+        controller.file_ctrl.on_frame_changed(5)  # stepped past it
+        assert rc.panel.current_segment() is None
+        rc.panel.step(1)
+        assert _shown(controller) == 7
 
 
 class TestRowActions:

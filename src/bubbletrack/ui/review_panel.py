@@ -72,6 +72,7 @@ class ReviewPanel(QWidget):
         self._hidden: frozenset[str] = frozenset()
         self._shown: int | None = None  # the frame on screen, as last reported
         self._selected: ReviewSegment | None = None  # as last announced
+        self._last_row: int | None = None  # where J/K continue when nothing is selected
         self._count = -1
 
         layout = QVBoxLayout(self)
@@ -161,9 +162,11 @@ class ReviewPanel(QWidget):
         segments, images = list(segments), tuple(images)
         if (segments, images, fitted) == (self._all, self._images, self._fitted):
             return
+        if images != self._images:  # another recording: start from the top
+            self._last_row = None
         self._all, self._images, self._fitted = segments, images, fitted
         self._items = {item.frame: item for s in segments for item in s.items}
-        self._rebuild(keep=self._selected is not None)
+        self._rebuild()
 
     def segments(self) -> list[ReviewSegment]:
         """The rows on show (after the type filter), in queue order."""
@@ -189,7 +192,7 @@ class ReviewPanel(QWidget):
         hidden = frozenset(keys)
         if hidden != self._hidden:
             self._hidden = hidden
-            self._rebuild(keep=self._selected is not None)
+            self._rebuild()
 
     def _present(self) -> list[tuple[str, int]]:
         """(category, frames) of every type in the queue, in menu order."""
@@ -224,23 +227,29 @@ class ReviewPanel(QWidget):
         return self._shown if self._shown is not None and segment.contains(self._shown) \
             else segment.start
 
-    def select_frame(self, frame: int | None) -> bool:
+    def select_frame(self, frame: int | None, *, keep_row: bool = True) -> bool:
         """The view shows *frame*: silently select the row holding it (or none).
 
-        The selected row is kept while its span holds the frame; True if a
-        row is selected afterwards.
+        With *keep_row* the selected row is kept while its span holds the
+        frame; without, the row that lists the frame wins (moving on to a
+        frame of the queue).  True if a row is selected afterwards.
         """
         self._shown = frame
-        segment = segment_of(self._visible, frame, prefer=self.current_segment())
+        prefer = self.current_segment() if keep_row else None
+        segment = segment_of(self._visible, frame, prefer=prefer)
         self._set_row(self._visible.index(segment) if segment is not None else -1)
         return segment is not None
 
     def step(self, delta: int) -> None:
-        """Select the next (+1) or previous (-1) row and show its first frame."""
+        """Select the next (+1) or previous (-1) row and show its first frame.
+
+        With no row selected, continue from the row last selected (else the top).
+        """
         if not self._visible:
             return
         row = self._list.currentRow()
-        target = 0 if row < 0 else min(max(row + delta, 0), len(self._visible) - 1)
+        base = row if row >= 0 else self._last_row
+        target = 0 if base is None else min(max(base + delta, 0), len(self._visible) - 1)
         if target != row:
             self._list.setCurrentRow(target)  # emits frame_activated
 
@@ -269,7 +278,9 @@ class ReviewPanel(QWidget):
 
     # -- view -------------------------------------------------------------- #
 
-    def _rebuild(self, *, keep: bool) -> None:
+    def _rebuild(self) -> None:
+        """Refill the list; a selected row is followed to its successor."""
+        old = self.current_segment()
         self._visible = [s for s in self._all if s.category not in self._hidden]
         self._list.blockSignals(True)
         self._list.clear()
@@ -278,13 +289,24 @@ class ReviewPanel(QWidget):
             item.setData(ROW_ROLE, row_data(segment, self._images))
             item.setToolTip(tooltip_html(segment, self._images))
             self._list.addItem(item)
-        target = segment_of(self._visible, self._shown) if keep else None
+        target = self._successor(old)
         self._list.setCurrentRow(self._visible.index(target) if target is not None else -1)
         self._list.blockSignals(False)
         self._refresh_view()
 
+    def _successor(self, old: ReviewSegment | None) -> ReviewSegment | None:
+        """The row to keep after a rebuild: the same kind of problem still
+        spanning the shown frame, else whichever row holds that frame."""
+        if old is None or self._shown is None:
+            return None
+        same = next((s for s in self._visible
+                     if s.category == old.category and s.contains(self._shown)), None)
+        return segment_of(self._visible, self._shown, prefer=same)
+
     def _refresh_view(self) -> None:
         segment = self.current_segment()
+        if segment is not None:
+            self._last_row = self._list.currentRow()
         self._update_controls(segment)
         self._update_header()
         frame = self.current_frame()

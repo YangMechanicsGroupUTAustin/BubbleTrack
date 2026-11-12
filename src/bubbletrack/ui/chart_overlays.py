@@ -1,4 +1,5 @@
-"""Annotation layers of the R(t) chart: cursor, Rmax window, cycles, selection.
+"""Annotation layers of the R(t) chart: cursor, Rmax window, cycles, selection,
+and the span of the selected Review row.
 
 All positions are on the chart's x axis, which is the 1-based frame number.
 """
@@ -17,6 +18,7 @@ RMAX_LINE_PEN = pg.mkPen("#a5b4fc", width=1.5, style=Qt.PenStyle.DashLine)
 CYCLE_PEN = pg.mkPen("#71717a", width=1.2, style=Qt.PenStyle.DashLine)
 SELECTION_BRUSH = pg.mkBrush(99, 102, 241, 55)
 SELECTION_PEN = pg.mkPen(129, 140, 248, 200, width=1)
+REVIEW_SPAN_BRUSH = pg.mkBrush(228, 228, 231, 26)  # the selected Review row, unframed
 # Label positions run along the line from the bottom (0) to the top (1) of the view.
 # Rmax sits high on the curve, so its label goes low; collapses are low, so theirs go high.
 TOP_LABEL = {"position": 0.97, "color": "#a1a1aa", "anchors": [(0, 0), (0, 0)]}
@@ -70,6 +72,14 @@ class ChartOverlays:
         self.selection.setZValue(-10)
         self.selection.hide()
         plot_item.addItem(self.selection, ignoreBounds=True)
+
+        # Shading only: unlike the selection, nothing acts on it.
+        self.review_span = pg.LinearRegionItem(
+            values=(0, 1), movable=False, brush=REVIEW_SPAN_BRUSH, pen=pg.mkPen(None),
+        )
+        self.review_span.setZValue(-15)
+        self.review_span.hide()
+        plot_item.addItem(self.review_span, ignoreBounds=True)
 
         self._cycle_lines: list[pg.InfiniteLine] = []
 
@@ -132,8 +142,19 @@ class ChartOverlays:
     def hide_selection(self) -> None:
         self.selection.hide()
 
+    # -- Review row ------------------------------------------------------- #
+
+    def set_review_span(self, span: tuple[float, float] | None) -> None:
+        """Shade the x span (x0, x1); None hides it."""
+        if span is None:
+            self.review_span.hide()
+            return
+        self.review_span.setRegion(tuple(sorted(span)))
+        self.review_span.show()
+
     def clear(self) -> None:
         self.set_cursor(None)
         self.set_rmax(None)
         self.set_cycles(())
         self.hide_selection()
+        self.set_review_span(None)
