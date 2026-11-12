@@ -21,7 +21,9 @@ import numpy as np
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import FIT_METRIC_KEYS
 
-FIT_SOURCE_NAMES: tuple[str, ...] = tuple(source.name for source in FitSource)
+# Indexed by code; FitSource(code) raises at import if the codes ever stop
+# being 0..K-1, which the MAT name lookup ``FitSourceNames{code + 1}`` needs.
+FIT_SOURCE_NAMES: tuple[str, ...] = tuple(FitSource(code).name for code in range(len(FitSource)))
 """Source names indexed by their code (``FIT_SOURCE_NAMES[FitSource.AUTO]``)."""
 
 FLAG_SEPARATOR = "|"

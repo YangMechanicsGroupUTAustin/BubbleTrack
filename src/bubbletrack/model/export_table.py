@@ -204,7 +204,8 @@ def export_csv(
         :func:`~bubbletrack.model.export_fit.fit_result_arrays`).  Each one
         given appends its columns after all the others: ``Source`` (name),
         ``Confidence``, ``Locked`` (0/1), ``Flags`` (``a|b``) and one column
-        per metric (``R_Circle_px``, ``Area_px2``, ...).
+        per metric (``R_Circle_px``, ``Area_px2``, ...).  ValueError if
+        one does not have an entry per frame.
 
     Returns
     -------
