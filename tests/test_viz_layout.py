@@ -96,6 +96,9 @@ class TestSmallScreens:
         bar = lp.pretune_tab.action_bar
         assert not lp.scroll_area.widget().isAncestorOf(bar)
         assert lp.pinned_footer.isAncestorOf(bar)
+        # Content height depends on the fonts available; force it to be tall.
+        lp.scroll_area.widget().setMinimumHeight(2000)
+        qapp.processEvents()
         scroll = lp.scroll_area.verticalScrollBar()
         assert scroll.maximum() > 0  # content is taller than the panel
         scroll.setValue(scroll.maximum())
