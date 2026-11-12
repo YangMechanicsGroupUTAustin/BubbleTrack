@@ -189,15 +189,20 @@ class AutoController(BaseController):
         if source is None:
             return frozenset()
         in_range = np.arange(start_idx, end_idx + 1)
-        manual = [int(i) for i in in_range if source[i] == FitSource.MANUAL]
+        locked_arr = self.state.fit_locked
+        # Frames accepted in review are always kept; manual fits are asked about.
+        locked = frozenset(int(i) for i in in_range
+                           if locked_arr is not None and locked_arr[i])
+        manual = [int(i) for i in in_range
+                  if source[i] == FitSource.MANUAL and i not in locked]
         if not manual:
-            return frozenset()
+            return locked
         policy = self._ask_manual_policy(len(manual))
         if policy == "cancel":
             return None
         if policy == "overwrite":
-            return frozenset()
-        return frozenset(manual)
+            return locked
+        return locked | frozenset(manual)
 
     def _ask_manual_policy(self, n_manual: int) -> str:
         """Ask whether Fit All may overwrite manual fixes: keep/overwrite/cancel."""
@@ -234,10 +239,12 @@ class AutoController(BaseController):
             return
         self._on_auto_frame_done(*result)
 
-    def _on_worker_frame_meta(self, worker, idx: int, confidence: float) -> None:
-        if (worker is self._worker and idx not in self._protected
-                and self.state.fit_confidence is not None):
-            self.state.fit_confidence[idx] = confidence
+    def _on_worker_frame_meta(self, worker, idx: int, meta: dict) -> None:
+        if worker is not self._worker or idx in self._protected:
+            return
+        if self.state.fit_confidence is not None:
+            self.state.fit_confidence[idx] = meta.get("confidence", np.nan)
+        edge_support.store_meta(self.state, idx, meta)
 
     def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
         if worker is self._worker:

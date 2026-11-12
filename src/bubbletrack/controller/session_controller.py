@@ -26,7 +26,7 @@ from bubbletrack.model.state import AppState, update_state
 logger = logging.getLogger(__name__)
 
 RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_source",
-               "fit_confidence")
+               "fit_confidence", "fit_metrics", "fit_flags", "fit_locked")
 _NOT_PARAMS = {"version", "folder_path", "video_path", "images", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
 LAST_SESSION_NAME = "last_session.brt"
@@ -82,6 +82,17 @@ def restore_results(state: AppState, results: dict) -> str | None:
     if edges is not None and len(edges) == n:
         for i, xy in enumerate(edges):
             state.circle_xy[i] = xy
+    metrics = results.get("fit_metrics")
+    if metrics is not None and state.fit_metrics is not None:
+        for key, values in metrics.items():
+            if key in state.fit_metrics and len(values) == n:
+                state.fit_metrics[key][:] = values
+    flags = results.get("fit_flags")
+    if flags is not None and len(flags) == n and state.fit_flags is not None:
+        state.fit_flags[:] = list(flags)
+    locked = results.get("fit_locked")
+    if locked is not None and len(locked) == n and state.fit_locked is not None:
+        state.fit_locked[:] = locked
     confidence = results.get("fit_confidence")
     if confidence is not None and len(confidence) == n and state.fit_confidence is not None:
         state.fit_confidence[:] = confidence

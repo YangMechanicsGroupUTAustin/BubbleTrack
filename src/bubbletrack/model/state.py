@@ -16,6 +16,17 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+# Per-frame shape metrics shared by the engine, export, review and charts.
+FIT_METRIC_KEYS: tuple[str, ...] = (
+    "r_circle",          # robust circle-fit radius (px)
+    "area_px",           # area of the bubble region (px^2)
+    "circularity",       # 4*pi*A / P^2
+    "solidity",          # A / convex-hull area
+    "fragment_count",    # other dark regions near the main body
+    "fragment_area_px",  # their total area (px^2)
+    "shoulder_width",    # outer extent minus steep edge (px)
+)
+
 from bubbletrack.model.constants import (
     DEFAULT_FPS,
     DEFAULT_REMOVING_FACTOR,
@@ -85,6 +96,9 @@ class AppState:
     region_count: object = None     # np.ndarray (N,) number of selected regions
     fit_source: object = None       # np.ndarray (N,) int8 FitSource codes
     fit_confidence: object = None   # np.ndarray (N,) float, NaN = not scored (Edge engine)
+    fit_metrics: object = None      # dict[str, np.ndarray (N,)] keyed by FIT_METRIC_KEYS, NaN = n/a
+    fit_flags: object = None        # list[frozenset[str]] per frame (engine/sequence flags)
+    fit_locked: object = None       # np.ndarray (N,) bool, accepted in review: never overwritten
 
     # Display parameters
     img_grayscale_max: int = 65535
@@ -127,6 +141,9 @@ class AppState:
             region_count=np.zeros(n, dtype=int),
             fit_source=np.zeros(n, dtype=np.int8),
             fit_confidence=np.full(n, np.nan),
+            fit_metrics={key: np.full(n, np.nan) for key in FIT_METRIC_KEYS},
+            fit_flags=[frozenset()] * n,
+            fit_locked=np.zeros(n, dtype=bool),
         )
 
 

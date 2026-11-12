@@ -71,7 +71,8 @@ def _process_single_frame_edge(args: tuple):
     from bubbletrack.model.edge_pipeline import fit_edge, read_raw
 
     fit = fit_edge(read_raw(source), gridx, gridy, job)
-    return (idx, fit.radius, fit.edge_xy, fit.mask, fit.rc, fit.cc, 0, fit.confidence)
+    meta = {"confidence": fit.confidence, "flags": fit.flags, "metrics": fit.metrics}
+    return (idx, fit.radius, fit.edge_xy, fit.mask, fit.rc, fit.cc, 0, meta)
 
 
 class BatchWorker(QThread):
@@ -88,7 +89,7 @@ class BatchWorker(QThread):
     progress = pyqtSignal(int, int)
     frame_done = pyqtSignal(int, float, object, object, float, float, int)
     frame_error = pyqtSignal(int, str)  # (frame_idx, error_message)
-    frame_meta = pyqtSignal(int, float)  # (frame_idx, confidence) — Edge engine only
+    frame_meta = pyqtSignal(int, object)  # (frame_idx, {confidence, flags, metrics}) — Edge only
 
     # Run frames in this process (threads) instead of a process pool.
     # Used by tests that inject fakes, and handy when debugging.
@@ -219,7 +220,7 @@ class BatchWorker(QThread):
                             result = fut.result()
                             self.frame_done.emit(*result[:7])
                             if len(result) > 7:
-                                self.frame_meta.emit(idx, float(result[7]))
+                                self.frame_meta.emit(idx, result[7])
                         except Exception as exc:
                             self._emit_failure(idx, exc)
                         done_count += 1

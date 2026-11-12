@@ -78,8 +78,19 @@ def store_fit(state: AppState, idx: int, fit: EdgeFrameFit, source: FitSource) -
         state.region_count[idx] = 0
     if state.fit_confidence is not None:
         state.fit_confidence[idx] = fit.confidence
+    store_meta(state, idx, {"flags": fit.flags, "metrics": fit.metrics})
     if state.fit_source is not None:
         state.fit_source[idx] = source if accepted else FitSource.NONE
+
+
+def store_meta(state: AppState, idx: int, meta: dict) -> None:
+    """Write per-frame flags and shape metrics (unreported metrics become NaN)."""
+    if state.fit_flags is not None:
+        state.fit_flags[idx] = frozenset(meta.get("flags", ()))
+    if state.fit_metrics is not None:
+        reported = meta.get("metrics", {})
+        for key, values in state.fit_metrics.items():
+            values[idx] = reported.get(key, np.nan)
 
 
 def status_text(idx: int, fit: EdgeFrameFit) -> tuple[str, str]:

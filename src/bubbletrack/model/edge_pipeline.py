@@ -14,7 +14,7 @@ Everything here is picklable and Qt-free so worker processes can use it.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -87,6 +87,19 @@ class EdgeFrameFit:
     confidence: float
     flags: frozenset
     rejected_reason: str  # "" when accepted
+    metrics: dict = field(default_factory=dict)  # subset of state.FIT_METRIC_KEYS
+
+
+def _metrics(res) -> dict:
+    """Shape metrics the engine reports (missing ones are simply absent)."""
+    from bubbletrack.model.state import FIT_METRIC_KEYS
+
+    out = {}
+    for key in FIT_METRIC_KEYS:
+        value = getattr(res, key, None)
+        if value is not None:
+            out[key] = float(value)
+    return out
 
 
 def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
@@ -104,7 +117,9 @@ def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
         reason = ""
     if reason:
         return EdgeFrameFit(-1.0, float("nan"), float("nan"), np.empty((0, 2)),
-                            res.mask, confidence, frozenset(res.flags), reason)
+                            res.mask, confidence, frozenset(res.flags), reason,
+                            metrics=_metrics(res))
     return EdgeFrameFit(float(res.radius), float(res.rc), float(res.cc),
                         np.asarray(res.edge_xy, dtype=np.float64).reshape(-1, 2),
-                        res.mask, confidence, frozenset(res.flags), "")
+                        res.mask, confidence, frozenset(res.flags), "",
+                        metrics=_metrics(res))

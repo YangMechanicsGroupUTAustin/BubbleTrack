@@ -100,6 +100,17 @@ def save_session(filepath: str, state) -> None:
             state.fit_source.tolist() if state.fit_source is not None else None
         ),
         "fit_confidence": _to_json_array(state.fit_confidence),
+        "fit_metrics": (
+            {k: _to_json_array(v) for k, v in state.fit_metrics.items()}
+            if state.fit_metrics is not None else None
+        ),
+        "fit_flags": (
+            [sorted(flags) for flags in state.fit_flags]
+            if state.fit_flags is not None else None
+        ),
+        "fit_locked": (
+            [bool(v) for v in state.fit_locked] if state.fit_locked is not None else None
+        ),
     }
     # allow_nan=False guarantees strict JSON (MATLAB's jsondecode rejects NaN)
     Path(filepath).write_text(json.dumps(data, indent=2, allow_nan=False),
@@ -158,6 +169,12 @@ def load_session(filepath: str) -> dict:
             None if xy is None else _from_json_array(xy).reshape(-1, 2)
             for xy in data["circle_xy"]
         ]
+    if data.get("fit_metrics") is not None:
+        data["fit_metrics"] = {k: _from_json_array(v) for k, v in data["fit_metrics"].items()}
+    if data.get("fit_flags") is not None:
+        data["fit_flags"] = [frozenset(flags) for flags in data["fit_flags"]]
+    if data.get("fit_locked") is not None:
+        data["fit_locked"] = np.array(data["fit_locked"], dtype=bool)
     if data.get("fit_confidence") is not None:
         data["fit_confidence"] = _from_json_array(data["fit_confidence"])
     if data.get("edge_seed") is not None:
