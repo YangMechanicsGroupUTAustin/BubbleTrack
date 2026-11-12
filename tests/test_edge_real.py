@@ -135,12 +135,12 @@ def test_labelled_bubble_frames_on_lic():
     no-bubble frames rejected (confidence < 0.3) 75/85; 184 bubble frames accepted, 178 of them correct.
     For comparison, prototype P2 without the saturated-speckle fix scored 214/235 (91.1 %).
 
-    Measured with the region layer (edge-1.1.0, area radius): 204/235 = 86.8 % correct; no-bubble
-    frames rejected 77/85; 192 bubble frames accepted, 182 of them correct.  The labels are circles;
-    the frames that differ: 06/65 and 06/73 now correct; 06/49 (half bubble on a wall, the region
-    takes in wall texture), 07/73 (a third of the bubble behind dead reference pixels) and 09/81
-    (low contrast: a third of the bubble is above its own 50 % level, so the dark body is a D)
-    now off by more than the tolerance.
+    Measured with the region layer (edge-1.1.0, area radius): 203/235 = 86.4 % correct; no-bubble
+    frames rejected 77/85; 191 bubble frames accepted, 181 of them correct.  The labels are circles;
+    the frames that differ: 06/65 now correct; 06/49 (half bubble on a wall, the region takes in
+    wall texture), 07/73 (a third of the bubble behind dead reference pixels) and 09/81 (low
+    contrast: a third of the bubble is above its own 50 % level, so the dark body is a D) now
+    off by more than the tolerance.
     """
     labels = _labels()
     crit = labels["criterion"]
