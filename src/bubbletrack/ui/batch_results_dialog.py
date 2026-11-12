@@ -17,21 +17,66 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from bubbletrack.model.batch_result import BatchResultStore
+from bubbletrack.model.batch_result import (
+    BatchResultStore,
+    FolderResult,
+    format_score,
+    mean_score,
+)
 from bubbletrack.model.constants import QUALITY_GOOD_THRESHOLD, QUALITY_WARN_THRESHOLD
 from bubbletrack.ui.radius_chart import RadiusChart
 
+_MAX_ERROR_LINES = 8  # longer summaries are truncated with "... and N more"
+
+
+def item_colours(result: FolderResult) -> tuple[str, QColor]:
+    """(foreground, background tint) for a source in the list."""
+    if not result.success:
+        return "#71717a", QColor(113, 113, 122, 20)  # gray
+    if result.n_fitted == 0:
+        return "#d4d4d8", QColor(239, 68, 68, 25)  # red
+    score = mean_score(result)
+    if not np.isfinite(score):
+        return "#d4d4d8", QColor(0, 0, 0, 0)  # not scored (area mode)
+    if score >= QUALITY_GOOD_THRESHOLD:
+        return "#d4d4d8", QColor(16, 185, 129, 25)  # green
+    if score >= QUALITY_WARN_THRESHOLD:
+        return "#d4d4d8", QColor(245, 158, 11, 25)  # amber
+    return "#d4d4d8", QColor(239, 68, 68, 25)  # red
+
+
+def item_text(result: FolderResult) -> str:
+    kind = "video · " if result.source_kind == "video" else ""
+    if not result.success and not result.has_results:
+        return f"{result.folder_name}\n{kind}Failed: {result.message}"
+    status = "" if result.success else " · FAILED"
+    return (f"{result.folder_name}\n{kind}{result.n_fitted}/{result.n_frames} fitted · "
+            f"{format_score(result)}{status}")
+
+
+def error_text(store: BatchResultStore) -> str:
+    """Per-source error summary ('' when nothing failed)."""
+    lines = store.error_summary()
+    if not lines:
+        return ""
+    n_failed = len(store.failures)
+    head = f"{n_failed} source(s) failed:" if n_failed else "Batch problem:"
+    shown = lines[:_MAX_ERROR_LINES]
+    if len(lines) > len(shown):
+        shown.append(f"... and {len(lines) - len(shown)} more (see the log)")
+    return "\n".join([head] + [f"  • {line}" for line in shown])
+
 
 class BatchResultsBrowserDialog(QDialog):
-    """Non-modal dialog showing all batch folder results with R-t preview.
+    """Non-modal dialog showing all batch source results with R-t preview.
 
     Signals
     -------
-    load_folder_requested(str)
-        Emitted with the folder path when user clicks "Load into Main View".
+    load_folder_requested(object)
+        Emitted with the selected ``FolderResult`` when the user clicks
+        "Load into Main View".
     """
 
-    # Emits the selected FolderResult when user clicks "Load into Main View"
     load_folder_requested = pyqtSignal(object)
 
     def __init__(
@@ -41,7 +86,7 @@ class BatchResultsBrowserDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._store = store
-        self._selected_result = None  # type: FolderResult | None
+        self._selected_result: FolderResult | None = None
 
         self.setWindowTitle("Batch Results Browser")
         self.setMinimumSize(900, 600)
@@ -62,23 +107,31 @@ class BatchResultsBrowserDialog(QDialog):
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(8)
 
-        # Summary header
-        n_ok = sum(1 for r in self._store.results if r.success)
-        total_fitted = sum(r.n_fitted for r in self._store.results)
-        total_frames = sum(r.n_frames for r in self._store.results)
+        results = self._store.results
+        n_ok = sum(1 for r in results if r.success)
+        total_fitted = sum(r.n_fitted for r in results)
+        total_frames = sum(r.n_frames for r in results)
         self._header = QLabel(
-            f"Batch Results — {n_ok}/{len(self._store.results)} folders, "
+            f"Batch Results — {n_ok}/{len(results)} sources, "
             f"{total_fitted}/{total_frames} frames fitted"
         )
         self._header.setFont(QFont("Segoe UI", 11, QFont.Weight.Bold))
         self._header.setStyleSheet("color: #e4e4e7; padding: 4px 0;")
         root.addWidget(self._header)
 
-        # Splitter: folder list (left) + chart preview (right)
+        self._error_label = QLabel(error_text(self._store))
+        self._error_label.setWordWrap(True)
+        self._error_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        self._error_label.setStyleSheet(
+            "color: #fca5a5; background: rgba(239, 68, 68, 0.08); "
+            "border-radius: 4px; padding: 6px;")
+        self._error_label.setVisible(bool(self._error_label.text()))
+        root.addWidget(self._error_label)
+
         splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.setHandleWidth(3)
 
-        # -- Left: folder list ----------------------------------------- #
+        # -- Left: source list ----------------------------------------- #
         self._folder_list = QListWidget()
         self._folder_list.setMinimumWidth(220)
         self._folder_list.setMaximumWidth(350)
@@ -92,7 +145,7 @@ class BatchResultsBrowserDialog(QDialog):
         right_layout.setContentsMargins(8, 0, 0, 0)
         right_layout.setSpacing(6)
 
-        self._detail_label = QLabel("Select a folder to preview results.")
+        self._detail_label = QLabel("Select a source to preview results.")
         self._detail_label.setFont(QFont("Segoe UI", 10))
         self._detail_label.setStyleSheet("color: #a1a1aa;")
         self._detail_label.setWordWrap(True)
@@ -116,12 +169,11 @@ class BatchResultsBrowserDialog(QDialog):
         right_layout.addWidget(self._load_btn)
 
         splitter.addWidget(right_panel)
-        splitter.setStretchFactor(0, 1)  # folder list
+        splitter.setStretchFactor(0, 1)  # source list
         splitter.setStretchFactor(1, 3)  # chart panel
 
         root.addWidget(splitter, stretch=1)
 
-        # Bottom close button
         close_btn = QPushButton("Close")
         close_btn.setObjectName("secondaryBtn")
         close_btn.setFixedHeight(32)
@@ -131,35 +183,14 @@ class BatchResultsBrowserDialog(QDialog):
         bottom_row.addWidget(close_btn)
         root.addLayout(bottom_row)
 
-    # ------------------------------------------------------------------ #
-    #  Folder list population
-    # ------------------------------------------------------------------ #
-
     def _populate_folder_list(self) -> None:
         for result in self._store.results:
-            avg_q = self._avg_quality(result)
-            item_text = (
-                f"{result.folder_name}\n"
-                f"{result.n_fitted}/{result.n_frames} fitted · "
-                f"Avg Q: {avg_q:.0%}"
-            )
-            item = QListWidgetItem(item_text)
+            item = QListWidgetItem(item_text(result))
             item.setFont(QFont("Segoe UI", 9))
-
-            # Color-code by average quality
-            if not result.success:
-                item.setForeground(QColor("#71717a"))  # gray
-                item.setBackground(QColor(113, 113, 122, 20))
-            elif avg_q >= QUALITY_GOOD_THRESHOLD:
-                item.setForeground(QColor("#d4d4d8"))
-                item.setBackground(QColor(16, 185, 129, 25))  # green tint
-            elif avg_q >= QUALITY_WARN_THRESHOLD:
-                item.setForeground(QColor("#d4d4d8"))
-                item.setBackground(QColor(245, 158, 11, 25))  # amber tint
-            else:
-                item.setForeground(QColor("#d4d4d8"))
-                item.setBackground(QColor(239, 68, 68, 25))   # red tint
-
+            item.setToolTip(result.message)
+            foreground, background = item_colours(result)
+            item.setForeground(QColor(foreground))
+            item.setBackground(background)
             self._folder_list.addItem(item)
 
     # ------------------------------------------------------------------ #
@@ -170,32 +201,25 @@ class BatchResultsBrowserDialog(QDialog):
         if row < 0 or row >= len(self._store.results):
             return
         result = self._store.results[row]
-        frames = np.arange(1, result.n_frames + 1)
-        self._chart.set_total_frames(result.n_frames)
-        self._chart.plot_all(frames, result.radius, result.quality_scores)
-
-        avg_q = self._avg_quality(result)
-        self._detail_label.setText(
-            f"Path: {result.folder_path}\n"
-            f"Fitted: {result.n_fitted}/{result.n_frames} frames\n"
-            f"Avg Quality: {avg_q:.0%}"
-        )
-        self._detail_label.setStyleSheet("color: #e4e4e7;")
-        self._load_btn.setEnabled(True)
         self._selected_result = result
+        self._chart.set_total_frames(result.n_frames)
+        if result.has_results:
+            frames = np.arange(1, len(result.radius) + 1)
+            self._chart.plot_all(frames, result.radius, result.quality_scores)
+        else:
+            self._chart.clear()
+
+        lines = [f"Path: {result.folder_path}",
+                 f"Type: {result.source_kind}",
+                 f"Fitted: {result.n_fitted}/{result.n_frames} frames",
+                 f"{format_score(result)}",
+                 f"Status: {result.message}"]
+        lines.extend(f"Saved: {path}" for path in result.outputs)
+        self._detail_label.setText("\n".join(lines))
+        self._detail_label.setStyleSheet(
+            "color: #e4e4e7;" if result.success else "color: #fca5a5;")
+        self._load_btn.setEnabled(result.has_results)
 
     def _on_load_clicked(self) -> None:
-        if self._selected_result is not None:
+        if self._selected_result is not None and self._selected_result.has_results:
             self.load_folder_requested.emit(self._selected_result)
-
-    # ------------------------------------------------------------------ #
-    #  Helpers
-    # ------------------------------------------------------------------ #
-
-    @staticmethod
-    def _avg_quality(result) -> float:
-        """Average quality score over fitted frames only."""
-        valid = result.radius > 0
-        if not np.any(valid):
-            return 0.0
-        return float(np.mean(result.quality_scores[valid]))

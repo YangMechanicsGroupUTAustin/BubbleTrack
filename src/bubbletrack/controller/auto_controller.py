@@ -410,43 +410,54 @@ class AutoController(BaseController):
         self.w.header.set_status(text, "#f59e0b" if warn else "#10b981")
 
     # ------------------------------------------------------------------ #
-    #  Batch multi-folder processing
+    #  Batch processing of many sources (image folders and videos)
     # ------------------------------------------------------------------ #
 
     def on_batch_folders(self) -> None:
-        """Prompt user for a parent directory and process all experiment folders."""
+        """Ask for a parent directory and process every folder and video in it."""
         if self.is_busy():
+            self.w.header.set_status("A fit is already running", "#f59e0b")
             return
         if not self.state.images:
             QMessageBox.information(
-                self.w, "Load a folder first",
-                "Load one experiment folder and tune the ROI and parameters "
-                "on it first.\n\nBatch processing applies exactly those "
-                "settings to every folder.",
+                self.w, "Load a source first",
+                "Load one experiment folder or video and tune the ROI and "
+                "parameters on it first.\n\nBatch processing applies exactly "
+                "those settings to every folder and video.",
             )
             return
 
         root = QFileDialog.getExistingDirectory(
-            self.w, "Select Parent Directory Containing Experiment Folders",
+            self.w, "Select Parent Directory Containing Experiments",
         )
         if not root:
             return
 
-        # Scan for experiment subfolders
-        from bubbletrack.model.batch_experiments import find_experiment_folders
-        folders = find_experiment_folders(root)
-        if not folders:
+        from bubbletrack.model.batch_experiments import find_batch_sources
+        sources = find_batch_sources(root)
+        if not sources:
             QMessageBox.information(
                 self.w, "No Experiments Found",
-                f"No image folders found under:\n{root}\n\n"
-                "Each subfolder must contain image files (TIFF, PNG, JPG, BMP).",
+                f"No image folders or videos found under:\n{root}\n\n"
+                "Image folders are subfolders holding TIFF, PNG, JPG or BMP "
+                "files. Videos (AVI, MP4, MOV, MKV) may sit in the folder "
+                "itself or in its subfolders.",
             )
             return
 
-        # Read default physical params from PostProcessing panel
+        edge_params = None
+        if self.state.detection_mode == "edge":
+            from bubbletrack.model import edge_pipeline
+            try:
+                edge_params = edge_pipeline.params_from_state(self.state)
+            except Exception as exc:
+                self.w.header.set_status(f"Cannot prepare Edge batch: {exc}", "#ef4444")
+                return
+
         pp = self.w.left_panel.post_processing
         dlg = BatchConfigDialog(
-            folders,
+            sources,
+            detection_mode=self.state.detection_mode,
             default_fps=pp.get_fps(),
             default_um2px=pp.get_scale(),
             default_fit_length=pp.get_fit_length(),
@@ -454,105 +465,111 @@ class AutoController(BaseController):
         )
         if dlg.exec() != BatchConfigDialog.DialogCode.Accepted:
             return
-
         cfg = dlg.get_config()
+        if cfg.sources and not self.is_busy():
+            self._start_batch_worker(cfg, edge_params)
 
+    def _start_batch_worker(self, cfg, edge_params) -> None:
+        """Start a BatchFolderWorker with the current parameters."""
+        state = self.state
         at = self.w.left_panel.automatic_tab
         at.set_batch_running(True)
-        at.set_batch_status(f"Starting batch: {len(cfg.folders)} folders...")
+        at.set_batch_status(f"Starting batch: {len(cfg.sources)} source(s)...")
         self.w.header.set_status("Batch processing...", "#f59e0b")
 
         # Record the parameters actually used, not those current at the end.
-        self._batch_params = (self.state.gridx, self.state.gridy, self.state.img_thr)
-        self._batch_worker = BatchFolderWorker(
-            folders=cfg.folders,
-            sensitivity=self.state.img_thr,
-            gridx=self.state.gridx,
-            gridy=self.state.gridy,
-            removing_factor_slider=self.state.removing_factor,
-            bubble_cross_edges=self.state.bubble_cross_edges,
-            removing_obj_radius=self.state.removing_obj_radius,
-            gaussian_sigma=self.state.gaussian_sigma,
-            clahe_clip=self.state.clahe_clip,
-            closing_radius=self.state.closing_radius,
-            opening_radius=self.state.opening_radius,
-            detection_mode=self.state.detection_mode,
-            gradient_boundary=self.state.gradient_boundary,
-            area_max_regions=self.state.area_max_regions,
+        self._batch_params = (state.gridx, state.gridy, state.img_thr, state.detection_mode)
+        worker = BatchFolderWorker(
+            sources=cfg.sources,
+            sensitivity=state.img_thr,
+            gridx=state.gridx,
+            gridy=state.gridy,
+            removing_factor_slider=state.removing_factor,
+            bubble_cross_edges=state.bubble_cross_edges,
+            removing_obj_radius=state.removing_obj_radius,
+            gaussian_sigma=state.gaussian_sigma,
+            clahe_clip=state.clahe_clip,
+            closing_radius=state.closing_radius,
+            opening_radius=state.opening_radius,
+            detection_mode=state.detection_mode,
+            gradient_boundary=state.gradient_boundary,
+            area_max_regions=state.area_max_regions,
             max_radius=self._get_max_radius(),
             export_physical=cfg.export_physical,
             fps=cfg.fps,
             um2px=cfg.um2px,
             rmax_fit_length=cfg.rmax_fit_length,
+            edge_params=edge_params,
         )
         self._batch_results = []
-        self._batch_worker.folder_started.connect(self._on_batch_folder_started)
-        self._batch_worker.frame_progress.connect(self._on_batch_frame_progress)
-        self._batch_worker.folder_done.connect(self._on_batch_folder_done)
-        self._batch_worker.folder_result_ready.connect(self._on_batch_folder_result)
-        self._batch_worker.all_done.connect(self._on_batch_all_done)
+        self._batch_error = ""
+        worker.folder_started.connect(self._on_batch_folder_started)
+        worker.frame_progress.connect(self._on_batch_frame_progress)
+        worker.folder_done.connect(self._on_batch_folder_done)
+        worker.result_ready.connect(self._on_batch_folder_result)
+        worker.error.connect(self._on_batch_error)
+        worker.all_done.connect(self._on_batch_all_done)
+        self._batch_worker = worker
         self._batch_running = True
         self._set_run_state(True)
-        self._batch_worker.start()
+        worker.start()
 
     def _on_batch_folder_started(self, idx: int, total: int, name: str) -> None:
         at = self.w.left_panel.automatic_tab
-        at.set_batch_status(f"Folder {idx}/{total}: {name}")
+        at.set_batch_status(f"Source {idx}/{total}: {name}")
         self.w.header.set_status(f"Batch: {name} ({idx}/{total})", "#f59e0b")
 
     def _on_batch_frame_progress(self, done: int, total: int) -> None:
         self.w.left_panel.automatic_tab.set_batch_progress(done, total)
 
     def _on_batch_folder_done(self, name: str, success: bool, msg: str) -> None:
-        status = "✓" if success else "✗"
-        logger.info("Batch folder %s: %s — %s", name, status, msg)
+        if success:
+            logger.info("Batch source %s: ✓ — %s", name, msg)
+        else:
+            logger.warning("Batch source %s: ✗ — %s", name, msg)
 
-    def _on_batch_folder_result(
-        self, folder_path: str, n_frames: int, n_fitted: int,
-        radius: np.ndarray, quality_scores: np.ndarray,
-        circle_fit_par: np.ndarray | None = None,
-        circle_xy: list | None = None,
-        region_count: np.ndarray | None = None,
-    ) -> None:
-        from bubbletrack.model.batch_result import FolderResult
-        self._batch_results.append(FolderResult(
-            folder_path=folder_path,
-            folder_name=Path(folder_path).name,
-            success=True,
-            message=f"{n_fitted}/{n_frames} fitted",
-            n_frames=n_frames,
-            n_fitted=n_fitted,
-            radius=radius,
-            quality_scores=quality_scores,
-            circle_fit_par=circle_fit_par,
-            circle_xy=circle_xy,
-            region_count=region_count,
-        ))
+    def _on_batch_folder_result(self, result) -> None:
+        """One FolderResult per source (failed sources included)."""
+        self._batch_results.append(result)
+
+    def _on_batch_error(self, message: str) -> None:
+        self._batch_error = message
+        logger.error("Batch run failed: %s", message)
 
     def _on_batch_all_done(self, folders_ok: int, total_fitted: int) -> None:
+        results = tuple(self._batch_results)
+        error = getattr(self, "_batch_error", "")
+        n_failed = sum(1 for r in results if not r.success)
+        summary = f"{folders_ok}/{len(results)} source(s), {total_fitted} frames fitted"
+        if n_failed:
+            summary += f", {n_failed} failed"
+
         at = self.w.left_panel.automatic_tab
         at.set_batch_running(False)
-        at.set_batch_status(
-            f"Complete: {folders_ok} folder(s), {total_fitted} frames fitted"
-        )
-        self.w.header.set_status(
-            f"Batch done: {folders_ok} folders, {total_fitted} fitted", "#10b981",
-        )
+        at.set_batch_status(f"Complete: {summary}")
+        if error:
+            self.w.header.set_status(error, "#ef4444")
+        else:
+            self.w.header.set_status(f"Batch done: {summary}",
+                                     "#f59e0b" if n_failed else "#10b981")
         self._batch_worker = None
         self._batch_running = False
         self._set_run_state(False)
 
-        if self._batch_results:
+        if results or error:
             from bubbletrack.model.batch_result import BatchResultStore
-            gridx, gridy, sensitivity = self._batch_params or (
+            gridx, gridy, sensitivity, mode = self._batch_params or (
                 self.state.gridx, self.state.gridy, self.state.img_thr,
+                self.state.detection_mode,
             )
             store = BatchResultStore(
-                results=tuple(self._batch_results),
+                results=results,
                 timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
                 gridx=gridx,
                 gridy=gridy,
                 sensitivity=sensitivity,
+                detection_mode=mode,
+                error=error,
             )
             self._batch_store = store
             self._show_batch_browser(store)
@@ -566,7 +583,7 @@ class AutoController(BaseController):
         self._batch_browser_dlg.show()  # Non-modal
 
     def _on_load_batch_folder(self, result) -> None:
-        """Load a batch folder into the main view and restore its results.
+        """Load a batch source (folder or video) and restore its results.
 
         Parameters
         ----------
@@ -576,10 +593,21 @@ class AutoController(BaseController):
         if self.is_busy():
             self.w.header.set_status("Stop the running fit first", "#f59e0b")
             return
+        if not result.has_results:
+            self.w.header.set_status(
+                f"{result.folder_name} has no results to load", "#f59e0b")
+            return
 
-        # 1. Load the folder (scans images, initialises blank results, displays frame 0)
-        self.bus.emit("load_folder", result.folder_path)
-        if self.state.radius is None or self.state.folder_path != result.folder_path:
+        # 1. Open the source the normal way (blank results, frame 0 displayed)
+        is_video = result.source_kind == "video"
+        self.bus.emit("load_video" if is_video else "load_folder", result.folder_path)
+        state = self.state
+        if is_video:
+            loaded = state.video_reader is not None and state.video_path == result.folder_path
+        else:
+            loaded = state.video_reader is None and state.folder_path == result.folder_path
+        if state.radius is None or not loaded:
+            logger.warning("Batch source %s was not loaded", result.folder_path)
             return
 
         # 2. Restore the ROI the batch actually used
@@ -588,21 +616,10 @@ class AutoController(BaseController):
             self._update(gridx=tuple(store.gridx), gridy=tuple(store.gridy))
             self.w.original_panel.set_roi_text(self.state.gridx, self.state.gridy)
 
-        # 3. Restore batch results into state
+        # 3. Restore batch results (radius, centres, edges, confidence, flags, metrics)
+        from bubbletrack.model.batch_result import restore_into_state
+        n_copy = restore_into_state(self.state, result)
         n_state = len(self.state.radius)
-        n_copy = min(n_state, len(result.radius))
-        state = self.state
-        state.radius[:n_copy] = result.radius[:n_copy]
-        if result.circle_fit_par is not None:
-            state.circle_fit_par[:n_copy] = result.circle_fit_par[:n_copy]
-        if result.circle_xy is not None:
-            for i in range(n_copy):
-                state.circle_xy[i] = result.circle_xy[i]
-        if result.region_count is not None and state.region_count is not None:
-            state.region_count[:n_copy] = result.region_count[:n_copy]
-        if state.fit_source is not None:
-            fitted = state.radius[:n_copy] > 0
-            state.fit_source[:n_copy] = np.where(fitted, FitSource.AUTO, FitSource.NONE)
 
         # 4. Re-display current frame and chart
         display_frame(
