@@ -15,7 +15,7 @@ Coordinates are 0-based ROI pixels ``[row, col]``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import cv2
 import numpy as np
@@ -37,6 +37,10 @@ class RayEdges:
     multi_fraction: float
     """Fraction of rays with two or more separate steps (halo / double ring)."""
     n_rays: int
+    levels: np.ndarray = field(default_factory=lambda: np.empty(0))
+    """Per edge point: the absolute crossing level between its local plateaus."""
+    rays: np.ndarray = field(default_factory=lambda: np.empty(0, int))
+    """Per edge point: the index of its ray (rays are evenly spaced in angle)."""
 
     @property
     def n_clipped(self) -> int:
@@ -169,7 +173,7 @@ def ray_edges(e: np.ndarray, circle: tuple[float, float, float], contrast: float
     r_edge, ii = r_edge[found], idx[found]
     pts = np.column_stack([rc + np.sin(th[ii]) * r_edge, cc + np.cos(th[ii]) * r_edge])
     status[ii] = STATUS_EDGE
-    return RayEdges(pts, status, multi, n_rays)
+    return RayEdges(pts, status, multi, n_rays, lvl[found], ii)
 
 
 def _row_percentile(p: np.ndarray, cols: np.ndarray, q: float, min_count: int) -> tuple[np.ndarray, np.ndarray]:
@@ -193,8 +197,20 @@ def _row_percentile(p: np.ndarray, cols: np.ndarray, q: float, min_count: int) -
     return out, rows
 
 
+def outer_image(image: np.ndarray, exclude: np.ndarray, cfg: RayConfig) -> np.ndarray:
+    """The smoothed image the outer extent is measured on; excluded pixels are background."""
+    smooth = cv2.GaussianBlur(image, (0, 0), cfg.outer_blur_sigma)
+    return np.where(exclude, np.maximum(smooth, 1.0), smooth)
+
+
 def outer_extent(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, float, float],
                  cfg: RayConfig) -> np.ndarray:
+    """Definition-B edge points (see :func:`outer_extent_with_levels`)."""
+    return outer_extent_with_levels(image, exclude, circle, cfg)[0]
+
+
+def outer_extent_with_levels(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, float, float],
+                             cfg: RayConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Definition-B edge points: where each ray recovers 90 % of its step beyond the steep edge.
 
     Per ray, the dark level is a low percentile just inside the steep edge and
@@ -213,8 +229,12 @@ def outer_extent(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, fl
 
     Returns
     -------
-    ndarray of shape (M, 2)
+    points : ndarray of shape (M, 2)
         Outer-extent points [row, col].
+    levels : ndarray of shape (M,)
+        The absolute recovery level of each point's ray.
+    rays : ndarray of shape (M,)
+        The index of each point's ray among ``cfg.outer_rays``.
     """
     rc, cc, radius = circle
     smooth = cv2.GaussianBlur(image, (0, 0), cfg.outer_blur_sigma)
@@ -234,7 +254,7 @@ def outer_extent(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, fl
     use = ok_d & ok_b
     use[use] = (bg[use] - dark[use]) >= cfg.outer_min_contrast
     if not use.any():
-        return np.empty((0, 2))
+        return np.empty((0, 2)), np.empty(0), np.empty(0, int)
     p, th_u, d, bgl = prof[use], th[use], dark[use], bg[use]
     l50 = (d + 0.5 * (bgl - d))[:, None]
     l90 = (d + cfg.outer_level * (bgl - d))[:, None]
@@ -255,4 +275,5 @@ def outer_extent(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, fl
     r_b = np.where(kk > j, interp, rs[kk])
     keep = has_up & has_b & np.isfinite(r_b)
     th_k, r_k = th_u[keep], r_b[keep]
-    return np.column_stack([rc + np.sin(th_k) * r_k, cc + np.cos(th_k) * r_k])
+    return (np.column_stack([rc + np.sin(th_k) * r_k, cc + np.cos(th_k) * r_k]), l90[keep, 0],
+            np.nonzero(use)[0][keep])
