@@ -9,11 +9,12 @@ from __future__ import annotations
 
 import csv
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping, Sequence
 
 import numpy as np
 
 from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
+from bubbletrack.model.export_fit import FitColumns
 from bubbletrack.model.export_meta import (
     META_SHEET_TITLE,
     excel_value,
@@ -23,15 +24,16 @@ from bubbletrack.model.export_meta import (
 from bubbletrack.model.rmax import locate_rmax, valid_frame_mask
 
 # A data cell: its value plus the format spec used to render it as CSV
-# text.  Excel receives the raw value so that cells stay numeric.
-_Cell = tuple["int | float", str]
+# text.  Excel receives the raw value so that cells stay numeric (text
+# cells, e.g. Source and Flags, are passed through unchanged).
+_Cell = tuple["int | float | str", str]
 
 _FMT_INT = "d"
 _FMT_TIME = ".8f"
 _FMT_LENGTH = ".4f"
 
 
-def _excel_number(value: int | float) -> int | float | None:
+def _excel_number(value: int | float | str) -> int | float | str | None:
     """Return *value* for an Excel cell; NaN/inf (unsupported) become empty."""
     if isinstance(value, float) and not math.isfinite(value):
         return None
@@ -100,6 +102,7 @@ def _iter_data_rows(
     um2px: float | None,
     region_count: np.ndarray | None,
     rmax_frame: float | None,
+    fit: FitColumns,
 ) -> Iterator[list[_Cell]]:
     """Yield the cells of every processed frame, skipping ``radius <= 0``."""
     for i in range(len(radius)):
@@ -114,7 +117,7 @@ def _iter_data_rows(
                 None if region_count is None else int(region_count[i])
             ),
             rmax_frame=rmax_frame,
-        )
+        ) + fit.cells(i)
 
 
 def _build_table(
@@ -125,12 +128,14 @@ def _build_table(
     um2px: float | None,
     region_count: np.ndarray | None,
     rmax_fit_length: int,
+    fit: FitColumns,
 ) -> tuple[list[str], Iterator[list[_Cell]], str]:
     """Return ``(header, rows, warning)`` shared by the CSV and Excel writers.
 
     With *fps*, Rmax is located by :func:`locate_rmax` (the same estimate
     as the RofT ``.mat`` export) to fill ``Time_from_Rmax_s``; *warning*
-    carries its caveats, or is empty.
+    carries its caveats, or is empty.  *fit* adds the trailing per-frame
+    fit-result columns.
     """
     rmax_frame: float | None = None
     warning = ""
@@ -147,11 +152,11 @@ def _build_table(
         has_fps=fps is not None,
         has_scale=um2px is not None,
         has_region_count=region_count is not None,
-    )
+    ) + fit.header()
     rows = _iter_data_rows(
         radius, circle_fit_par,
         fps=fps, um2px=um2px, region_count=region_count,
-        rmax_frame=rmax_frame,
+        rmax_frame=rmax_frame, fit=fit,
     )
     return header, rows, warning
 
@@ -166,6 +171,11 @@ def export_csv(
     region_count: np.ndarray | None = None,
     rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
     metadata: dict | None = None,
+    fit_source: np.ndarray | None = None,
+    fit_confidence: np.ndarray | None = None,
+    fit_locked: np.ndarray | None = None,
+    fit_flags: Sequence[frozenset[str]] | None = None,
+    fit_metrics: Mapping[str, np.ndarray] | None = None,
 ) -> str:
     """Export results to CSV format.
 
@@ -189,6 +199,12 @@ def export_csv(
     metadata : dict or None
         Provenance; when given it is written as JSON to a sidecar file
         ``<name>.meta.json`` next to the CSV.  The CSV itself is unchanged.
+    fit_source, fit_confidence, fit_locked, fit_flags, fit_metrics
+        Per-frame fit results as stored in ``AppState`` (see
+        :func:`~bubbletrack.model.export_fit.fit_result_arrays`).  Each one
+        given appends its columns after all the others: ``Source`` (name),
+        ``Confidence``, ``Locked`` (0/1), ``Flags`` (``a|b``) and one column
+        per metric (``R_Circle_px``, ``Area_px2``, ...).
 
     Returns
     -------
@@ -203,10 +219,14 @@ def export_csv(
     the 1-based (possibly fractional) Rmax position from
     :func:`locate_rmax`; this equals ``t`` of the RofT ``.mat`` export.
     """
+    fit = FitColumns.build(
+        len(radius), fit_source=fit_source, fit_confidence=fit_confidence,
+        fit_locked=fit_locked, fit_flags=fit_flags, fit_metrics=fit_metrics,
+    )
     header, rows, warning = _build_table(
         radius, circle_fit_par,
         fps=fps, um2px=um2px, region_count=region_count,
-        rmax_fit_length=rmax_fit_length,
+        rmax_fit_length=rmax_fit_length, fit=fit,
     )
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
@@ -229,6 +249,11 @@ def export_excel(
     region_count: np.ndarray | None = None,
     rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH,
     metadata: dict | None = None,
+    fit_source: np.ndarray | None = None,
+    fit_confidence: np.ndarray | None = None,
+    fit_locked: np.ndarray | None = None,
+    fit_flags: Sequence[frozenset[str]] | None = None,
+    fit_metrics: Mapping[str, np.ndarray] | None = None,
 ) -> str:
     """Export results to Excel (.xlsx) format with numeric cells.
 
@@ -252,6 +277,9 @@ def export_excel(
     metadata : dict or None
         Provenance; when given it is written to a second sheet
         ``Metadata`` as Key/Value rows (lists are JSON-encoded).
+    fit_source, fit_confidence, fit_locked, fit_flags, fit_metrics
+        Per-frame fit results; columns as in :func:`export_csv`.  Numbers
+        stay numeric and NaN becomes an empty cell.
 
     Returns
     -------
@@ -265,10 +293,14 @@ def export_excel(
     # Lazy import to avoid hard dependency
     from openpyxl import Workbook  # type: ignore[import-untyped]
 
+    fit = FitColumns.build(
+        len(radius), fit_source=fit_source, fit_confidence=fit_confidence,
+        fit_locked=fit_locked, fit_flags=fit_flags, fit_metrics=fit_metrics,
+    )
     header, rows, warning = _build_table(
         radius, circle_fit_par,
         fps=fps, um2px=um2px, region_count=region_count,
-        rmax_fit_length=rmax_fit_length,
+        rmax_fit_length=rmax_fit_length, fit=fit,
     )
 
     wb = Workbook()

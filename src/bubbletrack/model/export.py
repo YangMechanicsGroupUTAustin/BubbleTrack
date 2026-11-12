@@ -5,16 +5,20 @@ in focused modules and are re-exported here, so callers keep importing
 from ``bubbletrack.model.export``:
 
 - ``export_meta``  -- provenance metadata (struct / sheet / JSON sidecar),
+- ``export_fit``   -- per-frame fit results (source, confidence, flags, ...),
 - ``rmax``         -- the Rmax estimate shared by RofT and the tables,
 - ``export_table`` -- the CSV and Excel writers.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import numpy as np
 import scipy.io
 from scipy.io import savemat
 
+from bubbletrack.model.export_fit import FitColumns, fit_result_arrays
 from bubbletrack.model.export_meta import (
     META_MAT_VARIABLE,
     META_SHEET_TITLE,
@@ -40,6 +44,7 @@ __all__ = [
     "export_excel",
     "export_r_data",
     "export_rof_t_data",
+    "fit_result_arrays",
     "locate_rmax",
     "rmax_fit_half_window",
     "safe_loadmat",
@@ -85,6 +90,11 @@ def export_r_data(
     region_count: np.ndarray | None = None,
     *,
     metadata: dict | None = None,
+    fit_source: np.ndarray | None = None,
+    fit_confidence: np.ndarray | None = None,
+    fit_locked: np.ndarray | None = None,
+    fit_flags: Sequence[frozenset[str]] | None = None,
+    fit_metrics: Mapping[str, np.ndarray] | None = None,
 ) -> None:
     """Save raw fitting results to a ``.mat`` file.
 
@@ -103,7 +113,23 @@ def export_r_data(
     metadata : dict or None
         Provenance (detection settings, version, ...).  When given it is
         saved as the struct variable ``BubbleTrackMeta``.
+    fit_source, fit_confidence, fit_locked, fit_flags, fit_metrics
+        Per-frame fit results as stored in ``AppState`` (see
+        :func:`fit_result_arrays`); each one given adds its variables:
+        ``FitSource`` (int8 codes) with ``FitSourceNames`` (cellstr, so
+        ``FitSourceNames{FitSource(k) + 1}`` names frame k),
+        ``FitConfidence``, ``FitLocked`` (logical), ``FitFlags`` (cellstr
+        of ``a|b`` strings) and the struct ``FitMetrics``.
+
+    Raises
+    ------
+    ValueError
+        If a per-frame fit result does not have one entry per frame.
     """
+    fit = FitColumns.build(
+        len(radius), fit_source=fit_source, fit_confidence=fit_confidence,
+        fit_locked=fit_locked, fit_flags=fit_flags, fit_metrics=fit_metrics,
+    )
     # Replace None entries with empty arrays for savemat compatibility
     cleaned_edges = [
         (e if e is not None else np.empty((0, 2))) for e in edge_pts
@@ -116,6 +142,7 @@ def export_r_data(
     }
     if region_count is not None:
         data["RegionCount"] = region_count.reshape(1, -1)
+    data.update(fit.mat_variables())
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
     savemat(save_path, data)
