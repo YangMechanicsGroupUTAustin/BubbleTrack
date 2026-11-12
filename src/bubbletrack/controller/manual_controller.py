@@ -6,6 +6,7 @@ import logging
 
 import numpy as np
 
+from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
     display_frame,
@@ -171,6 +172,7 @@ class ManualController(BaseController):
             self.state.region_count[idx] = 0
         if self.state.fit_source is not None:
             self.state.fit_source[idx] = FitSource.NONE
+        edge_support.clear_scoring(self.state, idx)
 
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 

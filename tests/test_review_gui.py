@@ -67,10 +67,9 @@ class TestInstall:
         toggle.trigger()
         assert not rc.dock.isHidden()
 
-    def test_existing_view_menu_is_reused(self, gui):
+    def test_installed_once_at_startup(self, gui):
         window, controller = gui
-        window.menuBar().addMenu("&View")
-        install_review(window, controller)
+        assert install_review(window, controller) is controller.review
         view = [a for a in window.menuBar().actions() if a.text().replace("&", "") == "View"]
         assert len(view) == 1 and len(view[0].menu().actions()) == 1
 
@@ -144,7 +143,10 @@ class TestActions:
         rc.perform("delete")
         assert state.radius[3] == -1.0 and state.fit_source[3] == FitSource.NONE
         assert rc.count == 0
-        state.radius[3] = 35.0  # a new result for that frame is reviewed again
+        # A new low-confidence result for that frame is reviewed again (deleting
+        # cleared the old score, so the new fit brings its own).
+        state.radius[3] = 35.0
+        state.fit_confidence[3] = 0.2
         rc.refresh()
         assert rc.panel.frames() == [3]
 

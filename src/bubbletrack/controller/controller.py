@@ -118,6 +118,10 @@ class AppController:
         self._connect_signals()
         self._sync_ui_from_state()
 
+        # Review queue dock (suspicious frames, one-key triage)
+        from bubbletrack.controller.review_controller import install_review
+        self.review = install_review(self.w, self)
+
         # Keyboard shortcuts
         self._shortcuts = setup_shortcuts(self.w, {
             "frame_prev": lambda: self.file_ctrl.on_frame_changed(
@@ -309,6 +313,7 @@ class AppController:
             self._state.circle_xy[idx] = None
         if self._state.fit_source is not None:
             self._state.fit_source[idx] = FitSource.NONE
+        edge_support.clear_scoring(self._state, idx)
 
         self._refresh_chart()
 

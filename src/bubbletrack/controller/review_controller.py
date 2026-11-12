@@ -381,7 +381,14 @@ def _view_menu(window) -> QMenu:
 
 
 def install_review(window, app_controller) -> ReviewController:
-    """Add the Review dock (and a View menu toggle) to *window*."""
+    """Add the Review dock (and a View menu toggle) to *window*.
+
+    Idempotent: the app controller installs it at start-up, and a second
+    call returns that instance instead of adding another dock and key set.
+    """
+    existing = getattr(app_controller, "review", None)
+    if isinstance(existing, ReviewController):
+        return existing
     panel = ReviewPanel()
     dock = QDockWidget("Review", window)
     dock.setObjectName("ReviewDock")
