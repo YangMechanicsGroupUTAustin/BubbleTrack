@@ -4,8 +4,8 @@ After Fit All, every frame has a single-frame :class:`Observation`.  The solver
 tracks the bubble forwards and backwards from a seed with a constant-velocity
 prediction and adaptive gates, re-runs the detector with a circle prior only
 on frames whose raw result is inconsistent with the track, finds collapses
-and cycles, stops at a post-collapse fragment cloud, and returns a prioritised
-review list.  Manual or accepted frames are hard anchors.
+and cycles, marks post-collapse fragment clouds (no bubble until one re-forms),
+and returns a prioritised review list.  Manual or accepted frames are hard anchors.
 
 Public API::
 

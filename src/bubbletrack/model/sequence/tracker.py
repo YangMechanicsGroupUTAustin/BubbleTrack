@@ -16,14 +16,21 @@ An acceptance right after a loss is flagged ``reacquired`` and needs
 ``release_ratio`` of the last one) the radius window is released to
 [0, ceiling] so the minimum and the rebound are accepted.
 
-After such a release, ``cloud_frames`` consecutive cloud-like frames end a
-forward pass: flagged ``fragmented`` by the detector, or small with nothing solid
-on the track and no object persisting from the previous frame (a weak residual
-bubble persists, fragments do not).  The remaining frames are ``none`` +
-``cloud``.  A backward pass is never cut short (a wrong stop would erase whole
-earlier cycles); at either sequence end or a "no bubble" anchor, a trailing run
-of cloud-like frames (after a release) or of lost frames where nothing at all was
-detected is ``none``: no bubble yet / any more.
+After such a release, ``cloud_frames`` consecutive cloud-like frames are a
+post-collapse fragment cloud.  A frame is cloud-like when no single body persists
+on the track (no detection near it lies within max(2 px, 0.2 R) of one in the
+previous frame: a bubble of any size stays put, the main body of a cloud hops
+between fragments) and there are fragments: the detector flags the tracked
+(accepted) body ``fragmented``, or the tracked body is small (below
+``cloud_radius_frac`` x the bubble's Rmax; for a lost frame its last measured
+radius, while the loss is recent).  An unverified detection elsewhere says nothing
+about the tracked bubble.  A forward pass marks the cloud ``none`` + ``cloud``
+until a bubble re-forms (a rebound or the next pulse: two consecutive confident
+raw detections of one body); tracking restarts there.  A backward pass is never
+cut short (a wrong stop would erase whole earlier cycles); at either sequence end
+or a "no bubble" anchor, a trailing run of cloud-like frames (after a release) or
+of lost frames where nothing at all was detected is ``none``: no bubble yet / any
+more.
 """
 
 from __future__ import annotations
@@ -45,6 +52,12 @@ logger = logging.getLogger(__name__)
 
 _FRAGMENTED = "fragmented"
 _HISTORY = 3
+_SAME_PLACE_PX = 2.0
+_SAME_PLACE_FRAC = 0.2
+"""Two detections in consecutive frames are one body when their centres lie within
+max(2 px, 0.2 R) (radius free: collapses are fast).  On the LIC recordings 95 % of
+consecutive verified frames move by at most 0.1 R (98 % by 0.2 R); the main body of a
+fragment cloud hops by a large fraction of R."""
 
 
 @dataclass(frozen=True)
@@ -128,37 +141,27 @@ def measure(frame: int, raw: Observation, pred: Prediction, coast: int, cache: R
     return Step(raw, SOURCE_LOST, frozenset({FLAG_LOST}), again)
 
 
-def _fragmented(step: Step, raw: Observation, pred: Prediction, rmax: float,
-                cfg: SequenceConfig) -> bool:
-    """Fragments around a small main body (below ``cloud_radius_frac`` x Rmax).
+def _fragmented(step: Step) -> bool:
+    """The detector reports fragments around the tracked body (the frame's accepted measurement).
 
-    Fragments next to a full-size bubble are satellites or debris (the engine
-    counts any other dark region within ~2 R), not a cloud.  Measured on LIC:
-    LIC 151 -> 182 / 235 solver-correct frames, lic_hard 43 -> 70 / 182; a
-    confidence test instead (>= reacquire_confidence) gave 158 and 43."""
-    small = cfg.cloud_radius_frac * rmax
-    for obs in (raw, step.obs):
-        if _FRAGMENTED in obs.flags and (obs.radius if obs.ok else pred.last_radius) < small:
-            return True
-    return False
+    An unverified detection elsewhere says nothing about the tracked bubble: on edge-1.1.0
+    the single-frame result often picks a debris particle beside a well-tracked bubble."""
+    return step.accepted and _FRAGMENTED in step.obs.flags
 
 
-def _small_and_unsupported(step: Step, raw: Observation, pred: Prediction, rmax: float,
-                           cfg: SequenceConfig) -> bool:
-    """Small (below ``cloud_radius_frac`` x the pass's Rmax) with nothing solid on the track.
+def _small(step: Step, pred: Prediction, coast: int, rmax: float, cfg: SequenceConfig) -> bool:
+    """The tracked body is below ``cloud_radius_frac`` x the bubble's Rmax.
 
-    Solid = any measurement of the frame (raw or re-detected) centred inside the
-    tight gate with at least ``min_confidence`` (its radius may jump: collapses are
-    fast), or a confident raw bubble of non-cloud size inside the wide gate."""
-    small = cfg.cloud_radius_frac * rmax
-    r_eff = step.obs.radius if step.accepted else pred.last_radius
-    if not r_eff < small:
+    A lost frame only shows the last measured radius: it counts while the loss is recent
+    (at most ``max_redetect_coast`` lost frames); after a long loss the bubble may have
+    regrown or drifted."""
+    if step.accepted:
+        radius = step.obs.radius
+    elif coast <= cfg.max_redetect_coast:
+        radius = pred.last_radius
+    else:
         return False
-    seen = (step.obs, raw) if step.again is None else (step.obs, raw, step.again)
-    if any(centre_within(m, pred) and confident(m, cfg.min_confidence) for m in seen):
-        return False
-    return not (within(raw, pred, cfg.wide_gate_factor) and raw.radius >= small
-                and confident(raw, cfg.low_confidence))
+    return radius < cfg.cloud_radius_frac * rmax
 
 
 def _near_track(step: Step, raw: Observation, pred: Prediction, cfg: SequenceConfig) -> tuple[Observation, ...]:
@@ -167,28 +170,40 @@ def _near_track(step: Step, raw: Observation, pred: Prediction, cfg: SequenceCon
     return tuple(m for m in found if centre_within(m, pred, cfg.wide_gate_factor))
 
 
+def _same_place(a: Observation, b: Observation) -> bool:
+    """One body in consecutive frames (see ``_SAME_PLACE_PX``)."""
+    reach = max(_SAME_PLACE_PX, _SAME_PLACE_FRAC * max(a.radius, b.radius))
+    return math.hypot(a.rc - b.rc, a.cc - b.cc) <= reach
+
+
 def _persistent(seen: tuple[Observation, ...], before: tuple[Observation, ...]) -> bool:
-    """Did the same small object appear in the previous frame (a residual bubble, not fragments)?"""
-    for a in seen:
-        for b in before:
-            r = max(a.radius, b.radius)
-            if (math.hypot(a.rc - b.rc, a.cc - b.cc) <= max(3.0, 0.3 * r)
-                    and abs(a.radius - b.radius) <= max(2.0, 0.25 * r)):
-                return True
-    return False
+    """Did a body near the track stay put since the previous frame (a bubble, not fragments)?"""
+    return any(_same_place(a, b) for a in seen for b in before)
 
 
-def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, stop: int,
-             cache: RedetectCache, cfg: SequenceConfig, *, stop_is_end: bool = True) -> dict[int, Step]:
-    """Track from ``start`` (exclusive) towards ``stop`` (exclusive) in ``direction`` (+1 / -1).
+@dataclass(frozen=True)
+class _Segment:
+    """One bubble followed by a pass, up to the pass end or (forwards) a confirmed cloud."""
 
-    ``stop_is_end``: ``stop`` is the sequence boundary or a "no bubble" anchor (the trailing
-    frames may then become ``none``), not another seed whose own passes cover them."""
+    steps: dict
+    last: int
+    """Last frame measured."""
+    run: tuple[int, ...]
+    """Trailing cloud-like frames."""
+    armed: bool
+    """A collapse was seen."""
+    cloud: bool
+    """The segment ended at a cloud starting at ``run[0]``."""
+
+
+def _follow(raw: tuple[Observation, ...], start: TrackPoint, direction: int, stop: int,
+            cache: RedetectCache, cfg: SequenceConfig) -> _Segment:
+    """Track one bubble from ``start`` (exclusive) towards ``stop`` (exclusive)."""
     history: tuple[TrackPoint, ...] = (start,)
     c_err: tuple[float, ...] = ()
     r_err: tuple[float, ...] = ()
     coast, armed, rmax = 0, False, start.radius
-    run: list[int] = []
+    run: tuple[int, ...] = ()
     seen: tuple[Observation, ...] = ()
     steps: dict[int, Step] = {}
     frame = start.frame + direction
@@ -208,21 +223,53 @@ def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, st
         else:
             coast += 1
         before, seen = seen, _near_track(step, raw[frame], pred, cfg)
-        cloudy = armed and (_fragmented(step, raw[frame], pred, rmax, cfg)
-                            or (_small_and_unsupported(step, raw[frame], pred, rmax, cfg)
-                                and not _persistent(seen, before)))
-        run = run + [frame] if cloudy else []
+        cloudy = (armed and not _persistent(seen, before)
+                  and (_fragmented(step) or _small(step, pred, coast, rmax, cfg)))
+        run = run + (frame,) if cloudy else ()
         if direction > 0 and len(run) >= cfg.cloud_frames:
-            return _terminate(steps, run[0], direction, stop, len(raw), cloud=True)
+            return _Segment(steps, frame, run, armed, cloud=True)
         frame += direction
+    return _Segment(steps, frame - direction, run, armed, cloud=False)
+
+
+def _reformed(raw: tuple[Observation, ...], lo: int, hi: int, cfg: SequenceConfig) -> int | None:
+    """First frame in ``lo..hi-1`` where a bubble re-forms after a cloud (a rebound or the next
+    pulse): it and the next frame hold one body with ``reacquire_confidence`` (raw only)."""
+    for f in range(lo, hi - 1):
+        a, b = raw[f], raw[f + 1]
+        if (a.ok and b.ok and confident(a, cfg.reacquire_confidence)
+                and confident(b, cfg.reacquire_confidence) and _same_place(a, b)):
+            return f
+    return None
+
+
+def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, stop: int,
+             cache: RedetectCache, cfg: SequenceConfig, *, stop_is_end: bool = True) -> dict[int, Step]:
+    """Track from ``start`` (exclusive) towards ``stop`` (exclusive) in ``direction`` (+1 / -1).
+
+    ``stop_is_end``: ``stop`` is the sequence boundary or a "no bubble" anchor (the trailing
+    frames may then become ``none``), not another seed whose own passes cover them."""
+    steps: dict[int, Step] = {}
+    seg = _follow(raw, start, direction, stop, cache, cfg)
+    while seg.cloud:                   # forwards only: no bubble until one re-forms
+        end = min(len(raw), stop)
+        back = _reformed(raw, seg.last + 1, end, cfg)
+        steps.update(seg.steps)
+        steps.update(_no_bubble(range(seg.run[0], end if back is None else back), cloud=True))
+        if back is None:
+            return steps
+        obs = raw[back]
+        steps[back] = Step(obs, SOURCE_RAW, frozenset({FLAG_REACQUIRED}))
+        seg = _follow(raw, TrackPoint(back, obs.rc, obs.cc, obs.radius), direction, stop, cache, cfg)
+    steps.update(seg.steps)
     if not stop_is_end:                # stopped at another seed: that one's passes take over
         return steps
     first = _empty_tail(steps, raw, direction)
-    if run and (first is None or (run[0] - first) * direction < 0):
-        first = run[0]
+    if seg.run and (first is None or (seg.run[0] - first) * direction < 0):
+        first = seg.run[0]
     if first is None:
         return steps
-    return _terminate(steps, first, direction, stop, len(raw), cloud=armed and direction > 0)
+    return _terminate(steps, first, direction, stop, len(raw), cloud=seg.armed and direction > 0)
 
 
 def _empty_tail(steps: dict[int, Step], raw: tuple[Observation, ...], direction: int) -> int | None:
@@ -236,11 +283,15 @@ def _empty_tail(steps: dict[int, Step], raw: tuple[Observation, ...], direction:
     return first
 
 
+def _no_bubble(frames: range, *, cloud: bool) -> dict[int, Step]:
+    """``none`` steps for ``frames`` (flag ``cloud`` after a collapse)."""
+    flags = frozenset({FLAG_CLOUD}) if cloud else frozenset()
+    return {f: Step(NO_OBSERVATION, SOURCE_NONE, flags) for f in frames}
+
+
 def _terminate(steps: dict[int, Step], first: int, direction: int, stop: int, n: int, *,
                cloud: bool) -> dict[int, Step]:
     """Frames from ``first`` to the pass end have no bubble (``cloud`` after a collapse)."""
-    flags = frozenset({FLAG_CLOUD}) if cloud else frozenset()
     end = min(n, stop) if direction > 0 else max(-1, stop)
     kept = {f: s for f, s in steps.items() if (f - first) * direction < 0}
-    kept.update({f: Step(NO_OBSERVATION, SOURCE_NONE, flags) for f in range(first, end, direction)})
-    return kept
+    return kept | _no_bubble(range(first, end, direction), cloud=cloud)

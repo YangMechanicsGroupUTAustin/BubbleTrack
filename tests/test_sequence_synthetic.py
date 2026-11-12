@@ -13,7 +13,9 @@ A frame counts when the true bubble is measurable (R >= 3 px, centre inside the 
 must be a verified solution with |dR| <= max(1 px, 3 %) and centre error <= max(2 px, 10 % R).
 Cloud frames must be ``none`` with the ``cloud`` flag.
 
-Measured (edge-1.0.0): every measurable frame correct in both set-ups (19-33 per scenario).
+Measured (edge-1.0.0, and again on edge-1.1.0): every measurable frame correct in both set-ups
+(19-33 per scenario).  On edge-1.1.0 the cloud fragments are detected confidently (0.5-0.7) as
+tiny bubbles; they count as a cloud because no body stays put from frame to frame.
 Single-frame Fit All alone: with the click 11/19 at drift 20, 15/19 at drift 15, 18/21 on the
 jet; without it 0/19 wherever the larger satellite is in view.  Redetect calls: 4-12 per
 sequence with the click (collapse and the frames the click misses), 14-22 without it.
@@ -92,8 +94,6 @@ def _verdicts(frames, gt, sol_of):
 @pytest.mark.parametrize("mode", ["click", "anchor"])
 @pytest.mark.parametrize("name", list(SPECS))
 def test_every_measurable_frame_is_solved(solved, name, mode):
-    if (name, mode) == ("collapse_rebound_cloud", "anchor"):
-        pytest.xfail("engine edge-1.1.0: the cloud is tracked one frame too long; follow-up in progress")
     frames, gt, raw, res, calls = solved(name, mode)
 
     def solved(t):
