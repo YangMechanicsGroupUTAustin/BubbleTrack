@@ -46,8 +46,16 @@ def make_params(*, edge_definition: str = "steep", polarity: str = "dark",
 
 
 def params_from_state(state, *, prior: tuple[float, float, float] | None = None):
+    """Engine settings for *state*; a *prior* circle replaces the seed click.
+
+    With both, the seed decides the candidate and the prior is ignored; on
+    the labelled LIC sets that cost 3 points of accuracy for neighbour and
+    drag refits (85 -> 82 %, 34 -> 31 %), and on a moving bubble the click
+    is far from the bubble in most frames anyway.
+    """
+    seed = None if prior is not None else state.edge_seed
     return make_params(edge_definition=state.edge_definition, polarity=state.edge_polarity,
-                       seed=state.edge_seed, prior=prior)
+                       seed=seed, prior=prior)
 
 
 def read_raw(source) -> np.ndarray:

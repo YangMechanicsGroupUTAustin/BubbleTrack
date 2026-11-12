@@ -238,3 +238,13 @@ def test_config_persists_edge_settings(isolated_config):
     assert cfg["detection_mode"] == "edge"
     assert cfg["edge_definition"] == "outer"
     assert cfg["edge_polarity"] == "bright"
+
+
+def test_a_prior_replaces_the_seed_click():
+    """Neighbour refits pass a prior; keeping the seed would make the engine ignore it."""
+    from bubbletrack.model.state import AppState
+
+    state = update_state(AppState(), edge_seed=(10.0, 20.0))
+    assert edge_pipeline.params_from_state(state).seed == (10.0, 20.0)
+    with_prior = edge_pipeline.params_from_state(state, prior=(50.0, 60.0, 12.0))
+    assert with_prior.seed is None and with_prior.prior == (50.0, 60.0, 12.0)
