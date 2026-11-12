@@ -21,9 +21,9 @@ forward pass: flagged ``fragmented`` by the detector, or small with nothing soli
 on the track and no object persisting from the previous frame (a weak residual
 bubble persists, fragments do not).  The remaining frames are ``none`` +
 ``cloud``.  A backward pass is never cut short (a wrong stop would erase whole
-earlier cycles); at either sequence end, a trailing run of cloud-like frames
-(after a release) or of lost frames where nothing at all was detected is
-``none``: no bubble yet / any more.
+earlier cycles); at either sequence end or a "no bubble" anchor, a trailing run
+of cloud-like frames (after a release) or of lost frames where nothing at all was
+detected is ``none``: no bubble yet / any more.
 """
 
 from __future__ import annotations
@@ -168,8 +168,11 @@ def _persistent(seen: tuple[Observation, ...], before: tuple[Observation, ...]) 
 
 
 def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, stop: int,
-             cache: RedetectCache, cfg: SequenceConfig) -> dict[int, Step]:
-    """Track from ``start`` (exclusive) towards ``stop`` (exclusive) in ``direction`` (+1 / -1)."""
+             cache: RedetectCache, cfg: SequenceConfig, *, stop_is_end: bool = True) -> dict[int, Step]:
+    """Track from ``start`` (exclusive) towards ``stop`` (exclusive) in ``direction`` (+1 / -1).
+
+    ``stop_is_end``: ``stop`` is the sequence boundary or a "no bubble" anchor (the trailing
+    frames may then become ``none``), not another seed whose own passes cover them."""
     history: tuple[TrackPoint, ...] = (start,)
     c_err: tuple[float, ...] = ()
     r_err: tuple[float, ...] = ()
@@ -201,7 +204,7 @@ def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, st
         if direction > 0 and len(run) >= cfg.cloud_frames:
             return _terminate(steps, run[0], direction, stop, len(raw), cloud=True)
         frame += direction
-    if 0 <= frame < len(raw):          # stopped at another anchor: that one's passes take over
+    if not stop_is_end:                # stopped at another seed: that one's passes take over
         return steps
     first = _empty_tail(steps, raw, direction)
     if run and (first is None or (run[0] - first) * direction < 0):

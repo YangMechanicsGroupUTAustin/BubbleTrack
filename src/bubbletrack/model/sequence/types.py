@@ -28,7 +28,10 @@ FLAG_JUMP = "jump"                    # accepted outside the tight gate (sudden 
 FLAG_CLOUD = "cloud"                  # post-collapse fragment cloud: tracking stopped
 
 RAW_REVIEW_FLAGS = ("fragmented", "non_circular", "clipped_completed")
-"""Single-frame (engine) flags that put a frame on the review list."""
+"""Single-frame (engine) flags that put a frame on the review list.  ``fragmented`` and
+``clipped_completed`` belong to the shared per-frame result contract; edge-1.0.0 does not
+emit them yet (it emits ``non_circular``).  Plain ``clipped`` is deliberately not listed:
+a bubble cut by the frame edge is routine (example_1 is clipped on every frame)."""
 
 
 def _as_float(value, name: str) -> float:

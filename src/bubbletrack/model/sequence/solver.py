@@ -8,7 +8,8 @@
    next anchor (so anchors reset the track state) or the sequence end.
 3. A frame covered by two passes takes the nearer seed's accepted result
    (flag ``disagree`` when the two passes found different circles).
-4. Collapses and cycles from the verified radii; flags; the review list.
+4. Collapses and cycles from the verified radii of each bubble lifetime (runs
+   between "no bubble" frames); flags; the review list.
 """
 
 from __future__ import annotations
@@ -101,8 +102,8 @@ def _passes(raw, seeds: dict[int, TrackPoint], hard: list[int], cache, cfg) -> l
     for s, point in seeds.items():
         nxt = min((h for h in hard if h > s), default=len(raw))
         prv = max((h for h in hard if h < s), default=-1)
-        out.append((s, run_pass(raw, point, +1, nxt, cache, cfg)))
-        out.append((s, run_pass(raw, point, -1, prv, cache, cfg)))
+        out.append((s, run_pass(raw, point, +1, nxt, cache, cfg, stop_is_end=nxt not in seeds)))
+        out.append((s, run_pass(raw, point, -1, prv, cache, cfg, stop_is_end=prv not in seeds)))
     return out
 
 
@@ -116,13 +117,14 @@ def _coverage(n: int, passes: list[tuple[int, dict]]) -> list[list[tuple[int, in
 
 
 def _merge(cands: list[tuple[int, int, Step]], cfg: SequenceConfig) -> tuple[Step | None, bool]:
-    """(chosen step, passes disagree): the nearest seed's accepted result, else its loss."""
+    """(chosen step, passes disagree): the nearest seed's accepted result; without one, a
+    pass's "no bubble" verdict (cloud, vanished) over another's loss."""
     cands = sorted(cands, key=lambda c: (c[0], c[1]))
     if not cands:
         return None, False
     accepted = [c[2] for c in cands if c[2].accepted]
     if not accepted:
-        return cands[0][2], False
+        return next((c[2] for c in cands if c[2].source == SOURCE_NONE), cands[0][2]), False
     split = len(accepted) > 1 and disagree(accepted[0].obs, accepted[1].obs, cfg)
     return accepted[0], split
 
@@ -149,10 +151,35 @@ def _anchor_solution(circle: tuple[float, float, float]) -> FrameSolution:
     return FrameSolution(_NAN, _NAN, _NAN, 1.0, SOURCE_ANCHOR, frozenset(), -1)
 
 
-def _with_cycles(frames: list[FrameSolution], cfg: SequenceConfig):
+def _lifetimes(frames: list[FrameSolution]) -> list[tuple[int, int]]:
+    """Inclusive runs of frames between "no bubble" frames (``none`` or an empty anchor)."""
+    gone = [f.source == SOURCE_NONE or (f.source == SOURCE_ANCHOR and not f.ok) for f in frames]
+    runs, start = [], None
+    for i, g in enumerate(gone + [True]):
+        if not g and start is None:
+            start = i
+        elif g and start is not None:
+            runs.append((start, i - 1))
+            start = None
+    return runs
+
+
+def _cycles_by_lifetime(frames: list[FrameSolution], cfg: SequenceConfig):
+    """Collapses and cycles per bubble lifetime, so a gap without a bubble is never bridged:
+    the last collapse before a gap is found, and re-nucleation after it is a new cycle."""
     verified = np.array([f.radius if f.source in (SOURCE_RAW, SOURCE_TRACKED, SOURCE_ANCHOR) else _NAN
                          for f in frames])
-    collapses, cycles = detect_cycles(verified, config=cfg)
+    collapses, cycles = [], []
+    for a, b in _lifetimes(frames):
+        seg = verified[a:min(b + 2, len(frames))]          # one gone frame after: the bubble vanished
+        c, cy = detect_cycles(seg, config=cfg)
+        collapses += [a + k for k in c if a + k <= b]
+        cycles += [(a + s, a + e) for s, e in cy]
+    return tuple(collapses), tuple(cycles)
+
+
+def _with_cycles(frames: list[FrameSolution], cfg: SequenceConfig):
+    collapses, cycles = _cycles_by_lifetime(frames, cfg)
     cycle_of = np.full(len(frames), -1)
     for k, (a, b) in enumerate(cycles):
         cycle_of[a:b + 1] = k

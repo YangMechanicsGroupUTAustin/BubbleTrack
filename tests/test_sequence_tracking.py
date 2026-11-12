@@ -200,3 +200,19 @@ def test_a_backward_pass_never_stops_early_so_earlier_cycles_survive():
     assert all(res.frames[i].source == "lost" for i in blind)
     assert all_correct(res, truth, skip=blind | {41})
     assert "reacquired" in res.frames[26].flags
+
+
+def test_a_gap_without_bubble_ends_a_lifetime_and_is_not_reviewed():
+    """Bubble 1 vanishes after frame 25, a second one nucleates at 35; the user marked frame 30
+    "no bubble".  The gap is ``none`` (not lost), the collapse before it is found, and the
+    re-nucleation is the start of a new cycle, not a collapse."""
+    truth = truth_track(rayleigh_radii(60, [(-1, 27, 50.0), (34, 24, 40.0)]))
+    res = solve_sequence(observe(truth), ScriptedDetector(truth), anchors={30: (NAN, NAN, -1.0)})
+    gap = [i for i in range(26, 35) if i != 30]
+    assert all(res.frames[i].source == "none" and res.frames[i].cycle == -1 for i in gap)
+    reviewed = dict(res.review)
+    assert reviewed.get(26) == ("cloud",)               # only where tracking stopped, ranked low
+    assert not (set(gap) - {26}) & set(reviewed)
+    assert res.collapse_frames == (25, 57)            # both bubbles vanish after collapsing
+    assert res.cycles == ((0, 25), (35, 57))
+    assert all_correct(res, truth)
