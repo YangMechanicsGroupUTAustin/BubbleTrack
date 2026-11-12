@@ -95,8 +95,23 @@ class AutoController(BaseController):
                 "#ef4444",
             )
             return
-        start_idx = display_to_frame(start)
-        end_idx = display_to_frame(end)
+        self.fit_range(display_to_frame(start), display_to_frame(end))
+
+    def fit_range(self, start_idx: int, end_idx: int) -> None:
+        """Fit frames start_idx..end_idx (0-based, inclusive) in the background.
+
+        Same run as Fit All (locked frames kept, manual fits asked about),
+        without changing the From/To fields of the Automatic tab.
+        """
+        if not self.state.images:
+            return
+        if self.is_busy():
+            self.w.header.set_status("A fit is already running", "#f59e0b")
+            return
+        start_idx = max(0, start_idx)
+        end_idx = min(end_idx, len(self.state.images) - 1)
+        if start_idx > end_idx:
+            return
 
         protected = self._choose_protected_frames(start_idx, end_idx)
         if protected is None:  # user cancelled

@@ -269,9 +269,11 @@ class ExportController(BaseController):
         fd, chart_path = tempfile.mkstemp(suffix=".png")
         os.close(fd)
         try:
-            exporter = ImageExporter(self.w.radius_chart._plot.plotItem)
-            exporter.parameters()["width"] = 1200
-            exporter.export(chart_path)
+            # The report shows the data, not the cursor/selection/hover text.
+            with self.w.radius_chart.export_view() as plot_item:
+                exporter = ImageExporter(plot_item)
+                exporter.parameters()["width"] = 1200
+                exporter.export(chart_path)
         except Exception as exc:
             logger.warning("Could not export chart image: %s", exc)
             _remove_quietly(chart_path)

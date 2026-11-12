@@ -277,17 +277,19 @@ class TestRangeSelection:
         self._ready(chart)
         chart.set_selection(4, 8)
         seen = {}
-        for name in ("delete_range_requested", "refit_range_requested", "lock_range_requested"):
+        names = ("delete_range_requested", "refit_range_requested", "lock_range_requested",
+                 "unlock_range_requested")
+        for name in names:
             getattr(chart, name).connect(lambda a, b, n=name: seen.setdefault(n, (a, b)))
         menu = chart._context_menu_at(6.0, 20.0)
         actions = [a for a in menu.actions() if not a.isSeparator()]
         assert [a.text() for a in actions] == [
             "Delete range (frames 5–9)", "Refit range (frames 5–9)",
-            "Lock range (frames 5–9)", "Clear selection"]
-        for action in actions[:3]:
+            "Lock range (frames 5–9)", "Unlock range (frames 5–9)", "Clear selection"]
+        for action in actions[:4]:
             action.trigger()
-        assert seen == {n: (4, 8) for n in seen} and len(seen) == 3
-        actions[3].trigger()
+        assert seen == {n: (4, 8) for n in names}
+        actions[4].trigger()
         assert chart.selected_range() is None
 
     def test_point_menu_outside_selection(self, chart):

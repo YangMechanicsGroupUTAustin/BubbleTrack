@@ -93,13 +93,6 @@ def store_meta(state: AppState, idx: int, meta: dict) -> None:
             values[idx] = reported.get(key, np.nan)
 
 
-def clear_scoring(state: AppState, idx: int) -> None:
-    """Forget a frame's confidence, flags and metrics (deleted or cleared frame)."""
-    if state.fit_confidence is not None:
-        state.fit_confidence[idx] = np.nan
-    store_meta(state, idx, {})
-
-
 def status_text(idx: int, fit: EdgeFrameFit) -> tuple[str, str]:
     """(message, colour) for the header after fitting frame *idx*."""
     if fit.radius > 0:

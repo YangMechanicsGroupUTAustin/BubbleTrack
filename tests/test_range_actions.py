@@ -1,0 +1,104 @@
+"""Brushed-range actions on the R(t) chart, and what a lock protects."""
+
+from __future__ import annotations
+
+import time
+
+import numpy as np
+import pytest
+
+from bubbletrack.event_bus import RESULTS_CHANGED
+from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.state import update_state
+
+N = 10
+
+
+def _wait(qapp, predicate, timeout_s: float = 120.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        qapp.processEvents()
+        if predicate():
+            return
+        time.sleep(0.01)
+    raise TimeoutError("condition not reached")
+
+
+@pytest.fixture
+def app(gui, make_sequence):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("A", N)))
+    state = controller._get_state()
+    state.radius[:] = np.linspace(20.0, 70.0, N)
+    state.circle_fit_par[:] = [[125.0, 200.0]] * N
+    state.fit_source[:] = FitSource.AUTO
+    state.fit_confidence[:] = 0.9
+    events = []
+    controller.bus.subscribe(RESULTS_CHANGED, lambda *a: events.append(a))
+    return window, controller, state, events
+
+
+def test_delete_range_keeps_locked_frames(app):
+    window, controller, state, events = app
+    state.fit_locked[4] = True
+    window.radius_chart.delete_range_requested.emit(3, 5)
+    assert list(state.radius[3:6]) == [-1.0, pytest.approx(42.2, abs=0.1), -1.0]
+    assert state.fit_source[3] == FitSource.NONE and np.isnan(state.fit_confidence[5])
+    assert state.radius[2] > 0 and state.radius[6] > 0
+    assert "1 locked kept" in window.header._status_label.text()
+    assert len(events) == 1
+
+
+def test_delete_range_of_only_locked_frames_changes_nothing(app):
+    window, _, state, events = app
+    state.fit_locked[2:4] = True
+    window.radius_chart.delete_range_requested.emit(2, 3)
+    assert (state.radius[2:4] > 0).all() and events == []
+
+
+def test_delete_range_is_clipped_to_the_sequence(app):
+    window, _, state, _ = app
+    window.radius_chart.delete_range_requested.emit(8, 50)
+    assert (state.radius[8:] == -1.0).all() and state.radius[7] > 0
+
+
+def test_lock_range_locks_fitted_frames_only_and_unlock_releases(app):
+    window, _, state, events = app
+    state.radius[6] = -1.0
+    window.radius_chart.lock_range_requested.emit(5, 7)
+    assert list(state.fit_locked[4:9]) == [False, True, False, True, False]
+    window.radius_chart.unlock_range_requested.emit(0, N - 1)
+    assert not state.fit_locked.any()
+    assert len(events) == 2
+
+
+@pytest.mark.parametrize("erase", ["chart_delete", "manual_clear"])
+def test_erasing_a_locked_frame_unlocks_it(app, erase):
+    """Otherwise Fit All would skip the now-empty frame forever."""
+    _, controller, state, _ = app
+    state.fit_locked[0] = True
+    if erase == "chart_delete":
+        controller._on_delete_point(0)
+    else:
+        controller.manual_ctrl.on_manual_clear()  # current frame is 0
+    assert state.radius[0] == -1.0 and not state.fit_locked[0]
+
+
+def test_refit_range_fits_only_that_range_and_keeps_from_to(qapp, app):
+    window, controller, state, _ = app
+    controller._state = update_state(controller._get_state(), img_thr=0.58,
+                                     removing_factor=85, gaussian_sigma=3.0)
+    state = controller._get_state()
+    state.radius[:] = 5.0  # a recognisable wrong value everywhere
+    state.fit_locked[4] = True
+    tab = window.left_panel.automatic_tab
+    before = tab.get_range()
+    window.radius_chart.refit_range_requested.emit(3, 5)
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
+    state = controller._get_state()
+    expected = np.linspace(20.0, 70.0, N)
+    assert state.radius[3] == pytest.approx(expected[3], rel=0.05)
+    assert state.radius[5] == pytest.approx(expected[5], rel=0.05)
+    assert state.radius[4] == 5.0  # locked: kept
+    assert (state.radius[:3] == 5.0).all() and (state.radius[6:] == 5.0).all()
+    assert tab.get_range() == before

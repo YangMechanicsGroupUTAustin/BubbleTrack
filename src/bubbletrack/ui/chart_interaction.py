@@ -91,12 +91,13 @@ def build_point_menu(chart, idx: int) -> QMenu:
 
 
 def build_range_menu(chart, start: int, end: int) -> QMenu:
-    """Delete / refit / lock for the 0-based inclusive range start..end."""
+    """Delete / refit / lock / unlock for the 0-based inclusive range start..end."""
     span = f"frames {start + 1}–{end + 1}"
     return _menu(chart, (
         (f"Delete range ({span})", lambda: chart.delete_range_requested.emit(start, end)),
         (f"Refit range ({span})", lambda: chart.refit_range_requested.emit(start, end)),
         (f"Lock range ({span})", lambda: chart.lock_range_requested.emit(start, end)),
+        (f"Unlock range ({span})", lambda: chart.unlock_range_requested.emit(start, end)),
         (None, None),
         ("Clear selection", chart.clear_selection),
     ))

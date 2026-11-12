@@ -16,6 +16,8 @@ from dataclasses import dataclass, field, replace
 
 import numpy as np
 
+from bubbletrack.model.provenance import FitSource
+
 # Per-frame shape metrics shared by the engine, export, review and charts.
 FIT_METRIC_KEYS: tuple[str, ...] = (
     "r_circle",          # robust circle-fit radius (px)
@@ -145,6 +147,24 @@ class AppState:
             fit_flags=[frozenset()] * n,
             fit_locked=np.zeros(n, dtype=bool),
         )
+
+
+def clear_frame_result(state: AppState, idx: int) -> None:
+    """Erase frame *idx*'s result in place: unfitted, unscored and unlocked.
+
+    Uses the same empty values as :meth:`AppState.with_results_initialized`
+    (radius -1, centre NaN, source NONE).  A lock protects a result, so an
+    erased frame is unlocked and the next Fit All fits it again.
+    """
+    empty = (("radius", -1.0), ("circle_fit_par", np.nan), ("region_count", 0),
+             ("fit_source", FitSource.NONE), ("fit_confidence", np.nan),
+             ("fit_locked", False), ("circle_xy", None), ("fit_flags", frozenset()))
+    for name, value in empty:
+        values = getattr(state, name)
+        if values is not None:
+            values[idx] = value
+    for values in (state.fit_metrics or {}).values():
+        values[idx] = np.nan
 
 
 def update_state(state: AppState, **kwargs) -> AppState:

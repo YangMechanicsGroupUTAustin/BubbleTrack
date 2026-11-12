@@ -6,7 +6,6 @@ import logging
 
 import numpy as np
 
-from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
     display_frame,
@@ -18,6 +17,7 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.state import clear_frame_result
 from bubbletrack.model.undo import UndoStack
 
 logger = logging.getLogger(__name__)
@@ -163,17 +163,7 @@ class ManualController(BaseController):
         # Mark the current frame as unprocessed, using the same sentinels as
         # everywhere else (-1 / NaN): a 0 radius exported as a 0 um point.
         idx = self.state.image_no
-        if self.state.radius is not None:
-            self.state.radius[idx] = -1.0
-        if self.state.circle_fit_par is not None:
-            self.state.circle_fit_par[idx] = [np.nan, np.nan]
-        if self.state.circle_xy is not None:
-            self.state.circle_xy[idx] = None
-        if self.state.region_count is not None:
-            self.state.region_count[idx] = 0
-        if self.state.fit_source is not None:
-            self.state.fit_source[idx] = FitSource.NONE
-        edge_support.clear_scoring(self.state, idx)
+        clear_frame_result(self.state, idx)
 
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 

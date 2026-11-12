@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from functools import partial
 
 import numpy as np
 from PyQt6.QtCore import QTimer
@@ -30,7 +31,7 @@ from bubbletrack.model.detection import (
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
-from bubbletrack.model.state import AppState, update_state
+from bubbletrack.model.state import AppState, clear_frame_result, update_state
 from bubbletrack.ui.shortcuts import setup_shortcuts
 
 logger = logging.getLogger(__name__)
@@ -123,6 +124,10 @@ class AppController:
         from bubbletrack.controller.review_controller import install_review
         self.review = install_review(self.w, self)
 
+        # Key-frame filmstrip above the R(t) chart
+        from bubbletrack.controller.filmstrip_controller import install_filmstrip
+        self.filmstrip = install_filmstrip(self.w, self)
+
         # Keyboard shortcuts
         self._shortcuts = setup_shortcuts(self.w, {
             "frame_prev": lambda: self.file_ctrl.on_frame_changed(
@@ -131,9 +136,9 @@ class AppController:
             "frame_next": lambda: self.file_ctrl.on_frame_changed(
                 min(self._state.total_frames - 1, self._state.image_no + 1),
             ),
-            "zoom_in": self.w.original_panel._zoom_in,
-            "zoom_out": self.w.original_panel._zoom_out,
-            "zoom_reset": self.w.original_panel._zoom_reset,
+            "zoom_in": self.w.original_panel.zoom_in,
+            "zoom_out": self.w.original_panel.zoom_out,
+            "zoom_reset": self.w.original_panel.reset_zoom,
             "undo": self.manual_ctrl.undo_last_point,
             "play_pause": self.w.frame_scrubber.toggle_play,
         })
@@ -225,6 +230,13 @@ class AppController:
             self._on_refit_point_with_neighbors,
         )
 
+        # R-t chart brushed range: delete / refit / lock / unlock
+        chart = self.w.radius_chart
+        chart.delete_range_requested.connect(self._on_delete_range)
+        chart.refit_range_requested.connect(self.auto_ctrl.fit_range)
+        chart.lock_range_requested.connect(partial(self._on_lock_range, locked=True))
+        chart.unlock_range_requested.connect(partial(self._on_lock_range, locked=False))
+
         # Compare mode change — refresh display immediately
         self.w.compare_mode_changed.connect(self._on_compare_mode_changed)
 
@@ -306,16 +318,7 @@ class AppController:
         if self._state.radius is None or idx < 0 or idx >= len(self._state.radius):
             return
 
-        self._state.radius[idx] = -1.0
-        self._state.circle_fit_par[idx] = [np.nan, np.nan]
-        if self._state.region_count is not None:
-            self._state.region_count[idx] = 0
-        if self._state.circle_xy is not None:
-            self._state.circle_xy[idx] = None
-        if self._state.fit_source is not None:
-            self._state.fit_source[idx] = FitSource.NONE
-        edge_support.clear_scoring(self._state, idx)
-
+        clear_frame_result(self._state, idx)
         self._refresh_chart()
 
         # Refresh display if we are viewing the deleted frame
@@ -327,6 +330,48 @@ class AppController:
         self.w.header.set_status(f"Deleted result for frame {idx + 1}", "#10b981")
         self.bus.emit(RESULTS_CHANGED)
         logger.info("Deleted result for frame %d", idx + 1)
+
+    def _frames_in(self, start: int, end: int) -> range:
+        """0-based frames start..end (inclusive), clipped to the loaded results."""
+        n = 0 if self._state.radius is None else len(self._state.radius)
+        return range(max(start, 0), min(end, n - 1) + 1)
+
+    def _on_delete_range(self, start: int, end: int) -> None:
+        """Delete the results of frames start..end; locked frames are kept.
+
+        A lock protects a result from bulk edits, as in Fit All (Unlock the
+        range, or delete the single point, to remove a locked result).
+        """
+        locked = self._state.fit_locked
+        frames = self._frames_in(start, end)
+        targets = [i for i in frames if locked is None or not locked[i]]
+        if not targets:
+            self.w.header.set_status("Nothing to delete: every frame is locked", "#f59e0b")
+            return
+        for i in targets:
+            clear_frame_result(self._state, i)
+        self._refresh_chart()
+        if self._state.image_no in targets:
+            display_frame(self._state, self.w, self._state.image_no,
+                          self._set_state, self._image_cache)
+        kept = len(frames) - len(targets)
+        text = f"Deleted frames {start + 1}-{end + 1}"
+        self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
+        logger.info("%s, %d locked kept", text, kept)
+        self.bus.emit(RESULTS_CHANGED)
+
+    def _on_lock_range(self, start: int, end: int, *, locked: bool) -> None:
+        """Lock the fitted frames of start..end (or unlock the whole range)."""
+        flags = self._state.fit_locked
+        if flags is None:
+            return
+        frames = [i for i in self._frames_in(start, end)
+                  if not locked or self._state.radius[i] > 0]
+        flags[frames] = locked
+        self._refresh_chart()
+        verb = "Locked" if locked else "Unlocked"
+        self.w.header.set_status(f"{verb} {len(frames)} frame(s)", "#10b981")
+        self.bus.emit(RESULTS_CHANGED)
 
     def _on_refit_point(self, idx: int) -> None:
         """Re-run detection + circle fitting for a single frame *idx* (0-based)."""
