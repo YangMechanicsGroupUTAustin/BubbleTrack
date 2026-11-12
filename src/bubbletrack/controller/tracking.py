@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from PyQt6.QtCore import QThread, pyqtSignal
 
 from bubbletrack.controller.edge_support import store_fit
-from bubbletrack.controller.review_controller import ReviewItem
+from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.model.edge_pipeline import EdgeJob, read_raw
 from bubbletrack.model.frame_source import open_recording
 from bubbletrack.model.provenance import FitSource

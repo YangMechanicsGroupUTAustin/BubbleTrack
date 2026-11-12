@@ -12,6 +12,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QComboBox, QDockWidget, QSpinBox
 
 from bubbletrack.controller.review_controller import build_review_items, install_review
+from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.ui.shortcuts import REVIEW_BINDINGS
 
@@ -90,8 +91,8 @@ class TestInstall:
         state.fit_flags[5] = frozenset({"non_circular"})
         rc.refresh()
         assert rc.panel.frames() == [2, 5]
-        assert rc.panel.texts()[0] == "Frame 3 (file _003) · low confidence 0.20"
-        assert rc.panel.texts()[1] == "Frame 6 (file _006) · non_circular"
+        assert rc.panel.texts()[0] == "Frame 3 · _003 · Low confidence"
+        assert rc.panel.texts()[1] == "Frame 6 · _006 · Irregular shape"
         assert counts == [2]
 
     def test_locked_frames_are_excluded(self, review):
@@ -107,7 +108,7 @@ class TestInstall:
         state = _fitted(controller, conf=np.nan)
         state.radius[3] = 60.0
         rc.refresh()
-        assert rc.panel.texts() == ["Frame 4 (file _004) · jump"]
+        assert rc.panel.texts() == ["Frame 4 · _004 · Sudden jump"]
 
     def test_set_extra_merges_and_new_source_resets(self, review, make_sequence):
         from bubbletrack.controller.review_controller import ReviewItem
@@ -167,13 +168,13 @@ class TestActions:
     ])
     def test_refit_calls_through_and_advances(self, review, monkeypatch, action, method):
         _, controller, rc = review
-        _flag(controller, rc, f2=0.1, f4=0.3)
+        _flag(controller, rc, f2=0.1, f5=0.3)  # two single-frame rows
         calls = []
         monkeypatch.setattr(controller, method, calls.append)
         rc.panel.step(1)
         rc.perform(action)
         assert calls == [2]
-        assert rc.panel.current_frame() == 4  # frame 2 is still listed, but we move on
+        assert rc.panel.current_frame() == 5  # frame 2 is still listed, but we move on
 
     def test_manual_opens_manual_tab_in_point_mode_then_advances(self, review):
         window, controller, rc = review
@@ -255,7 +256,7 @@ class TestRunLock:
         assert rc.panel.isEnabled()
         state = controller._get_state()
         assert (state.radius > 0).any()
-        assert rc.panel.frames() == [i.frame for i in build_review_items(state)]
+        assert rc.panel.frames() == queue_frames(build_segments(build_review_items(state)))
 
 
 class TestKeys:
@@ -270,14 +271,14 @@ class TestKeys:
     def test_j_k_navigate_and_a_accepts(self, qapp, review):
         window, controller, rc = review
         _show(qapp, window)
-        state = _flag(controller, rc, f1=0.1, f3=0.2, f5=0.3)
+        state = _flag(controller, rc, f1=0.1, f4=0.2, f7=0.3)  # three single-frame rows
         rc.panel._list.setFocus(Qt.FocusReason.MouseFocusReason)  # clicked into the dock
-        for key, expected in ((Qt.Key.Key_J, 1), (Qt.Key.Key_J, 3), (Qt.Key.Key_K, 1)):
+        for key, expected in ((Qt.Key.Key_J, 1), (Qt.Key.Key_J, 4), (Qt.Key.Key_K, 1)):
             QTest.keyClick(rc.panel._list, key)
             assert controller._get_state().image_no == expected
         QTest.keyClick(rc.panel._list, Qt.Key.Key_A)
         assert state.fit_locked[1]
-        assert rc.panel.frames() == [3, 5] and controller._get_state().image_no == 3
+        assert rc.panel.frames() == [4, 7] and controller._get_state().image_no == 4
 
     @pytest.mark.parametrize("widget_type", [QSpinBox, QComboBox])
     def test_keys_do_nothing_while_a_field_has_focus(self, qapp, review, widget_type):
