@@ -7,6 +7,7 @@ from pathlib import Path
 
 import numpy as np
 
+from bubbletrack.model.config import DETECTION_MODE_LABELS
 from bubbletrack.model.export_meta import radius_definition
 from bubbletrack.model.provenance import FitSource
 
@@ -37,7 +38,7 @@ def build_report_parameters(
     um2px_value = state.um2px if um2px is None else um2px
     return {
         "Source": state.folder_path or state.video_path or "(none)",
-        "Detection Mode": state.detection_mode,
+        "Detection Mode": DETECTION_MODE_LABELS.get(state.detection_mode, state.detection_mode),
         "Radius Definition": radius_definition(state.detection_mode, state.edge_definition),
         "Threshold": f"{state.img_thr:.2f}",
         "Removing Factor": str(state.removing_factor),

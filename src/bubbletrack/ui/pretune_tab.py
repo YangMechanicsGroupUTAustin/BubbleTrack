@@ -10,15 +10,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
 )
 
+from bubbletrack.model.config import DETECTION_MODE_LABELS, DETECTION_MODES
 from bubbletrack.ui.edge_options import EdgeOptionsBox
 from bubbletrack.ui.widgets import CollapsibleSection, SliderInput, ToggleSliderInput
 
-_METHODS = (
-    ("Intensity mask", "intensity"),
-    ("Gradient rings", "gradient"),
-    ("Dark region area", "area"),
-    ("Edge (new)", "edge"),
-)
+_METHODS = tuple((DETECTION_MODE_LABELS[mode], mode) for mode in DETECTION_MODES)
 
 
 class PreTuneTab(QWidget):
@@ -66,8 +62,9 @@ class PreTuneTab(QWidget):
             "Intensity mask: threshold + circle fit (classic).\n"
             "Gradient rings: choose a ring when a dark halo surrounds the bubble.\n"
             "Dark region area: area-equivalent radius for irregular bubbles.\n"
-            "Edge (new): places the wall at the 50% brightness crossing against a\n"
-            "bubble-free reference frame; no threshold tuning, reports confidence."
+            "Auto (reference frame): compares each frame with a bubble-free\n"
+            "reference frame and places the wall at the 50% brightness crossing;\n"
+            "no threshold tuning, reports a confidence per frame."
         )
         self._method_combo.currentIndexChanged.connect(self._on_method_changed)
         method_row.addWidget(self._method_combo, 1)

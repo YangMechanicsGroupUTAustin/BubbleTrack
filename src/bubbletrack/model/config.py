@@ -41,6 +41,13 @@ PERSIST_KEYS: frozenset[str] = frozenset({
 })
 
 DETECTION_MODES: tuple[str, ...] = ("intensity", "gradient", "area", "edge")
+# What users see for each mode (the ids above stay in sessions, configs and the CLI).
+DETECTION_MODE_LABELS: dict[str, str] = {
+    "intensity": "Intensity mask",
+    "gradient": "Gradient rings",
+    "area": "Dark region area",
+    "edge": "Auto (reference frame)",
+}
 EDGE_DEFINITIONS: tuple[str, ...] = ("steep", "outer")
 EDGE_POLARITIES: tuple[str, ...] = ("dark", "bright")
 EXPORT_FORMATS: tuple[str, ...] = ("mat", "csv", "xlsx")

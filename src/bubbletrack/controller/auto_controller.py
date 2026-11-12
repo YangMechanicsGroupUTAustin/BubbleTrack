@@ -126,7 +126,7 @@ class AutoController(BaseController):
             try:
                 edge_job = edge_support.build_job(self.state, self._get_max_radius())
             except Exception as exc:
-                self.w.header.set_status(f"Cannot prepare Edge fit: {exc}", "#ef4444")
+                self.w.header.set_status(f"Cannot prepare Auto fit: {exc}", "#ef4444")
                 return
 
         worker = BatchWorker(
@@ -514,7 +514,7 @@ class AutoController(BaseController):
             try:
                 edge_params = edge_pipeline.params_from_state(self.state)
             except Exception as exc:
-                self.w.header.set_status(f"Cannot prepare Edge batch: {exc}", "#ef4444")
+                self.w.header.set_status(f"Cannot prepare Auto batch: {exc}", "#ef4444")
                 return
 
         pp = self.w.left_panel.post_processing

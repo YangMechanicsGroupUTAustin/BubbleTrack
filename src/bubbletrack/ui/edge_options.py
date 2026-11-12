@@ -7,6 +7,8 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
 
+from bubbletrack.ui.widgets import CollapsibleSection
+
 _DEFINITIONS = (
     ("Steep edge (50%)", "steep"),
     ("Outer extent", "outer"),
@@ -42,7 +44,7 @@ class EdgeOptionsBox(QGroupBox):
     clear_seed_clicked = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__("Edge engine", parent)
+        super().__init__("Auto (reference frame)", parent)
         grid = QGridLayout(self)
         grid.setSpacing(6)
 
@@ -55,7 +57,7 @@ class EdgeOptionsBox(QGroupBox):
             "background. Moves outward with blur/defocus."
         )
         self._definition.currentIndexChanged.connect(self.options_changed)
-        grid.addWidget(QLabel("Edge:"), 0, 0)
+        grid.addWidget(QLabel("Wall at:"), 0, 0)
         grid.addWidget(self._definition, 0, 1, 1, 2)
 
         self._polarity = _combo(_POLARITIES)
@@ -104,6 +106,8 @@ class EdgeOptionsBox(QGroupBox):
         grid.addWidget(self._seed_label, 4, 1)
         grid.addLayout(seed_buttons, 5, 1, 1, 2)
 
+        # Advanced (collapsed): on by default, rarely needs changing.
+        advanced = CollapsibleSection("Advanced", collapsed=True)
         self._track_check = QCheckBox("Track across frames after Fit All")
         self._track_check.setChecked(True)
         self._track_check.setToolTip(
@@ -112,7 +116,9 @@ class EdgeOptionsBox(QGroupBox):
             "the predicted circle, and doubtful frames join the Review queue.\n"
             "Manual and locked frames are kept and anchor the track.\n"
             "Turn off to keep pure single-frame results.")
-        grid.addWidget(self._track_check, 6, 0, 1, 3)
+        advanced.add_widget(self._track_check)
+        grid.addWidget(advanced, 6, 0, 1, 3)
+        self.advanced = advanced
 
     # -- values ---------------------------------------------------------- #
 

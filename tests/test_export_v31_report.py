@@ -32,7 +32,7 @@ def _state(n: int = 10, **fields) -> AppState:
 class TestParameters:
     def test_detection_mode_and_radius_definition(self):
         params = build_report_parameters(_state(detection_mode="edge"))
-        assert params["Detection Mode"] == "edge"
+        assert params["Detection Mode"] == "Auto (reference frame)"  # user-facing name of "edge"
         assert params["Radius Definition"] == (
             "area-equivalent sqrt(A/pi) of the 50% iso-contour")
 

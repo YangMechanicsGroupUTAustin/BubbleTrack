@@ -56,12 +56,13 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--edge-definition", choices=EDGE_DEFINITIONS, default="steep",
-        help="Edge mode: wall at the 50%% crossing of the steep edge (steep, "
+        help="Auto (reference frame) mode, --mode edge: wall at the 50%% crossing of the steep edge (steep, "
              "default) or at the outer extent (outer)",
     )
     parser.add_argument(
         "--reference", type=int, default=None, metavar="FRAME",
-        help="Edge mode: 1-based bubble-free reference frame (default: auto)",
+        help="Auto (reference frame) mode, --mode edge: 1-based bubble-free reference frame "
+             "(default: chosen automatically)",
     )
     parser.add_argument(
         "--roi", nargs=4, type=int,
