@@ -174,10 +174,10 @@ class BatchWorker(QThread):
 
         reader = None
         if self._video_path:
-            # A private reader: VideoCapture must not be shared across threads.
-            from bubbletrack.model.image_io import VideoFrameReader
+            # A private reader: readers must not be shared across threads.
+            from bubbletrack.model.frame_source import open_recording
             try:
-                reader = VideoFrameReader(self._video_path)
+                reader = open_recording(self._video_path)
             except Exception as exc:
                 self.error.emit(f"Cannot open video: {exc}")
                 self.finished.emit()

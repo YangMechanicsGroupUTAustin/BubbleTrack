@@ -24,7 +24,15 @@ from PyQt6.QtWidgets import (
     QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
 )
 
-from bubbletrack.model.image_io import is_video_file
+from bubbletrack.model.frame_source import RECORDING_DIALOG_FILTER, is_recording_file
+
+
+def format_rate(fps: float) -> str:
+    """Frame rate with an SI prefix: '29.97 fps', '50 kfps', '5 Mfps'."""
+    for scale, unit in ((1e6, "Mfps"), (1e3, "kfps")):
+        if fps >= scale:
+            return f"{fps / scale:.4g} {unit}"
+    return f"{fps:.4g} fps"
 
 
 class _DropZone(QWidget):
@@ -127,17 +135,19 @@ class _DropZone(QWidget):
         if not urls:
             return
         path = urls[0].toLocalFile()
-        if not path:
-            return
+        if path:
+            self.accept_path(path)
 
+    def accept_path(self, path: str) -> None:
+        """Emit *path* if this zone takes it (a dropped file selects its folder)."""
         if self._mode == "folder":
             if os.path.isdir(path):
                 self.path_selected.emit(path)
             elif os.path.isfile(path):
                 # Fallback: use the file's parent directory
                 self.path_selected.emit(str(Path(path).parent))
-        else:  # video
-            if os.path.isfile(path) and is_video_file(path):
+        else:  # video or .dat recording
+            if os.path.isfile(path) and is_recording_file(path):
                 self.path_selected.emit(path)
 
 
@@ -176,9 +186,9 @@ class ImageSource(QWidget):
         self._video_zone = _DropZone(
             mode="video",
             icon="\U0001F3AC",  # clapper-board emoji
-            prompt="Drop video\nfile\nor click",
-            dialog_title="Select Video File",
-            dialog_filter="Video Files (*.avi *.mp4 *.mov *.mkv);;All Files (*)",
+            prompt="Drop video\nor .dat file\nor click",
+            dialog_title="Select Video or .dat Recording",
+            dialog_filter=RECORDING_DIALOG_FILTER,
         )
         zones_row.addWidget(self._folder_zone, 1)
         zones_row.addWidget(self._video_zone, 1)
@@ -206,6 +216,6 @@ class ImageSource(QWidget):
         """Show a loaded video in the video zone; reset the folder zone."""
         name = os.path.basename(video_path)
         self._video_zone.set_loaded(
-            [f"\u2713 {name}", f"{frames} fr  |  {fps:.1f} fps"],
+            [f"\u2713 {name}", f"{frames} fr  |  {format_rate(fps)}"],
         )
         self._folder_zone.reset()

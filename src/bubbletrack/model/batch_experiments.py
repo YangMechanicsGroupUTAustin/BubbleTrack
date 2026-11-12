@@ -17,7 +17,8 @@ from typing import Any, Callable
 import numpy as np
 
 from bubbletrack.model.folder_scan import natural_sort_key
-from bubbletrack.model.image_io import VideoFrameReader, is_video_file, scan_folder
+from bubbletrack.model.frame_source import FrameReader, is_recording_file, open_recording
+from bubbletrack.model.image_io import scan_folder
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def as_source(item: BatchSource | str | Path) -> BatchSource:
     if isinstance(item, BatchSource):
         return item
     path = Path(item)
-    is_video = path.is_file() and is_video_file(path.name)
+    is_video = path.is_file() and is_recording_file(path.name)
     return BatchSource(path, "video" if is_video else "folder")
 
 
@@ -85,7 +86,7 @@ def _has_images(entries: list[Path]) -> bool:
 
 def _videos(entries: list[Path]) -> list[BatchSource]:
     return [BatchSource(p, "video") for p in entries
-            if is_video_file(p.name) and p.is_file()]
+            if is_recording_file(p.name) and p.is_file()]
 
 
 def find_batch_sources(root: str | Path) -> list[BatchSource]:
@@ -125,10 +126,10 @@ class SourceFrames:
 
     def __init__(self, source: BatchSource) -> None:
         self.source = source
-        self._reader: VideoFrameReader | None = None
+        self._reader: FrameReader | None = None
         self._images: list[str] = []
         if source.kind == "video":
-            self._reader = VideoFrameReader(str(source.path))
+            self._reader = open_recording(source.path)
             self.n_frames = self._reader.total_frames
         else:
             self._images = scan_folder(str(source.path))

@@ -5,13 +5,15 @@ from __future__ import annotations
 import logging
 import os
 
+import numpy as np
+
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import frame_to_display
+from bubbletrack.model.frame_source import open_recording
 from bubbletrack.model.image_io import (
-    VideoFrameReader,
     detect_bit_depth,
     load_and_normalize,
     normalize_frame,
@@ -93,7 +95,7 @@ class FileController(BaseController):
         display_frame(self.state, self.w, 0, self._set_state, self._cache)
 
     def on_video_selected(self, video_path: str) -> None:
-        """Open a video file and set up virtual frame list."""
+        """Open a video or HPV-X2 .dat recording and set up a virtual frame list."""
         if self._refuse_while_busy():
             return
         # Close any previous video reader
@@ -101,7 +103,7 @@ class FileController(BaseController):
             self.state.video_reader.close()
 
         try:
-            reader = VideoFrameReader(video_path)
+            reader = open_recording(video_path)
         except Exception as exc:
             self.w.header.set_status(f"Cannot open video: {exc}", "#ef4444")
             return
@@ -126,12 +128,14 @@ class FileController(BaseController):
             folder_path=os.path.dirname(video_path),
             images=virtual_images,
             image_no=0,
-            img_grayscale_max=255,  # video frames are typically 8-bit
+            img_grayscale_max=255,  # corrected from the first frame below
         )
         self.state = self.state.with_results_initialized(n)
 
         # Read first frame to determine dimensions and set default ROI
         first_raw = reader.read_frame(0)
+        if np.issubdtype(first_raw.dtype, np.integer):
+            self._update(img_grayscale_max=int(np.iinfo(first_raw.dtype).max))
         first_img, _, _, _ = normalize_frame(
             first_raw, 0.5, (1, 99999), (1, 99999),
         )
