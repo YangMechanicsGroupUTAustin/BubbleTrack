@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 
 _CHANNELS = ("raw", "view")
 _FORESTS = ("extra", "random")
-_POLICIES = ("combined", "prior", "contour")
+_POLICIES = ("combined", "guarded", "prior", "contour")
 
 
 def _positive(name: str, value: float) -> None:
@@ -100,14 +100,19 @@ class MeasureConfig:
 
     policy: str = "combined"
     """"combined": Auto measures the wall inside the ML region, else ML's own outline;
+    "guarded": the same, but plain Auto's accepted result is kept before ML's outline;
     "prior": always Auto with the ML circle as its prior; "contour": always ML's outline."""
     level: float = 0.5
     smooth_sigma: float = 1.0
     min_radius_px: float = 3.0
     refine: bool = True
     """Move ML's outline to the half-contrast wall of the engine view near it."""
-    refine_band: float = 0.25
-    """Half-width of the band (fraction of R, at least 3 px) searched by the refinement."""
+    refine_band: float = 0.15
+    """Half-width of the window (fraction of R, at least 3 px) searched by the refinement."""
+    refine_passes: int = 1
+    """Each further pass recentres on the previous outline with half the window."""
+    refine_sectors: int = 8
+    """Angular sectors with their own wall crossing (1 = one shift for the whole outline)."""
     refine_min_contrast: float = 0.05
     agree_radius: tuple[float, float] = (0.15, 3.0)
     """Auto's wall belongs to the ML region when |dR| <= max(frac * R, px) ..."""

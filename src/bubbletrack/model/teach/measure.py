@@ -9,6 +9,10 @@ Precedence (``policy="combined"``, the default), per unverified frame:
    confidence; always sent to Review.
 3. If ML finds no region, no result (source ``"none"``).
 
+``policy="guarded"`` inserts plain Auto between 1 and 2: an accepted plain-Auto
+result (the user's Fit All) is kept (source ``"auto"``; flag ``ml_disagrees`` and
+Review when the ML region is elsewhere) rather than replaced by an ML outline.
+
 Manual and locked frames are never measured here (the caller skips them).
 ``policy="prior"`` (always Auto's guided wall) and ``"contour"`` (always ML's
 outline) exist for the study.
@@ -26,12 +30,14 @@ from bubbletrack.model.teach.config import MeasureConfig
 from bubbletrack.model.teach.model import MLModel
 from bubbletrack.model.teach.region import MLRegion, ml_region
 
+SOURCE_AUTO = "auto"
 SOURCE_AUTO_ML = "auto_ml"
 SOURCE_ML = "ml"
 SOURCE_NONE = "none"
 FLAG_GUIDED = "ml_guided"
 FLAG_OUTLINE = "ml_outline"
 FLAG_UNFAMILIAR = "ml_unfamiliar"
+FLAG_DISAGREES = "ml_disagrees"
 
 _NAN = float("nan")
 
@@ -45,7 +51,8 @@ class MLResult:
     cc: float
     confidence: float
     source: str
-    """"auto_ml" (Auto's wall inside the ML region), "ml" (ML's outline) or "none"."""
+    """"auto_ml" (Auto's wall inside the ML region), "auto" (plain Auto, guarded policy),
+    "ml" (ML's outline) or "none"."""
     flags: frozenset[str]
     region: MLRegion | None
     """ML's own region (None when the classifier found nothing)."""
@@ -62,8 +69,10 @@ class MLResult:
 
     @property
     def needs_review(self) -> bool:
-        """ML's own outline is always reviewed, and so is anything not accepted."""
-        return self.source != SOURCE_AUTO_ML or not self.accepted
+        """ML's own outline is always reviewed, and so is anything not accepted or disputed."""
+        if not self.accepted or FLAG_DISAGREES in self.flags:
+            return True
+        return self.source not in (SOURCE_AUTO_ML, SOURCE_AUTO)
 
 
 def wall_agrees(region: MLRegion, edge: EdgeResult, config: MeasureConfig = MeasureConfig()) -> bool:
@@ -86,33 +95,46 @@ def _from_auto(edge: EdgeResult, region: MLRegion | None, flags: frozenset[str])
                     frozenset(edge.flags) | flags | {FLAG_GUIDED}, region, edge, edge.confidence_gate)
 
 
+def _from_plain(auto: EdgeResult, region: MLRegion | None, guided: EdgeResult | None,
+                config: MeasureConfig) -> MLResult:
+    disputed = region is not None and not wall_agrees(region, auto, config)
+    flags = frozenset(auto.flags) | ({FLAG_DISAGREES} if disputed else set())
+    return MLResult(auto.radius, auto.rc, auto.cc, auto.confidence, SOURCE_AUTO, flags, region, guided,
+                    auto.confidence_gate)
+
+
 def _from_region(region: MLRegion, guided: EdgeResult | None, gate: float) -> MLResult:
     flags = {FLAG_OUTLINE} | ({"clipped"} if region.clipped else set())
     return MLResult(region.radius, region.rc, region.cc, region.confidence, SOURCE_ML, frozenset(flags),
                     region, guided, gate)
 
 
-def select_result(region: MLRegion | None, guided: EdgeResult | None, *,
+def select_result(region: MLRegion | None, guided: EdgeResult | None, *, auto: EdgeResult | None = None,
                   config: MeasureConfig = MeasureConfig()) -> MLResult:
-    """Apply the measurement policy to ML's region and Auto's guided measurement."""
+    """Apply the measurement policy to ML's region, Auto guided by it and (guarded
+    policy) plain Auto's own result *auto*."""
     gate = config.confidence_gate
     if config.policy == "prior":
         return _none(region, guided, gate) if guided is None else _from_auto(guided, region, frozenset())
+    keep_plain = config.policy == "guarded" and auto is not None and auto.accepted
     if region is None:
-        return _none(region, guided, gate)
-    if config.policy == "combined" and guided is not None and guided.accepted \
-            and wall_agrees(region, guided, config):
+        return _from_plain(auto, region, guided, config) if keep_plain else _none(region, guided, gate)
+    guided_ok = guided is not None and guided.accepted and wall_agrees(region, guided, config)
+    if config.policy in ("combined", "guarded") and guided_ok:
         return _from_auto(guided, region, frozenset())
+    if keep_plain:
+        return _from_plain(auto, region, guided, config)
     return _from_region(region, guided, gate)
 
 
 def measure_frame(model: MLModel, raw: np.ndarray, *, params: EdgeParams = EdgeParams(),
-                  config: MeasureConfig | None = None) -> MLResult:
+                  auto: EdgeResult | None = None, config: MeasureConfig | None = None) -> MLResult:
     """Measure one frame with ML assist.
 
     *params* are the user's Auto settings (seed click, polarity, gate; a
     tracker prior if any): they pick ML's region and are passed to Auto, whose
-    prior becomes the ML circle.
+    prior becomes the ML circle.  *auto* is plain Auto's result of this frame
+    (the Fit All result) for the guarded policy; it is computed when missing.
     """
     cfg = config or model.config.measure
     pred = model.predict(raw)
@@ -124,6 +146,8 @@ def measure_frame(model: MLModel, raw: np.ndarray, *, params: EdgeParams = EdgeP
     if region is not None and cfg.policy != "contour":
         guided = detect_edge(raw, gx, gy, reference=model.reference,
                              params=replace(params, prior=(region.rc, region.cc, region.radius)))
-    res = select_result(region, guided, config=cfg)
+    if cfg.policy == "guarded" and auto is None:
+        auto = detect_edge(raw, gx, gy, reference=model.reference, params=params)
+    res = select_result(region, guided, auto=auto, config=cfg)
     flags = res.flags | ({FLAG_UNFAMILIAR} if pred.novelty > cfg.novelty_warn else set())
     return replace(res, flags=flags, novelty=pred.novelty)

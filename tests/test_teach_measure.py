@@ -137,6 +137,29 @@ def test_nothing_found_anywhere():
     assert res.source == "none"
 
 
+def test_guarded_policy_keeps_an_accepted_plain_auto_result():
+    """An ML outline never replaces plain Auto's accepted result (no regression where Auto works)."""
+    cfg = MeasureConfig(policy="guarded")
+    region = _region(30.5, 61.0, 81.0, 0.8)
+    plain = _auto(12.0, 20.0, 20.0, 0.9)                       # Auto measured another object
+    res = select_result(region, None, auto=plain, config=cfg)
+    assert res.source == "auto" and res.radius == 12.0 and res.accepted
+    assert "ml_disagrees" in res.flags and res.needs_review
+    agreeing = select_result(region, None, auto=_auto(30.0, 61.0, 81.0, 0.9), config=cfg)
+    assert agreeing.source == "auto" and "ml_disagrees" not in agreeing.flags and not agreeing.needs_review
+
+
+def test_guarded_policy_prefers_the_guided_wall_then_falls_back_like_combined():
+    cfg = MeasureConfig(policy="guarded")
+    region = _region(30.5, 61.0, 81.0, 0.8)
+    res = select_result(region, _auto(30.0, 61.0, 81.0, 0.7), auto=_auto(29.0, 61.0, 81.0, 0.9), config=cfg)
+    assert res.source == "auto_ml" and res.radius == 30.0
+    res = select_result(region, None, auto=_auto(np.nan, np.nan, np.nan, 0.0), config=cfg)
+    assert res.source == "ml" and res.accepted
+    res = select_result(None, None, auto=_auto(29.0, 61.0, 81.0, 0.9), config=cfg)
+    assert res.source == "auto" and res.accepted
+
+
 def test_single_source_policies():
     region = _region(30.5, 61.0, 81.0, 0.8)
     guided = _auto(29.0, 61.0, 81.0, 0.6)

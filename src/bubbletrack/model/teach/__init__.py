@@ -23,9 +23,11 @@ from bubbletrack.model.teach.config import ExampleConfig, FeatureConfig, ForestC
 from bubbletrack.model.teach.examples import BACKGROUND, BUBBLE, LABELS, FrameStrokes, MLExamples, stroke_pixels
 from bubbletrack.model.teach.features import FeatureStack, compute_features, feature_names
 from bubbletrack.model.teach.measure import (
+    FLAG_DISAGREES,
     FLAG_GUIDED,
     FLAG_OUTLINE,
     FLAG_UNFAMILIAR,
+    SOURCE_AUTO,
     SOURCE_AUTO_ML,
     SOURCE_ML,
     SOURCE_NONE,
@@ -39,9 +41,10 @@ from bubbletrack.model.teach.region import MLRegion, ml_region
 from bubbletrack.model.teach.sampling import circle_masks, training_pixels
 
 __all__ = [
-    "BACKGROUND", "BUBBLE", "FLAG_GUIDED", "FLAG_OUTLINE", "FLAG_UNFAMILIAR", "LABELS", "SOURCE_AUTO_ML",
-    "SOURCE_ML", "SOURCE_NONE", "ExampleConfig", "FeatureConfig", "FeatureStack", "ForestConfig", "FrameStrokes",
-    "MLConfig", "MLError", "MLExamples", "MLModel", "MLRegion", "MLResult", "MLUnavailableError", "MeasureConfig",
-    "Prediction", "TrainInfo", "circle_masks", "compute_features", "feature_names", "measure_frame",
-    "ml_region", "select_result", "stroke_pixels", "train_model", "training_pixels", "wall_agrees",
+    "BACKGROUND", "BUBBLE", "FLAG_DISAGREES", "FLAG_GUIDED", "FLAG_OUTLINE", "FLAG_UNFAMILIAR", "LABELS",
+    "SOURCE_AUTO", "SOURCE_AUTO_ML", "SOURCE_ML", "SOURCE_NONE", "ExampleConfig", "FeatureConfig", "FeatureStack",
+    "ForestConfig", "FrameStrokes", "MLConfig", "MLError", "MLExamples", "MLModel", "MLRegion", "MLResult",
+    "MLUnavailableError", "MeasureConfig", "Prediction", "TrainInfo", "circle_masks", "compute_features",
+    "feature_names", "measure_frame", "ml_region", "select_result", "stroke_pixels", "train_model",
+    "training_pixels", "wall_agrees",
 ]

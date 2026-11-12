@@ -2,9 +2,9 @@
 
 Steps: smooth P lightly, threshold at ``level``, fill holes, choose the blob
 (the one holding the prior / seed, else the nearest, else the biggest
-confident one), optionally move its outline to the half-contrast wall of the
-engine view nearby (the Edge definition of the wall), complete a blob cut by
-the ROI border with its circle fit, and score it (:mod:`.confidence`).
+confident one), score it (:mod:`.confidence`), optionally move its outline to
+the half-contrast wall of the engine view (:mod:`.refine`), and complete a
+region cut by the ROI border with its circle fit.
 """
 
 from __future__ import annotations
@@ -19,9 +19,7 @@ from skimage.measure import find_contours
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.teach.config import MeasureConfig
 from bubbletrack.model.teach.confidence import region_confidence, region_terms
-
-_MIN_RING_PX = 20
-_MAX_REFINE_CHANGE = 0.3
+from bubbletrack.model.teach.refine import refine_outline
 
 
 def _empty_points() -> np.ndarray:
@@ -79,34 +77,6 @@ def _choose(labels: np.ndarray, valid: np.ndarray, areas: np.ndarray, centroids:
             score = np.maximum(d - radii[ids - 1], 0.0) - 1e-3 * radii[ids - 1]
         return int(ids[np.argmin(score)])
     return int(ids[np.argmax(areas[ids - 1] * mean_p[ids - 1])])
-
-
-def _refine(mask: np.ndarray, view: np.ndarray, cfg: MeasureConfig) -> np.ndarray | None:
-    """Move the outline to where the smoothed view crosses half-way between the
-    plateaus just inside and just outside it (None when that is not measurable)."""
-    r0 = math.sqrt(mask.sum() / math.pi)
-    b = max(3.0, cfg.refine_band * r0)
-    vs = ndimage.gaussian_filter(np.asarray(view, np.float32), 1.0)
-    d_in = ndimage.distance_transform_edt(mask)
-    d_out = ndimage.distance_transform_edt(~mask)
-    core = d_in > b
-    inner = core & (d_in <= 2 * b)
-    inner = inner if inner.sum() >= _MIN_RING_PX else core
-    outer = (d_out > b) & (d_out <= 2 * b)
-    if inner.sum() < _MIN_RING_PX or outer.sum() < _MIN_RING_PX:
-        return None
-    lo, hi = float(np.median(vs[inner])), float(np.median(vs[outer]))
-    if hi - lo < cfg.refine_min_contrast:
-        return None
-    band = (d_in <= b) & mask | (d_out <= b) & ~mask
-    new = ndimage.binary_fill_holes(core | (band & (vs < 0.5 * (lo + hi))))
-    labels, n = ndimage.label(new)
-    if n > 1:
-        overlap = np.bincount(labels[core], minlength=n + 1)
-        overlap[0] = 0
-        new = labels == int(np.argmax(overlap))
-    r1 = math.sqrt(new.sum() / math.pi)
-    return new if abs(r1 - r0) <= _MAX_REFINE_CHANGE * r0 else None
 
 
 def _border_count(mask: np.ndarray) -> int:
@@ -179,14 +149,16 @@ def ml_region(prob: np.ndarray, view: np.ndarray | None = None, *, origin: tuple
     centroids = np.array(ndimage.center_of_mass(labels > 0, labels, idx)).reshape(-1, 2)
     mean_p = np.asarray(ndimage.mean(ps, labels, idx), float)
     k = _choose(labels, valid, areas, centroids, mean_p, _local(seed, origin), _local(prior, origin))
-    mask = labels == k
-    refined = False
+    blob = labels == k
+    raw_radius = math.sqrt(blob.sum() / math.pi)
+    terms = {**region_terms(p, blob, raw_radius, config.level), "raw_radius": raw_radius}
+    mask, refined = blob, False
     if view is not None and config.refine:
-        new = _refine(mask, view, config)
+        new = refine_outline(blob, view, config)
         if new is not None:
-            mask, refined = new, True
+            mask, refined = new.mask, True
+            terms.update(new.diagnostics)
     radius, rc, cc, clipped = _measure(mask)
-    terms = region_terms(p, mask, radius, config.level)
     return MLRegion(radius=radius, rc=rc + origin[0], cc=cc + origin[1], confidence=region_confidence(terms),
                     mask=mask, clipped=clipped, refined=refined, terms=terms,
                     contour=_outline(mask) + np.array(origin, float))
