@@ -130,6 +130,12 @@ class TestAutosave:
         assert ctrl._autosave_timer.isActive()
         assert ctrl.autosave_if_due() is not None
 
+    def test_results_changed_bus_event_schedules_a_save(self, make):
+        ctrl, _, bus = make()
+        bus.emit(sc.RESULTS_CHANGED_EVENT)
+        assert ctrl._autosave_timer.isActive()
+        assert ctrl.autosave_if_due() is not None
+
     def test_write_failure_is_logged_not_raised(self, make, monkeypatch, caplog):
         ctrl, _, _ = make()
 

@@ -42,6 +42,7 @@ PREVIOUS_SESSION_NAME = "previous_session.brt"
 AUTOSAVE_MIN_INTERVAL_S = 60.0  # at most one autosave per minute ...
 AUTOSAVE_DEBOUNCE_S = 2.0       # ... starting this long after the first change
 RECOVERY_MTIME_SLACK_S = 2.0    # file-time resolution (FAT: 2 s) vs the clean-exit stamp
+RESULTS_CHANGED_EVENT = "results_changed"  # bus event: any controller edited results
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
 
@@ -158,7 +159,7 @@ def restore_results(state: AppState, results: dict) -> str | None:
 
 
 class SessionController(BaseController):
-    """Save/load sessions and keep a last-session recovery file."""
+    """Save/load sessions and keep the autosaved recovery session up to date."""
 
     def __init__(
         self,
@@ -187,6 +188,7 @@ class SessionController(BaseController):
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.timeout.connect(self.autosave_if_due)
         self.bus.subscribe("run_state_changed", self._on_run_state_changed)
+        self.bus.subscribe(RESULTS_CHANGED_EVENT, lambda *_: self.notify_results_changed())
 
     def save(self, path: str) -> bool:
         try:
@@ -263,6 +265,7 @@ class SessionController(BaseController):
 
         Cheap to call often: saves are debounced and happen at most once per
         ``AUTOSAVE_MIN_INTERVAL_S``, never while a run is writing results.
+        Sub-controllers can emit ``RESULTS_CHANGED_EVENT`` on the bus instead.
         """
         self._autosave_dirty = True
         self._autosave_target = autosave_path()
