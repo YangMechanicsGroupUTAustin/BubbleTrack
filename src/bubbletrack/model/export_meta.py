@@ -28,6 +28,30 @@ META_SHEET_TITLE = "Metadata"
 META_SIDECAR_SUFFIX = ".meta.json"
 """Suffix of the JSON file written next to an exported CSV (``run.meta.json``)."""
 
+# What the exported ``Radius`` measures, per detection mode.  In Edge mode
+# the primary radius is the area-equivalent radius of the 50 % contour; the
+# circle-fit radius is exported separately as the ``r_circle`` metric.
+_CIRCLE_FIT = "circle fit (Taubin)"
+_RADIUS_DEFINITIONS: dict[tuple[str, str | None], str] = {
+    ("area", None): "area-equivalent (dark regions)",
+    ("edge", "steep"): "area-equivalent sqrt(A/pi) of the 50% iso-contour",
+    ("edge", "outer"): "outer extent of the bubble shadow (Edge definition B)",
+}
+
+
+def radius_definition(detection_mode: str, edge_definition: str = "steep") -> str:
+    """Describe what the exported radius measures for *detection_mode*.
+
+    *edge_definition* ("steep" or "outer") only matters in Edge mode.
+    Manual fixes are always circle fits; the per-frame ``Source`` says
+    which frames those are.
+    """
+    if detection_mode == "edge":
+        key = ("edge", edge_definition if edge_definition == "outer" else "steep")
+    else:
+        key = (detection_mode, None)
+    return _RADIUS_DEFINITIONS.get(key, _CIRCLE_FIT)
+
 
 def _plain_value(value: object) -> object:
     """Convert a metadata value to plain Python data.
@@ -107,6 +131,7 @@ def build_export_metadata(
     um2px: float,
     rmax_fit_length: int,
     timestamp: datetime | None = None,
+    reference_index: int | None = None,
 ) -> dict:
     """Assemble provenance metadata for an export.
 
@@ -119,15 +144,21 @@ def build_export_metadata(
         over the possibly stale copies in *state*).
     timestamp : datetime or None
         Export time; defaults to the current local time.
+    reference_index : int or None
+        0-based reference frame the Edge engine actually used (the
+        auto-selected one when ``state.reference_frame`` is None).
 
     Returns
     -------
     dict
         Plain data keyed like the session file.  ``bubble_cross_edges`` is
         ordered ``[Top, Right, Down, Left]``; ``gridx``/``gridy`` are the
-        1-based inclusive ROI row/column bounds.
+        1-based inclusive ROI row/column bounds.  ``radius_definition``
+        says what ``Radius`` measures; ``reference_frame`` is 1-based (None
+        when unknown) and ``reference_frame_origin`` is "set" or "auto".
     """
     stamp = timestamp or datetime.now().astimezone()
+    reference = state.reference_frame if reference_index is None else reference_index
     return plain_metadata({
         "app_version": _app_version(),
         "exported_at": stamp.isoformat(timespec="seconds"),
@@ -150,4 +181,11 @@ def build_export_metadata(
         "fps": fps,
         "um2px": um2px,
         "rmax_fit_length": rmax_fit_length,
+        "radius_definition": radius_definition(state.detection_mode, state.edge_definition),
+        "edge_definition": state.edge_definition,
+        "edge_polarity": state.edge_polarity,
+        "reference_frame": None if reference is None else int(reference) + 1,
+        "reference_frame_origin": "auto" if state.reference_frame is None else "set",
+        "edge_seed_used": state.detection_mode == "edge" and state.edge_seed is not None,
+        "edge_seed": state.edge_seed,
     })

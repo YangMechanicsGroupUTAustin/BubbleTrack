@@ -25,6 +25,7 @@ from bubbletrack.model.export_meta import (
     META_SIDECAR_SUFFIX,
     build_export_metadata,
     mat_metadata,
+    radius_definition,
 )
 from bubbletrack.model.export_table import export_csv, export_excel
 from bubbletrack.model.rmax import (
@@ -46,6 +47,7 @@ __all__ = [
     "export_rof_t_data",
     "fit_result_arrays",
     "locate_rmax",
+    "radius_definition",
     "rmax_fit_half_window",
     "safe_loadmat",
 ]
@@ -156,6 +158,7 @@ def export_rof_t_data(
     rmax_fit_length: int,
     *,
     metadata: dict | None = None,
+    confidence: np.ndarray | None = None,
 ) -> tuple[bool, str]:
     """Convert pixel radii to physical units and save to a ``.mat`` file.
 
@@ -177,6 +180,10 @@ def export_rof_t_data(
         odd L uses L points and an even L uses L - 1 points.
     metadata : dict or None
         Provenance; when given it is saved as the struct ``BubbleTrackMeta``.
+    confidence : (N,) array or None
+        Per-frame fit confidence; when given it is saved as ``Confidence``,
+        aligned with ``t`` and ``R``.  Invalid frames get NaN, and so does
+        the inserted Rmax sample unless it is a measured frame.
 
     Returns
     -------
@@ -185,6 +192,11 @@ def export_rof_t_data(
         success, *message* is empty or holds warnings about the Rmax
         estimate (e.g. a peak near the data boundary); the file is
         written either way.
+
+    Raises
+    ------
+    ValueError
+        If *confidence* does not have one entry per frame.
 
     Notes
     -----
@@ -199,6 +211,11 @@ def export_rof_t_data(
 
     R = np.asarray(radius, dtype=np.float64).ravel()
     t = np.arange(1, len(R) + 1, dtype=np.float64)  # 1-based frame numbers
+    if confidence is not None:
+        confidence = np.asarray(confidence, dtype=np.float64).ravel()
+        if len(confidence) != len(R):
+            raise ValueError(
+                f"confidence has {len(confidence)} entries, expected {len(R)}")
 
     valid_mask = valid_frame_mask(R)
     n_valid = int(valid_mask.sum())
@@ -237,9 +254,31 @@ def export_rof_t_data(
         "um2px": float(um2px),
         "RmaxFitLength": float(rmax_fit_length),
     }
+    if confidence is not None:
+        data["Confidence"] = _rof_t_confidence(
+            confidence, valid_mask, t, rmax_loc,
+        ).reshape(-1, 1)
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
     savemat(save_path, data)
 
     return True, " ".join(estimate.warnings)
+
+
+def _rof_t_confidence(
+    confidence: np.ndarray, valid_mask: np.ndarray, t: np.ndarray, rmax_loc: float,
+) -> np.ndarray:
+    """Align per-frame confidence with the RofT ``t``/``R`` samples.
+
+    The sample at t = 0 is the Rmax estimate: it takes the confidence of
+    the frame it replaces (a discrete peak), or NaN for a fitted vertex
+    between frames, which no single frame measured.
+    """
+    conf = np.where(valid_mask, confidence, np.nan)
+    at_peak = conf[t == rmax_loc]
+    return np.concatenate([
+        conf[t < rmax_loc],
+        [at_peak[0] if len(at_peak) else np.nan],
+        conf[t > rmax_loc],
+    ])
 
