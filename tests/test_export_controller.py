@@ -18,6 +18,12 @@ from bubbletrack.model.state import AppState
 AMBER = "#f59e0b"
 
 
+@pytest.fixture(autouse=True)
+def _isolated(isolated_config):
+    """Exports remember their folder in config.json: never the real one."""
+    return isolated_config
+
+
 class _FakeLabel:
     def __init__(self) -> None:
         self.style = ""
