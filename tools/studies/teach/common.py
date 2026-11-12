@@ -24,7 +24,7 @@ import test_sequence_real as T  # noqa: E402
 
 import bubbletrack  # noqa: E402
 from bubbletrack.model.image_io import imread_unicode  # noqa: E402
-from bubbletrack.model.teach import BACKGROUND, BUBBLE, MLExamples, stroke_pixels  # noqa: E402
+from bubbletrack.model.teach import BACKGROUND, BUBBLE, MLExamples, stroke_pixels, suggest_frames  # noqa: E402
 
 assert Path(bubbletrack.__file__).resolve().is_relative_to(REPO / "src"), bubbletrack.__file__
 FULL = T.FULL
@@ -90,16 +90,22 @@ def agree(circle, label, radius_only: bool = False) -> bool:
 #  Which frames the user teaches
 # --------------------------------------------------------------------------- #
 
-def choose_frames(strategy: str, n: int, labels: dict, auto_conf: dict) -> tuple[int, ...]:
+def choose_frames(strategy: str, n: int, labels: dict, auto_conf: dict,
+                  auto_radius: dict | None = None) -> tuple[int, ...]:
     """*n* taught frames among the labelled ones.
 
     largest: the n biggest bubbles; spread: the biggest, then sizes spread down to
     the 20th percentile; worst: lowest Auto confidence (what Review lists first);
-    time: evenly spaced in time.
+    time: evenly spaced in time; suggest: the package's ``suggest_frames`` on Auto's
+    own results (what the app can do without labels).
     """
     frames = sorted(labels)
     if n >= len(frames):
         return tuple(frames)
+    if strategy == "suggest":
+        radius = [(auto_radius or {}).get(i, np.nan) for i in frames]
+        conf = [auto_conf.get(i, 0.0) for i in frames]
+        return tuple(sorted(frames[k] for k in suggest_frames(radius, conf, n=n)))
     by_r = sorted(frames, key=lambda i: (labels[i][0], -i))
     if strategy == "largest":
         pick = by_r[::-1][:n]
@@ -158,7 +164,21 @@ def stroke_examples(circles: dict, shape: tuple[int, int], brush: int = 2) -> ML
         far = _far_line(rc, cc, r, h, w)
         if far is not None:
             ex = ex.paint(f, BACKGROUND, stroke_pixels(far, brush, shape))
+        if f not in ex.strokes or len(ex.strokes[f].background) < 50:
+            for line in _corner_lines(rc, cc, r, h, w):      # a huge bubble: paint what is visible
+                ex = ex.paint(f, BACKGROUND, stroke_pixels(line, brush, shape))
     return ex
+
+
+def _corner_lines(rc, cc, r, h, w):
+    """Short strokes from the frame corners towards the centre, stopping at 1.3 R."""
+    out = []
+    for cr, ccol in ((1.0, 1.0), (1.0, float(w)), (float(h), 1.0), (float(h), float(w))):
+        d = float(np.hypot(cr - rc, ccol - cc))
+        if d > 1.35 * r:
+            t = min(1.0, (d - 1.3 * r) / d)
+            out.append([(cr, ccol), (cr + t * (rc - cr), ccol + t * (cc - ccol))])
+    return out
 
 
 def _far_line(rc, cc, r, h, w):

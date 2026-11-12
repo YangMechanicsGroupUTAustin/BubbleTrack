@@ -98,7 +98,7 @@ class ForestConfig:
 class MeasureConfig:
     """From the probability map to the reported circle."""
 
-    policy: str = "combined"
+    policy: str = "guarded"
     """"combined": Auto measures the wall inside the ML region, else ML's own outline;
     "guarded": the same, but plain Auto's accepted result is kept before ML's outline;
     "prior": always Auto with the ML circle as its prior; "contour": always ML's outline."""
@@ -107,9 +107,9 @@ class MeasureConfig:
     min_radius_px: float = 3.0
     refine: bool = True
     """Move ML's outline to the half-contrast wall of the engine view near it."""
-    refine_band: float = 0.15
+    refine_band: float = 0.2
     """Half-width of the window (fraction of R, at least 3 px) searched by the refinement."""
-    refine_passes: int = 1
+    refine_passes: int = 2
     """Each further pass recentres on the previous outline with half the window."""
     refine_sectors: int = 8
     """Angular sectors with their own wall crossing (1 = one shift for the whole outline)."""

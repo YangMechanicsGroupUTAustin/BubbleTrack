@@ -1,17 +1,20 @@
 """One frame with ML assist: what radius is reported, and where it comes from.
 
-Precedence (``policy="combined"``, the default), per unverified frame:
+Precedence (``policy="guarded"``, the default), per unverified frame:
 
 1. ML proposes the bubble region; Auto measures the 50 % wall with that circle
    as its prior.  If Auto's result is accepted and lies on the ML region, it is
    reported: source ``"auto_ml"`` ("Auto (ML-guided)"), flag ``ml_guided``.
-2. Otherwise ML's own outline: source ``"ml"``, flag ``ml_outline``, with ML's
+2. Otherwise plain Auto's own result (the user's Fit All), if accepted: source
+   ``"auto"``; flag ``ml_disagrees`` (and Review) when the ML region is elsewhere.
+3. Otherwise ML's own outline: source ``"ml"``, flag ``ml_outline``, with ML's
    confidence; always sent to Review.
-3. If ML finds no region, no result (source ``"none"``).
+4. If ML finds no region either, no result (source ``"none"``).
 
-``policy="guarded"`` inserts plain Auto between 1 and 2: an accepted plain-Auto
-result (the user's Fit All) is kept (source ``"auto"``; flag ``ml_disagrees`` and
-Review when the ML region is elsewhere) rather than replaced by an ML outline.
+``policy="combined"`` is the same without step 2 (the owner's first proposal):
+in the study it lost up to 40 of 189 frames on recordings where Auto is good
+when the model was taught on unrepresentative frames, because a wrong ML
+region sends Auto astray and its wrong outline replaces a correct Auto result.
 
 Manual and locked frames are never measured here (the caller skips them).
 ``policy="prior"`` (always Auto's guided wall) and ``"contour"`` (always ML's

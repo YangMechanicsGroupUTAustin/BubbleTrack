@@ -18,6 +18,7 @@ from pathlib import Path
 import numpy as np
 
 import common as C
+import confirm_tables as CT
 import policies as P
 from run_study import DEFAULT_OUT, FEATS, MARGINS, grid_configs
 
@@ -247,6 +248,13 @@ def main() -> None:
     recs, autos, grid = load(out)
     fns = P.make_policies()
     ids = {s["id"] for s in grid_configs()}
+    confirm = CT.load_confirm(out, recs)
+    if confirm:
+        print(f"## Final defaults, per recording (verified-spread-2)\n\n"
+              f"{CT.per_recording(confirm, recs, autos, 'verified-spread-2')}\n")
+        cids = sorted({cid for _, cid in confirm})
+        print(f"## Final defaults, by taught frames\n\n{CT.overview(confirm, recs, autos, cids)}\n")
+        print(f"{CT.timing_from_confirm(confirm)}\n")
     print(f"## Per recording ({args.main})\n\n{section_main(recs, autos, grid, args.main, fns)}\n")
     for policy in ("iii_combined", "v_guarded"):
         branches = section_branches(recs, autos, grid, args.main, fns, policy)

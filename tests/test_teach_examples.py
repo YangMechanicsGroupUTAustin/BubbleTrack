@@ -74,6 +74,16 @@ def test_verify_and_unverify():
     assert ex.unverify(99) == ex
 
 
+def test_with_verified_replaces_all_circles_and_keeps_strokes():
+    ex = MLExamples().verify(1, (10.0, 10.0, 5.0)).paint(2, BUBBLE, _px((3, 3)))
+    synced = ex.with_verified({4: (40.0, 41.0, 12.0), 5: (50.0, 51.0, 13.0)})
+    assert dict(synced.verified) == {4: (40.0, 41.0, 12.0), 5: (50.0, 51.0, 13.0)}
+    assert synced.strokes == ex.strokes
+    assert ex.with_verified({}).frames == (2,)
+    with pytest.raises(ValueError):
+        ex.with_verified({3: (1.0, 1.0, 0.0)})
+
+
 @pytest.mark.parametrize("bad", [(1.0, 2.0, 0.0), (1.0, 2.0, -3.0), (np.nan, 2.0, 3.0), (1.0, 2.0)])
 def test_verify_rejects_bad_circles(bad):
     with pytest.raises(ValueError):

@@ -4,6 +4,8 @@ Phases (run in order; each writes under ``--out``):
 
 * ``auto``   plain Auto (seed click + reference) on every labelled frame -> ``auto/<rec>.json``;
 * ``grid``   train on the chosen frames, measure every other labelled frame -> ``grid/<rec>__<cfg>.jsonl``;
+* ``confirm`` the package's ``measure_frame`` with its final defaults on the key configurations
+  -> ``confirm/<rec>__<cfg>.jsonl`` (the grid records were taken with the first refinement settings);
 * ``cross``  novelty of a model on frames of its own and of the other recordings -> ``cross.json``;
 * ``timing`` training / prediction times in one process, nothing else running -> ``timing.json``.
 
@@ -34,8 +36,10 @@ from bubbletrack.model.teach import (
     FeatureConfig,
     ForestConfig,
     MLConfig,
+    MLError,
     measure_frame,
     ml_region,
+    select_result,
     train_model,
 )
 
@@ -135,7 +139,15 @@ def grid_job(args) -> tuple[str, str, int]:
         shape = imread_unicode(files[0]).shape[:2]
         ex = C.verified_examples(circles) if spec["source"] == "verified" else C.stroke_examples(circles, shape)
         cfg = _ml_config(spec)
-        model = train_model(ex, lambda i: imread_unicode(files[i]), *C.FULL, reference=ref, config=cfg)
+        try:
+            model = train_model(ex, lambda i: imread_unicode(files[i]), *C.FULL, reference=ref, config=cfg)
+        except MLError as exc:            # the app refuses to train: every frame keeps plain Auto
+            lines.append(dict(type="model", train_frames=list(frames), error=str(exc)))
+            lines += [dict(type="frame", frame=f, reg_raw=None, reg_ref=None, g_ref=None, g_raw=None,
+                           novelty=float("nan"), predict_ms=float("nan"), **{k: None for k in REFINE_VARIANTS})
+                      for f in test]
+            path.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+            return rec.key, spec["id"], len(test)
         head = dict(type="model", train_frames=list(frames), train_ms=model.info.train_ms,
                     n_bubble=model.info.n_bubble, n_background=model.info.n_background)
         lines.append(head)
@@ -157,6 +169,55 @@ def grid_job(args) -> tuple[str, str, int]:
                               predict_ms=pred.ms, **variants))
     path.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
     return rec.key, spec["id"], len(lines) - 1 if lines else 0
+
+
+# --------------------------------------------------------------------------- #
+#  Phase confirm: the package's own measure_frame with its final defaults
+# --------------------------------------------------------------------------- #
+
+CONFIRM = ("verified-spread-2", "verified-spread-3", "verified-time-1", "verified-worst-2", "verified-largest-1",
+           "strokes-spread-2", "strokes-spread-3", "strokes-largest-1", "verified-suggest-2", "verified-suggest-3",
+           "strokes-suggest-2")
+
+
+def _result_dict(res) -> dict:
+    return {"R": float(res.radius), "rc": float(res.rc), "cc": float(res.cc), "conf": float(res.confidence),
+            "acc": bool(res.accepted), "source": res.source, "flags": sorted(res.flags)}
+
+
+def confirm_job(args) -> tuple[str, str, int]:
+    rec, cid, auto, out_dir = args
+    path = Path(out_dir) / "confirm" / f"{rec.key.replace('/', '_')}__{cid}.jsonl"
+    if path.exists():
+        return rec.key, cid, -1
+    source, strategy, n = cid.split("-")
+    files = rec.files()
+    ref = rec.reference(files)
+    auto_conf = {int(k): (v["conf"] if v["acc"] else 0.0) for k, v in auto.items()}
+    auto_r = {int(k): v["R"] for k, v in auto.items() if v["acc"]}
+    frames = C.choose_frames(strategy, int(n), rec.labels, auto_conf, auto_r)
+    circles = training_circles(rec, frames, auto)
+    test = [f for f in sorted(rec.labels) if f not in frames]
+    lines = []
+    if circles and test:
+        shape = imread_unicode(files[0]).shape[:2]
+        ex = C.verified_examples(circles) if source == "verified" else C.stroke_examples(circles, shape)
+        cfg = MLConfig(forest=ForestConfig(n_jobs=1))
+        model = train_model(ex, lambda i: imread_unicode(files[i]), *C.FULL, reference=ref, config=cfg)
+        lines.append(dict(type="model", train_frames=list(frames), train_ms=model.info.train_ms))
+        params = EdgeParams(seed=rec.seed)
+        for f in test:
+            raw = imread_unicode(files[f])
+            plain = detect_edge(raw, *C.FULL, reference=ref, params=params)
+            t0 = time.perf_counter()
+            res = measure_frame(model, raw, params=params, auto=plain)
+            ms = (time.perf_counter() - t0) * 1e3
+            combined = select_result(res.region, res.guided, auto=plain,
+                                     config=replace(cfg.measure, policy="combined"))
+            lines.append(dict(type="frame", frame=f, guarded=_result_dict(res), combined=_result_dict(combined),
+                              novelty=res.novelty, ms=ms))
+    path.write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+    return rec.key, cid, len(lines) - 1 if lines else 0
 
 
 # --------------------------------------------------------------------------- #
@@ -232,7 +293,7 @@ def timing(recs: list[C.Recording]) -> dict:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--phase", default="all", choices=("auto", "grid", "cross", "timing", "all"))
+    ap.add_argument("--phase", default="all", choices=("auto", "grid", "confirm", "cross", "timing", "all"))
     ap.add_argument("--out", default=str(DEFAULT_OUT))
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--only", default="", help="comma-separated recording keys")
@@ -241,12 +302,13 @@ def main() -> None:
     out = Path(args.out)
     (out / "auto").mkdir(parents=True, exist_ok=True)
     (out / "grid").mkdir(parents=True, exist_ok=True)
+    (out / "confirm").mkdir(parents=True, exist_ok=True)
     recs = C.recordings()
     if args.only:
         keep = set(args.only.split(","))
         recs = [r for r in recs if r.key in keep]
     os.environ.setdefault("OMP_NUM_THREADS", "1")
-    phases = ("auto", "grid", "cross", "timing") if args.phase == "all" else (args.phase,)
+    phases = ("auto", "grid", "confirm", "cross", "timing") if args.phase == "all" else (args.phase,)
     with ProcessPoolExecutor(args.workers) as ex:
         if "auto" in phases:
             todo = [r for r in recs if not (out / "auto" / f"{r.key.replace('/', '_')}.json").exists()]
@@ -264,6 +326,11 @@ def main() -> None:
             for k, (key, cid, n) in enumerate(ex.map(grid_job, jobs, chunksize=1)):
                 if n >= 0:
                     print(f"[{k + 1}/{len(jobs)} {time.perf_counter() - t0:.0f}s] {key} {cid}: {n} frames", flush=True)
+        if "confirm" in phases:
+            jobs = [(r, cid, autos[r.key], str(out)) for cid in CONFIRM for r in recs]
+            for k, (key, cid, n) in enumerate(ex.map(confirm_job, jobs, chunksize=1)):
+                if n >= 0:
+                    print(f"confirm [{k + 1}/{len(jobs)}] {key} {cid}: {n} frames", flush=True)
         if "cross" in phases:
             cross = dict(ex.map(cross_job, [(r, [o for o in recs if o is not r], autos[r.key]) for r in recs]))
             (out / "cross.json").write_text(json.dumps(cross, indent=1), encoding="utf-8")

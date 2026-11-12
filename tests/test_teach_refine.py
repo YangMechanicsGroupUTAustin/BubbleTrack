@@ -56,7 +56,7 @@ def test_no_wall_near_the_outline_means_no_refinement():
 
 def test_the_shift_is_limited_to_the_window():
     view = np.where(_disk(60, 80, 33), 0.2, 1.0)          # wall 5 px out, window +-0.1 R = 3 px
-    out = refine_outline(_disk(60, 80, 28), view, MeasureConfig(refine_band=0.1))
+    out = refine_outline(_disk(60, 80, 28), view, MeasureConfig(refine_band=0.1, refine_passes=1))
     assert out is not None and 30.0 <= _radius(out.mask) <= 31.5
 
 

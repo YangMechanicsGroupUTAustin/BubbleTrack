@@ -133,6 +133,13 @@ class MLExamples:
         verified[_frame(frame)] = _circle(circle)
         return MLExamples(self.strokes, verified)
 
+    def with_verified(self, circles: Mapping[int, Circle]) -> MLExamples:
+        """Replace every verified circle by *circles* ({frame: (rc, cc, R)}); strokes are kept.
+
+        For syncing with the app's manual / locked frames in one call.
+        """
+        return MLExamples(self.strokes, {_frame(f): _circle(c) for f, c in circles.items()})
+
     def unverify(self, frame: int) -> MLExamples:
         if _frame(frame) not in self.verified:
             return self

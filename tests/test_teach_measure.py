@@ -188,7 +188,7 @@ def test_measure_frame_end_to_end():
     ex = MLExamples().verify(0, (61.0, 81.0, 30.0)).verify(1, (59.0, 85.0, 18.0))
     model = train_model(ex, frames.__getitem__, (1, H), (1, W), reference=ref)
     res = measure_frame(model, frames[2], params=EdgeParams(seed=(63.0, 79.0)))
-    assert res.accepted and res.source in ("auto_ml", "ml")
+    assert res.accepted and res.source in ("auto_ml", "auto", "ml")
     assert res.radius == pytest.approx(24.0, rel=0.05)
     assert (res.rc, res.cc) == pytest.approx((63.0, 79.0), abs=1.5)
     assert res.region is not None and res.guided is not None
