@@ -330,6 +330,6 @@ class TestClose:
         _load(controller, make_sequence("A", 4))
         controller._get_state().radius[1] = 22.0
         assert controller._confirm_close() is True
-        saved = isolated_config / "recovery" / "last_session.brt"
+        saved = isolated_config / "recovery" / "autosave.brt"  # the one recovery file
         assert saved.exists()
         assert load_session(str(saved))["radius"][1] == 22.0
