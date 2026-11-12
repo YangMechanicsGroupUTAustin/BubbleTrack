@@ -7,6 +7,8 @@ diamond inheritance issues.  Sub-controllers call them by passing
 
 from __future__ import annotations
 
+import logging
+
 import numpy as np
 
 from bubbletrack.model.cache import ImageCache
@@ -20,6 +22,8 @@ from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.sequence import detect_cycles
 from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.image_compare import CompareMode, create_overlay, create_wipe
+
+logger = logging.getLogger(__name__)
 
 
 def current_source(state: AppState, idx: int):
@@ -119,10 +123,13 @@ def display_frame(
         # morphology, so the binary panel was path-dependent — dragging
         # threshold off and back gave a different visual than dragging RF
         # off and back, even though both ended at the same (a, b) state.
+        view = None
         if state.detection_mode == "edge":
-            # The Edge engine has no threshold binary; never show the
-            # intensity-mode mask as if it were its result.
-            processed = np.zeros_like(binary_roi, dtype=bool)
+            # Auto mode has no threshold mask: show what the engine measures
+            # (frame / reference); its half-way level stands in for a mask in
+            # the overlay and wipe views.
+            view = engine_view_or_none(state, idx)
+            processed = (view < 0.5) if view is not None else np.zeros_like(binary_roi, dtype=bool)
             edge_xy = np.empty((0, 2))
         else:
             rf = compute_removing_factor(
@@ -187,7 +194,11 @@ def display_frame(
             # the mask panel is filled either way (it is hidden in IMAGE mode)
             # so switching modes never shows a stale mask.
             window.original_panel.set_image(cur_img)
-            window.binary_panel.set_image(bin_display)
+            if view is not None:
+                show_engine_view(state, window, idx, view)
+            else:
+                window.binary_panel.set_title(MASK_TITLE)
+                window.binary_panel.set_image(bin_display)
 
         window.original_panel.draw_roi_rect(state.gridx, state.gridy)
         draw_fit_overlay(state, window.original_panel, idx)
@@ -204,6 +215,41 @@ def display_frame(
             )
     except Exception as exc:
         window.header.set_status(f"Error: {exc}", "#ef4444")
+
+
+MASK_TITLE = "Binary Mask"
+ENGINE_VIEW_TITLE = "Auto view: frame \u00f7 reference"
+_VIEW_WHITE = 1.25  # view value shown as white: background (1.0) is light grey
+
+
+def engine_view_or_none(state: AppState, idx: int) -> np.ndarray | None:
+    """Frame *idx*'s ROI as the Auto engine sees it, or None if it cannot be read."""
+    from bubbletrack.controller import edge_support  # edge_support imports this module
+
+    try:
+        return edge_support.view_frame(state, idx)
+    except Exception as exc:
+        logger.warning("Auto view of frame %d unavailable: %s", idx + 1, exc)
+        return None
+
+
+def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None = None) -> None:
+    """Right panel in Auto mode: the engine's view with the measured outline.
+
+    A flat, even background means the reference frame matches this frame;
+    blotches or texture mean it does not (moved sample, changed lighting).
+    """
+    panel = window.binary_panel
+    panel.set_title(ENGINE_VIEW_TITLE)
+    if view is None:
+        view = engine_view_or_none(state, idx)
+    if view is None:
+        return
+    panel.set_image(np.clip(view / _VIEW_WHITE, 0.0, 1.0).astype(np.float32))
+    xy = state.circle_xy[idx] if state.circle_xy is not None else None
+    if xy is not None and state.radius is not None and state.radius[idx] > 0:
+        origin = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
+        panel.draw_fit_outline(np.asarray(xy, dtype=float) - origin, "#ef4444")
 
 
 def draw_fit_overlay(state: AppState, panel, idx: int) -> None:

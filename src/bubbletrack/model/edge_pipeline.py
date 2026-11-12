@@ -102,6 +102,14 @@ def _metrics(res) -> dict:
     return out
 
 
+def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
+              job: EdgeJob) -> np.ndarray:
+    """The ROI as the engine sees it (frame / reference); see ``engine_view``."""
+    from bubbletrack.model.edge.engine import engine_view
+
+    return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
+
+
 def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
              job: EdgeJob) -> EdgeFrameFit:
     """Run the engine on one raw frame and apply the acceptance rules."""

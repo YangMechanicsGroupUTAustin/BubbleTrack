@@ -184,6 +184,25 @@ def _local(point, origin: tuple[int, int]):
     return (point[0] - origin[0], point[1] - origin[1]) + tuple(point[2:])
 
 
+def engine_view(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
+                params: EdgeParams | None = None, config: EdgeConfig = DEFAULT_CONFIG) -> np.ndarray:
+    """The ROI as the engine measures it: the frame divided by the reference.
+
+    Background ~1, a dark bubble's interior ~0 (a bright bubble is mirrored
+    so it is dark too); the wall is where this crosses the half-way level.
+    Exactly stage A of :func:`detect_edge`, so a display of it shows users
+    whether the reference frame matches (a flat background) or not.
+    """
+    params = params or EdgeParams()
+    frame = to_gray_frame(raw)
+    ref = to_gray_frame(reference) if reference is not None else None
+    if ref is not None and ref.values.shape != frame.values.shape:
+        raise ValueError(f"reference shape {ref.values.shape} differs from frame shape {frame.values.shape}")
+    gx, gy, _ = _parse_roi(gridx, gridy, frame.values.shape)
+    _, _, image, _ = _normalize(frame, ref, roi_to_slice(gx, gy), params, config)
+    return image
+
+
 def _normalize(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slice, slice], params: EdgeParams,
                config: EdgeConfig) -> tuple[Normalized, np.ndarray, np.ndarray, np.ndarray]:
     """Stage A on the ROI; returns (normalized, saturated, working image, excluded pixels)."""

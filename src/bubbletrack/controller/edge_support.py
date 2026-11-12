@@ -16,6 +16,7 @@ from bubbletrack.model.state import AppState
 
 # Auto-selected reference per source; choosing reads several frames.
 _reference_cache: dict[tuple, int | None] = {}
+_reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference frame
 
 
 def _source_key(state: AppState) -> tuple:
@@ -52,13 +53,29 @@ def seed_text(state: AppState) -> str:
     return f"row {row:.0f}, col {col:.0f}"
 
 
+def reference_raw(state: AppState) -> np.ndarray | None:
+    """The reference frame's pixels (read once per source and reference)."""
+    idx = reference_index(state)
+    if idx is None:
+        return None
+    key = (*_source_key(state), idx)
+    if key not in _reference_raw_cache:
+        _reference_raw_cache.clear()
+        _reference_raw_cache[key] = edge_pipeline.read_raw(current_source(state, idx))
+    return _reference_raw_cache[key]
+
+
 def build_job(state: AppState, max_radius: float, *,
               prior: tuple[float, float, float] | None = None) -> EdgeJob:
-    idx = reference_index(state)
-    reference = (edge_pipeline.read_raw(current_source(state, idx))
-                 if idx is not None else None)
     return EdgeJob(params=edge_pipeline.params_from_state(state, prior=prior),
-                   reference=reference, max_radius=max_radius)
+                   reference=reference_raw(state), max_radius=max_radius)
+
+
+def view_frame(state: AppState, idx: int) -> np.ndarray:
+    """Frame *idx*'s ROI as the engine sees it (frame / reference)."""
+    raw = edge_pipeline.read_raw(current_source(state, idx))
+    return edge_pipeline.view_edge(raw, state.gridx, state.gridy,
+                                   build_job(state, max_radius=float("inf")))
 
 
 def fit_frame(state: AppState, idx: int, max_radius: float, *,

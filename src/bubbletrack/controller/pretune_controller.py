@@ -12,6 +12,7 @@ from bubbletrack.controller.display_mixin import (
     display_frame,
     redraw_original,
     refresh_chart,
+    show_engine_view,
 )
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
@@ -230,8 +231,7 @@ class PretuneController(BaseController):
             self.w.header.set_status(f"Error: {exc}", "#ef4444")
             return
         edge_support.store_fit(self.state, idx, fit, FitSource.REFIT)
-        if fit.mask is not None:
-            self.w.binary_panel.set_image(fit.mask)
+        show_engine_view(self.state, self.w, idx)
         redraw_original(self.state, self.w)
         if fit.radius > 0:
             self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1")
