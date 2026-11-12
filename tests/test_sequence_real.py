@@ -112,9 +112,14 @@ def _solve_folder(folder: str, ref_index, seed):
     return raw, res, solver_ms
 
 
+def _accepted(obs) -> bool:
+    """Would the app show this single-frame result (the engine's 0.3 gate)?"""
+    return obs.ok and obs.confidence >= 0.3
+
+
 def _score(raw, res, labels: dict, crit) -> dict:
     """labels: {frame index: circle (B) | "N"}."""
-    out = dict(b=0, before=0, after=0, app=0, n=0, rej_before=0, rej_after=0)
+    out = dict(b=0, before=0, after=0, shown_before=0, app=0, n=0, rej_before=0, rej_after=0)
     for i, lab in labels.items():
         if i >= len(raw):
             continue
@@ -127,9 +132,13 @@ def _score(raw, res, labels: dict, crit) -> dict:
             out["b"] += 1
             out["before"] += _agree((raw[i].radius, raw[i].rc, raw[i].cc), lab, crit)
             out["after"] += _agree((sol.radius, sol.rc, sol.cc), lab, crit)
-            # What the app stores: the single-frame result unless the solver re-measured it.
+            # What the app SHOWS: a frame below the confidence gate has no result;
+            # the solver's re-measurements are stored only when accepted.
+            shown = _accepted(raw[i])
+            out["shown_before"] += shown and _agree((raw[i].radius, raw[i].rc, raw[i].cc), lab, crit)
             kept = sol if sol.source == "tracked" else raw[i]
-            out["app"] += _agree((kept.radius, kept.rc, kept.cc), lab, crit)
+            out["app"] += (sol.source == "tracked" or shown) and _agree(
+                (kept.radius, kept.rc, kept.cc), lab, crit)
     out.update(review=len(res.review), calls=res.redetect_calls, n_frames=len(raw))
     return out
 
@@ -146,10 +155,11 @@ def _run_set(jobs) -> dict:
 
 
 def _report(title: str, rows: dict) -> dict:
-    keys = ("b", "before", "after", "app", "n", "rej_before", "rej_after", "review", "calls", "n_frames")
+    keys = ("b", "before", "after", "shown_before", "app", "n", "rej_before", "rej_after", "review",
+            "calls", "n_frames")
     tot = {k: sum(r[k] for r in rows.values()) for k in keys}
     print(f"\n{title}: bubble frames correct {tot['before']}/{tot['b']} -> {tot['after']}/{tot['b']} "
-          f"(app {tot['app']}/{tot['b']}), "
+          f"(shown by the app: {tot['shown_before']} -> {tot['app']}/{tot['b']}), "
           f"no-bubble rejected {tot['rej_before']}/{tot['n']} -> {tot['rej_after']}/{tot['n']}, "
           f"review {tot['review']}, redetect calls {tot['calls']} / {tot['n_frames']} frames")
     for name, r in rows.items():
@@ -186,7 +196,7 @@ def test_lic_no_regression_against_single_frame():
     tot = _report("lic", _run_set(jobs))
     assert tot["b"] == 235
     assert tot["after"] >= tot["before"] >= 200
-    assert tot["app"] >= tot["before"]
+    assert tot["app"] >= tot["shown_before"]
     assert tot["rej_after"] >= tot["rej_before"]
 
 
@@ -202,5 +212,5 @@ def test_lic_hard_no_regression_against_single_frame():
     tot = _report("lic_hard", _run_set(jobs))
     assert tot["b"] == 182
     assert tot["after"] >= tot["before"]
-    assert tot["app"] >= tot["before"]
+    assert tot["app"] >= tot["shown_before"]
     assert tot["rej_after"] >= tot["rej_before"]
