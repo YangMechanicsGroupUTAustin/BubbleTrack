@@ -71,6 +71,9 @@ def run_case(path: Path, label: str, tol: Tolerance, *, tracking: bool | None = 
         bundle = open_bundle(path)
     except CaseFormatError as exc:
         return CaseScore(label, None, error=str(exc))
+    except Exception as exc:  # anything else unreadable: report it, keep going
+        logger.debug("Opening %s failed", path, exc_info=True)
+        return CaseScore(label, None, error=f"{type(exc).__name__}: {exc}")
     with bundle:
         try:
             replayed = replay_case(bundle.case, bundle.read_frame, tracking=tracking)

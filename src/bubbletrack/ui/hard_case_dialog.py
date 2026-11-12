@@ -4,7 +4,7 @@
 
     Save frames the app gets wrong as one .zip ... send it to the maintainer.
     Frames      [ 121 ] to [ 180 ]
-                60 frames + 6 neighbours + reference frame 2 · about 12 MB
+                60 frames + 6 neighbours + reference frame 2 · up to 12 MB
                 4 fixed by you (labels)
     What is wrong here?
     [                                              ]

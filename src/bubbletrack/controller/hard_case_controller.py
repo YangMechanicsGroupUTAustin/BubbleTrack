@@ -170,7 +170,7 @@ class HardCaseController:
         deleted = self.deleted_frames()
         labels = sum(frame_label(app_result(state, i), deleted=i in deleted).is_labelled
                      for i, role in plan if role != ROLE_REFERENCE)
-        text = " + ".join(parts) + (f" · about {_megabytes(size)}" if size else "")
+        text = " + ".join(parts) + (f" · up to {_megabytes(size)}" if size else "")
         if labels:
             return text + f"\n{labels} frame(s) fixed by you (manual, accepted or deleted)"
         return text + ("\nNo frame here is fixed yet: fix or accept the right frames first "
@@ -224,7 +224,7 @@ class HardCaseController:
             return True
         answer = QMessageBox.question(
             self.w, "Large hard case",
-            f"This hard case will be about {_megabytes(size)} ({n} frames). Large files are "
+            f"This hard case will be up to {_megabytes(size)} ({n} frames). Large files are "
             "slow to send; a shorter range usually shows the problem just as well.\n\n"
             "Save it anyway?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,

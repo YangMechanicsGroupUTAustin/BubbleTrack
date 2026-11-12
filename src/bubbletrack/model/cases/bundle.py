@@ -19,6 +19,7 @@ import json
 import os
 import tempfile
 import zipfile
+import zlib
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -171,7 +172,10 @@ def _open_zip(path: Path) -> CaseBundle:
                 raise CaseFormatError(f"{path.name}: {name} is missing") from exc
             if info.file_size > MAX_MEMBER_BYTES:
                 raise CaseFormatError(f"{path.name}: {name} is too large")
-            return zf.read(info)
+            try:
+                return zf.read(info)
+            except (zipfile.BadZipFile, OSError, RuntimeError, ValueError, zlib.error) as exc:
+                raise CaseFormatError(f"{path.name}: cannot read {name} ({exc})") from exc
 
         return CaseBundle(path, _parse_case(read(CASE_JSON), path), read, zf.close)
     except Exception:

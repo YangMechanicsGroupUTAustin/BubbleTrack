@@ -269,6 +269,18 @@ def test_not_a_bundle(tmp_path, content):
         open_bundle(path)
 
 
+def test_corrupted_member_is_a_format_error(state, tmp_path):
+    path = _write(state, tmp_path)
+    data = bytearray(path.read_bytes())
+    with zipfile.ZipFile(path) as zf:
+        info = zf.getinfo("frames/frame_000006.tif")
+    start = info.header_offset + 30 + len(info.filename) + len(info.extra) + 20
+    data[start:start + 40] = bytes(40)  # damage the deflated data
+    path.write_bytes(bytes(data))
+    with open_bundle(path) as bundle, pytest.raises(CaseFormatError, match="frame_000006"):
+        bundle.read_frame(5)
+
+
 def test_default_file_name(state):
     from datetime import datetime
 
