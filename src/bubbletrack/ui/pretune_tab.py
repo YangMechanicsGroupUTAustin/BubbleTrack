@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QEvent, pyqtSignal
 from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QFileDialog, QGroupBox, QHBoxLayout, QLabel,
     QPushButton, QSpinBox, QVBoxLayout, QWidget,
@@ -223,29 +223,44 @@ class PreTuneTab(QWidget):
 
         layout.addWidget(filters_section)
 
-        # -- Fit button --
+        # -- Action bar: Fit Current Frame / Auto Tune + quality readout --
+        # Not part of this (scrolling) tab: the left panel pins it below the
+        # scroll area so the buttons never scroll out of view.
+        self.action_bar = QWidget()
+        self.action_bar.setObjectName("pinnedActions")
+        action_layout = QVBoxLayout(self.action_bar)
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setSpacing(6)
+        button_row = QHBoxLayout()
+        button_row.setSpacing(8)
+
         self._fit_btn = QPushButton("Fit Current Frame")
         self._fit_btn.clicked.connect(self.fit_clicked)
-        layout.addWidget(self._fit_btn)
+        button_row.addWidget(self._fit_btn, 1)
 
-        # -- Auto-Tune button --
         self._autotune_btn = QPushButton("Auto Tune")
         self._autotune_btn.setToolTip(
             "Automatically find optimal Threshold and Removing Factor\n"
             "by testing multiple combinations on the current frame."
         )
         self._autotune_btn.clicked.connect(self.autotune_clicked)
-        layout.addWidget(self._autotune_btn)
+        button_row.addWidget(self._autotune_btn, 1)
+        action_layout.addLayout(button_row)
 
-        # -- Quality display --
         self._quality_label = QLabel("")
         self._quality_label.setObjectName("qualityLabel")
         self._quality_label.setWordWrap(True)
         self._quality_label.hide()
-        layout.addWidget(self._quality_label)
+        action_layout.addWidget(self._quality_label)
 
         layout.addStretch()
         self._apply_method("intensity")
+
+    def changeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        """The pinned action bar lives elsewhere: keep its enabled state in step."""
+        if event.type() == QEvent.Type.EnabledChange:
+            self.action_bar.setEnabled(self.isEnabled())
+        super().changeEvent(event)
 
     # -- Public getters --
 

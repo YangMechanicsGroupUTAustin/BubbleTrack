@@ -1,17 +1,24 @@
-"""Three-tab selector: Pre-tune / Manual / Automatic."""
+"""Three-tab selector in workflow order: Pre-tune / Automatic / Manual."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QWidget
 
+PRETUNE, AUTOMATIC, MANUAL = "Pre-tune", "Automatic", "Manual"
+
 
 class TabBar(QWidget):
-    """Horizontal tab bar that emits the selected tab index (0, 1, 2)."""
+    """Horizontal tab bar that emits the selected tab index.
+
+    Indices follow :attr:`TAB_NAMES` (the workflow order: tune parameters,
+    fit every frame, then fix individual frames by hand).  Use
+    :meth:`index_of` instead of hard-coded numbers.
+    """
 
     tab_changed = pyqtSignal(int)
 
-    TAB_NAMES = ("Pre-tune", "Manual", "Automatic")
+    TAB_NAMES = (PRETUNE, AUTOMATIC, MANUAL)
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
@@ -32,6 +39,19 @@ class TabBar(QWidget):
 
         self._select(0)
 
+    @classmethod
+    def index_of(cls, name: str) -> int:
+        """Index of the tab called *name* (e.g. ``TabBar.index_of("Manual")``)."""
+        return cls.TAB_NAMES.index(name)
+
+    @classmethod
+    def name_of(cls, idx: int) -> str:
+        return cls.TAB_NAMES[idx] if 0 <= idx < len(cls.TAB_NAMES) else ""
+
+    def select(self, name: str) -> None:
+        """Switch to the tab called *name*, emitting :attr:`tab_changed`."""
+        self._select(self.index_of(name))
+
     def _select(self, idx: int):
         for i, btn in enumerate(self._buttons):
             btn.setChecked(i == idx)
@@ -45,3 +65,6 @@ class TabBar(QWidget):
             if btn.isChecked():
                 return i
         return 0
+
+    def current_name(self) -> str:
+        return self.name_of(self.current_index())

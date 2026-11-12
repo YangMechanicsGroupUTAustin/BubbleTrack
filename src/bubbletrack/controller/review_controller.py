@@ -21,6 +21,7 @@ from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.review_panel import ReviewEntry, ReviewPanel, item_text
 from bubbletrack.ui.shortcuts import ReviewShortcuts
+from bubbletrack.ui.tab_bar import MANUAL
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +47,7 @@ REASON_WEIGHTS: dict[str, int] = {
 UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
 REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
 
-MANUAL_TAB = 1  # TabBar index of the Manual tab
+MANUAL_TAB = MANUAL  # TabBar name of the Manual tab
 _OK, _WARN = "#10b981", "#f59e0b"
 
 
@@ -289,7 +290,7 @@ class ReviewController:
             toggle = getattr(self.w, "_toggle_sidebar", None)
             if toggle is not None:
                 toggle()
-        lp.tab_bar._select(MANUAL_TAB)  # TabBar has no public select yet
+        lp.tab_bar.select(MANUAL_TAB)
         self._app.manual_ctrl.on_manual_select()
         xy = self._state().circle_xy
         self._manual_pending = (frame, xy[frame] if xy is not None else None,

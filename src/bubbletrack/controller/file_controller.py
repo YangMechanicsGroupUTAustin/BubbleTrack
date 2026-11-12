@@ -20,6 +20,8 @@ from bubbletrack.model.image_io import (
     scan_folder,
 )
 from bubbletrack.model.state import update_state
+from bubbletrack.ui.frame_scrubber import frame_file_labels
+from bubbletrack.ui.tab_bar import TabBar
 
 logger = logging.getLogger(__name__)
 
@@ -198,6 +200,11 @@ class FileController(BaseController):
         """
         lp = self.w.left_panel
         scrubber = self.w.frame_scrubber
+        # "Frame 12/91 · _023": the file number next to every frame index
+        labels = frame_file_labels(self.state.images)
+        scrubber.set_frame_labels(labels)
+        self.w.status_bar.set_frame_labels(labels)
+        self.w.radius_chart.set_frame_labels(labels)
         scrubber.blockSignals(True)
         scrubber.set_range(n)
         scrubber.set_value(0)
@@ -218,6 +225,5 @@ class FileController(BaseController):
         """Tab bar switched — exit interactive modes, update status."""
         self.w.original_panel.set_mode("normal")
         self.w.left_panel.manual_tab.reset()
-        tab_names = ("Pre-tune", "Manual", "Automatic")
-        self.w.status_bar.update_mode(tab_names[idx] if idx < len(tab_names) else "")
+        self.w.status_bar.update_mode(TabBar.name_of(idx))
         self.bus.emit("tab_changed", idx)

@@ -60,7 +60,7 @@ class TestInstall:
         assert docks == [rc.dock]
         view = [a for a in window.menuBar().actions() if a.text().replace("&", "") == "View"]
         assert len(view) == 1
-        toggle = view[0].menu().actions()[0]
+        toggle = next(a for a in view[0].menu().actions() if a.text() == "&Review Queue")
         assert toggle.isCheckable() and toggle.isChecked()
         toggle.trigger()
         assert rc.dock.isHidden()
@@ -71,7 +71,8 @@ class TestInstall:
         window, controller = gui
         assert install_review(window, controller) is controller.review
         view = [a for a in window.menuBar().actions() if a.text().replace("&", "") == "View"]
-        assert len(view) == 1 and len(view[0].menu().actions()) == 1
+        assert len(view) == 1
+        assert [a.text() for a in view[0].menu().actions()].count("&Review Queue") == 1
 
     def test_empty_until_something_is_suspicious(self, review):
         _, controller, rc = review
@@ -179,7 +180,7 @@ class TestActions:
         state = _flag(controller, rc, f4=0.1, f6=0.3)
         rc.panel.step(1)
         rc.perform("manual")
-        assert window.left_panel.tab_bar.current_index() == 1
+        assert window.left_panel.tab_bar.current_name() == "Manual"
         assert window.original_panel._mode == "point"
         assert controller._get_state().image_no == 4
         for a in np.linspace(0, 2 * np.pi, 8, endpoint=False):

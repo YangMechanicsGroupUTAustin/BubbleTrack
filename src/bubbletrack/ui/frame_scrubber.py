@@ -1,13 +1,56 @@
-"""Frame scrubber — horizontal slider with frame counter."""
+"""Frame scrubber — horizontal slider with frame counter and file number."""
 
 from __future__ import annotations
+
+import os
+import re
+from collections.abc import Sequence
 
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QSpinBox, QWidget
 
+VIDEO_PREFIX = "video:"
+_TRAILING_NUMBER = re.compile(r"([_\-. ]?)(\d+)$")
+_MAX_STEM_CHARS = 14
+
+
+def frame_file_label(name: str) -> str:
+    """Short file-number tag for a frame: ``"_011"`` for ``img_011.tif``.
+
+    The trailing digits of the file stem (with the separator before them)
+    identify the camera frame; video placeholders ``"video:i"`` give
+    ``"#i"`` (the frame number in the video).  Names without trailing
+    digits fall back to a shortened stem.
+    """
+    if name.startswith(VIDEO_PREFIX):
+        return f"#{name[len(VIDEO_PREFIX):]}"
+    stem = os.path.splitext(os.path.basename(name))[0]
+    match = _TRAILING_NUMBER.search(stem)
+    if match:
+        return match.group(1) + match.group(2)
+    if len(stem) > _MAX_STEM_CHARS:
+        return stem[:_MAX_STEM_CHARS - 1] + "…"
+    return stem
+
+
+def frame_file_labels(names: Sequence[str]) -> tuple[str, ...]:
+    return tuple(frame_file_label(n) for n in names)
+
+
+def format_frame_text(current: int, total: int, file_label: str = "") -> str:
+    """``"Frame 1/91 · _011"`` (1-based *current*); no tag when *file_label* is empty."""
+    text = f"Frame {current}/{total}"
+    return f"{text} · {file_label}" if file_label else text
+
+
+def label_for(labels: Sequence[str], current_1based: int) -> str:
+    """The file label of a 1-based frame, or "" when unknown."""
+    idx = current_1based - 1
+    return labels[idx] if 0 <= idx < len(labels) else ""
+
 
 class FrameScrubber(QWidget):
-    """``[< ] ====o==== [> ]  Frame: 1/100``."""
+    """``[<] [>] ====o==== [>]  Frame 1/100 · _011``."""
 
     value_changed = pyqtSignal(int)  # 0-indexed frame number
 
@@ -17,7 +60,8 @@ class FrameScrubber(QWidget):
         layout.setContentsMargins(8, 4, 8, 4)
 
         # Prev button
-        self._prev = _NavButton("\u23EA")
+        self._prev = _NavButton("\u2039")  # glyph present in every UI font
+        self._prev.setToolTip("Previous frame (Left arrow)")
         self._prev.clicked.connect(self._step_back)
         layout.addWidget(self._prev)
 
@@ -34,7 +78,8 @@ class FrameScrubber(QWidget):
         layout.addWidget(self._slider, 1)
 
         # Next button
-        self._next = _NavButton("\u23E9")
+        self._next = _NavButton("\u203A")
+        self._next.setToolTip("Next frame (Right arrow)")
         self._next.clicked.connect(self._step_forward)
         layout.addWidget(self._next)
 
@@ -47,10 +92,15 @@ class FrameScrubber(QWidget):
         self._fps_spin.valueChanged.connect(self._on_fps_changed)
         layout.addWidget(self._fps_spin)
 
-        # Frame label
-        self._label = QLabel("Frame: --/--")
-        self._label.setFixedWidth(100)
+        # Frame label: "Frame 12/91 · _023"
+        self._labels: tuple[str, ...] = ()
+        self._label = QLabel("Frame --/--")
+        self._label.setObjectName("frameLabel")
+        self._label.setMinimumWidth(
+            self._label.fontMetrics().horizontalAdvance("Frame 0000/0000 · _00000") + 8,
+        )
         self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setToolTip("Frame index / total · file number (video: frame number)")
         layout.addWidget(self._label)
 
         # Playback timer
@@ -62,6 +112,14 @@ class FrameScrubber(QWidget):
     def set_range(self, total: int):
         self._slider.setMaximum(max(total - 1, 0))
         self._update_label()
+
+    def set_frame_labels(self, labels: Sequence[str]) -> None:
+        """File-number tags per frame (see :func:`frame_file_labels`)."""
+        self._labels = tuple(labels)
+        self._update_label()
+
+    def label_text(self) -> str:
+        return self._label.text()
 
     def set_value(self, idx: int):
         self._slider.setValue(idx)
@@ -93,7 +151,7 @@ class FrameScrubber(QWidget):
         if self._slider.value() >= self._slider.maximum():
             self._slider.setValue(0)
         self._playing = True
-        self._play_btn.setText("\u23F8")  # ⏸
+        self._play_btn.setText("\u2016")  # pause; glyph present in every UI font
         self._play_timer.setInterval(max(1, 1000 // self._fps_spin.value()))
         self._play_timer.start()
 
@@ -116,7 +174,7 @@ class FrameScrubber(QWidget):
     def _update_label(self):
         cur = self._slider.value() + 1  # 1-indexed display
         total = self._slider.maximum() + 1
-        self._label.setText(f"Frame: {cur}/{total}")
+        self._label.setText(format_frame_text(cur, total, label_for(self._labels, cur)))
 
 
 class _NavButton(QWidget):
