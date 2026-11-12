@@ -626,7 +626,7 @@ class AppController:
         """Return False to keep the window open.
 
         A running fit needs confirmation.  Results are always kept in
-        ~/.bubbletrack/recovery/last_session.brt so closing never loses them.
+        ~/.bubbletrack/recovery/autosave.brt so closing never loses them.
         """
         if self.auto_ctrl.is_busy():
             if not self._ask_yes_no(
