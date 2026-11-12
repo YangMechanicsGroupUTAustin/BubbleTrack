@@ -1,4 +1,4 @@
-"""Image comparison widget with multiple viewing modes."""
+"""Image viewing modes: raw image, or raw image compared with the binary mask."""
 
 from __future__ import annotations
 
@@ -15,15 +15,30 @@ from PyQt6.QtWidgets import (
 
 
 class CompareMode(Enum):
-    """Supported image comparison modes."""
+    """Supported image viewing modes.
 
+    ``IMAGE`` (the default) shows only the raw frame with the fitted outline;
+    the other modes add the binary mask beside, over, or wiped into it.
+    """
+
+    IMAGE = "image"
     SIDE_BY_SIDE = "side_by_side"
     OVERLAY = "overlay"
     WIPE = "wipe"
 
 
+_MODE_LABELS = {
+    CompareMode.IMAGE: ("Image", "Raw frame with the fitted outline (mask hidden)"),
+    CompareMode.SIDE_BY_SIDE: ("Image + Mask", "Raw frame and binary mask next to each other"),
+    CompareMode.OVERLAY: ("Overlay", "Binary mask tinted green over the raw frame"),
+    CompareMode.WIPE: ("Wipe", "Left half raw frame, right half binary mask"),
+}
+
+
 class CompareToolbar(QWidget):
-    """Small toolbar with 3 toggle buttons for comparison mode.
+    """Segmented control choosing the image viewing mode.
+
+    The active mode is shown as a filled (checked) segment.
 
     Signals
     -------
@@ -36,24 +51,28 @@ class CompareToolbar(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self.setObjectName("CompareToolbar")
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(4)
+        layout.setSpacing(0)
 
         self._group = QButtonGroup(self)
         self._group.setExclusive(True)
         self._buttons: dict[CompareMode, QPushButton] = {}
 
-        for mode in CompareMode:
-            btn = QPushButton(mode.value.replace("_", " ").title())
+        for i, mode in enumerate(CompareMode):
+            text, tip = _MODE_LABELS[mode]
+            btn = QPushButton(text)
+            btn.setObjectName("segmentBtn")
             btn.setCheckable(True)
-            btn.setFixedHeight(24)
+            btn.setToolTip(tip)
             btn.setProperty("compare_mode", mode.value)
+            btn.setProperty("segment", _segment_position(i, len(CompareMode)))
             self._group.addButton(btn)
             self._buttons[mode] = btn
             layout.addWidget(btn)
-            if mode is CompareMode.SIDE_BY_SIDE:
-                btn.setChecked(True)
+        self._buttons[CompareMode.IMAGE].setChecked(True)
+        layout.addStretch()
 
         self._group.buttonClicked.connect(self._on_click)
 
@@ -62,12 +81,26 @@ class CompareToolbar(QWidget):
         """Return the currently selected :class:`CompareMode`."""
         checked = self._group.checkedButton()
         if checked is None:
-            return CompareMode.SIDE_BY_SIDE
+            return CompareMode.IMAGE
         return CompareMode(checked.property("compare_mode"))
+
+    def set_mode(self, mode: CompareMode) -> None:
+        """Select *mode* programmatically and emit :attr:`mode_changed`."""
+        btn = self._buttons[mode]
+        if not btn.isChecked():
+            btn.setChecked(True)
+            self.mode_changed.emit(mode.value)
 
     def _on_click(self, btn: QPushButton) -> None:
         mode_value: str = btn.property("compare_mode")
         self.mode_changed.emit(mode_value)
+
+
+def _segment_position(index: int, count: int) -> str:
+    """'first' / 'middle' / 'last' — lets the stylesheet round the outer ends."""
+    if index == 0:
+        return "first"
+    return "last" if index == count - 1 else "middle"
 
 
 # ---------------------------------------------------------------------------

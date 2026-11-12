@@ -3,21 +3,82 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF, QPointF
-
-from bubbletrack.model.conventions import roi_to_slice
+from PyQt6.QtCore import Qt, pyqtSignal, QRectF
 from PyQt6.QtGui import (
-    QImage, QPixmap, QPen, QColor, QBrush, QWheelEvent, QMouseEvent,
+    QBrush, QColor, QImage, QMouseEvent, QPainterPath, QPen, QPixmap,
+    QResizeEvent, QWheelEvent,
 )
 from PyQt6.QtWidgets import (
-    QGraphicsView, QGraphicsScene, QGraphicsPixmapItem,
-    QGraphicsEllipseItem, QGraphicsRectItem, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QWidget, QSizePolicy,
+    QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
+    QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
+
+from bubbletrack.model.conventions import roi_to_slice
+
+# A polyline whose length exceeds this multiple of its convex-hull perimeter
+# is not a traced contour (raster-ordered edge pixels zig-zag across the shape).
+_CONTOUR_LENGTH_RATIO = 2.0
+_MIN_CONTOUR_POINTS = 8
+
+_VIEW_STYLE = {
+    "normal": "border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;",
+    "point": "border:2px solid #6366f1; border-radius:8px; background:#0c0d12;",
+    "roi": "border:2px solid #f59e0b; border-radius:8px; background:#0c0d12;",
+}
+
+
+def _hull_perimeter(points: np.ndarray) -> float:
+    """Perimeter of the convex hull of (N, 2) points (monotone chain)."""
+    pts = np.unique(np.asarray(points, dtype=float), axis=0)
+    if len(pts) < 3:
+        return 0.0
+    pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
+
+    def half(seq):
+        out: list = []
+        for p in seq:
+            while len(out) >= 2:
+                (ax, ay), (bx, by) = out[-2], out[-1]
+                if (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax) > 0:
+                    break
+                out.pop()
+            out.append(p)
+        return out
+
+    hull = np.array(half(pts)[:-1] + half(pts[::-1])[:-1])
+    closed = np.vstack([hull, hull[:1]])
+    return float(np.sum(np.hypot(*np.diff(closed, axis=0).T)))
+
+
+def is_ordered_contour(points: np.ndarray | None) -> bool:
+    """True when *points* trace a closed outline in order (draw as a polyline).
+
+    Edge pixels collected in raster order jump back and forth across the
+    shape, so their path is many times longer than the outline itself.
+    """
+    if points is None or len(points) < _MIN_CONTOUR_POINTS:
+        return False
+    pts = np.asarray(points, dtype=float)
+    closed = np.vstack([pts, pts[:1]])
+    length = float(np.sum(np.hypot(*np.diff(closed, axis=0).T)))
+    hull = _hull_perimeter(pts)
+    return hull > 0 and length <= _CONTOUR_LENGTH_RATIO * hull
+
+
+def _cosmetic_pen(colour: str, width: float) -> QPen:
+    """A pen whose width is in screen pixels, so overlays stay visible at any zoom."""
+    pen = QPen(QColor(colour), width)
+    pen.setCosmetic(True)
+    return pen
 
 
 class ImagePanel(QWidget):
     """Image viewer with zoom controls and overlay items.
+
+    The zoom and pan survive frame changes: a new image of the same size
+    keeps the current view; the view is refitted only for a new image size
+    or after :meth:`reset_zoom`.  Until the user zooms, the image follows
+    the panel size.
 
     Signals
     -------
@@ -36,61 +97,59 @@ class ImagePanel(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
+        layout.addLayout(self._build_toolbar(title))
 
-        # Title bar with zoom buttons
+        self._scene = QGraphicsScene(self)
+        self._view = _PanZoomView(self._scene, self)
+        self._view.setStyleSheet(_VIEW_STYLE["normal"])
+        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._view.setMinimumSize(160, 120)
+        layout.addWidget(self._view)
+
+        self._pixmap_item: QGraphicsPixmapItem | None = None
+        self._overlay_items: list = []
+        self._mode = "normal"  # "normal" | "point" | "roi"
+        self._image_size: tuple[int, int] | None = None  # (h, w)
+        self._auto_fit = True  # follow the panel size until the user zooms
+
+    def _build_toolbar(self, title: str) -> QHBoxLayout:
         top = QHBoxLayout()
         top.setContentsMargins(8, 4, 8, 0)
-        lbl = QLabel(title)
-        lbl.setObjectName("sectionTitle")
-        top.addWidget(lbl)
+        self._title_label = QLabel(title)
+        self._title_label.setObjectName("sectionTitle")
+        top.addWidget(self._title_label)
         top.addStretch()
 
-        # ROI button + coordinate label
         self._roi_label = QLabel("")
         self._roi_label.setObjectName("dimText")
         self._roi_label.setStyleSheet("font-size: 11px;")
         top.addWidget(self._roi_label)
 
-        self._select_roi_btn = QPushButton("ROI")
-        self._select_roi_btn.setFixedSize(42, 28)
-        self._select_roi_btn.setObjectName("secondaryBtn")
-        self._select_roi_btn.setToolTip("Drag on image to select Region of Interest")
+        self._select_roi_btn = self._tool_button("ROI", 42, "Drag on image to select Region of Interest")
         self._select_roi_btn.clicked.connect(self.select_roi_clicked)
-        top.addWidget(self._select_roi_btn)
+        self._zoom_in_btn = self._tool_button("+", 28, "Zoom in (wheel up)")
+        self._zoom_in_btn.clicked.connect(self.zoom_in)
+        self._zoom_out_btn = self._tool_button("−", 28, "Zoom out (wheel down)")
+        self._zoom_out_btn.clicked.connect(self.zoom_out)
+        self._zoom_reset_btn = self._tool_button("↺", 28, "Fit image to the panel (reset zoom)")
+        self._zoom_reset_btn.clicked.connect(self.reset_zoom)
+        for btn in (self._select_roi_btn, self._zoom_in_btn,
+                    self._zoom_out_btn, self._zoom_reset_btn):
+            top.addWidget(btn)
+        return top
 
-        self._zoom_in_btn = QPushButton("+")
-        self._zoom_in_btn.setFixedSize(28, 28)
-        self._zoom_in_btn.setObjectName("secondaryBtn")
-        self._zoom_in_btn.clicked.connect(self._zoom_in)
-        top.addWidget(self._zoom_in_btn)
-
-        self._zoom_out_btn = QPushButton("\u2212")
-        self._zoom_out_btn.setFixedSize(28, 28)
-        self._zoom_out_btn.setObjectName("secondaryBtn")
-        self._zoom_out_btn.clicked.connect(self._zoom_out)
-        top.addWidget(self._zoom_out_btn)
-
-        self._zoom_reset_btn = QPushButton("\u21BA")
-        self._zoom_reset_btn.setFixedSize(28, 28)
-        self._zoom_reset_btn.setObjectName("secondaryBtn")
-        self._zoom_reset_btn.clicked.connect(self._zoom_reset)
-        top.addWidget(self._zoom_reset_btn)
-
-        layout.addLayout(top)
-
-        # Graphics view
-        self._scene = QGraphicsScene(self)
-        self._view = _PanZoomView(self._scene, self)
-        self._view.setStyleSheet("border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;")
-        self._view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        layout.addWidget(self._view)
-
-        # State
-        self._pixmap_item: QGraphicsPixmapItem | None = None
-        self._overlay_items: list = []
-        self._mode = "normal"  # "normal" | "point" | "roi"
+    @staticmethod
+    def _tool_button(text: str, width: int, tip: str) -> QPushButton:
+        btn = QPushButton(text)
+        btn.setFixedSize(width, 28)
+        btn.setObjectName("secondaryBtn")
+        btn.setToolTip(tip)
+        return btn
 
     # -- Public API --
+
+    def set_title(self, title: str) -> None:
+        self._title_label.setText(title)
 
     def set_image(self, img: np.ndarray):
         """Display a greyscale or binary image (float [0,1] or bool)."""
@@ -100,17 +159,10 @@ class ImagePanel(QWidget):
             img8 = (np.clip(img, 0, 1) * 255).astype(np.uint8)
         else:
             img8 = img.astype(np.uint8)
-
+        img8 = np.ascontiguousarray(img8)
         h, w = img8.shape[:2]
-        qimg = QImage(img8.data.tobytes(), w, h, w, QImage.Format.Format_Grayscale8)
-        pixmap = QPixmap.fromImage(qimg)
-
-        self.clear_overlays()
-        if self._pixmap_item is not None:
-            self._scene.removeItem(self._pixmap_item)
-        self._pixmap_item = self._scene.addPixmap(pixmap)
-        self._scene.setSceneRect(QRectF(0, 0, w, h))
-        self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        qimg = QImage(img8.tobytes(), w, h, w, QImage.Format.Format_Grayscale8)
+        self._show_pixmap(QPixmap.fromImage(qimg), h, w)
 
     def set_image_rgb(self, img: np.ndarray):
         """Display an RGB image (H, W, 3) uint8.
@@ -120,47 +172,86 @@ class ImagePanel(QWidget):
         """
         if img.ndim != 3 or img.shape[2] != 3:
             raise ValueError("set_image_rgb expects an (H, W, 3) array")
-        img8 = img.astype(np.uint8)
+        img8 = np.ascontiguousarray(img.astype(np.uint8))
         h, w = img8.shape[:2]
-        bytes_per_line = 3 * w
-        qimg = QImage(
-            img8.data.tobytes(), w, h, bytes_per_line,
-            QImage.Format.Format_RGB888,
-        )
-        pixmap = QPixmap.fromImage(qimg)
+        qimg = QImage(img8.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888)
+        self._show_pixmap(QPixmap.fromImage(qimg), h, w)
 
+    def _show_pixmap(self, pixmap: QPixmap, h: int, w: int) -> None:
+        """Swap in a new frame; refit the view only when the image size changes."""
         self.clear_overlays()
-        if self._pixmap_item is not None:
-            self._scene.removeItem(self._pixmap_item)
-        self._pixmap_item = self._scene.addPixmap(pixmap)
-        self._scene.setSceneRect(QRectF(0, 0, w, h))
-        self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        if self._pixmap_item is None:
+            self._pixmap_item = self._scene.addPixmap(pixmap)
+            self._pixmap_item.setZValue(-1)
+        else:
+            self._pixmap_item.setPixmap(pixmap)
+        if self._image_size != (h, w):
+            self._image_size = (h, w)
+            self._scene.setSceneRect(QRectF(0, 0, w, h))
+            self._auto_fit = True
+            self._fit()
 
     def draw_circle(self, row_c: float, col_c: float, radius: float,
                     colour: str = "#6366f1", width: float = 2.0):
         """Draw a circle overlay. Coordinates are (row, col) = (y, x)."""
-        pen = QPen(QColor(colour), width)
         item = self._scene.addEllipse(
-            col_c - radius, row_c - radius, 2 * radius, 2 * radius, pen,
+            col_c - radius, row_c - radius, 2 * radius, 2 * radius,
+            _cosmetic_pen(colour, width),
         )
         self._overlay_items.append(item)
 
     def draw_points(self, points: np.ndarray, colour: str = "#EF4444", size: float = 3.0):
-        """Draw scatter points. *points* is (N, 2) ``[row, col]``."""
-        pen = QPen(QColor(colour), 0)
-        brush = QBrush(QColor(colour))
-        for r, c in points:
-            item = self._scene.addEllipse(c - size/2, r - size/2, size, size, pen, brush)
-            self._overlay_items.append(item)
+        """Draw scatter points. *points* is (N, 2) ``[row, col]``.
+
+        All points form one path item, so thousands of edge points stay cheap.
+        """
+        pts = np.asarray(points, dtype=float).reshape(-1, 2)
+        if len(pts) == 0:
+            return
+        path = QPainterPath()
+        half = size / 2
+        for r, c in pts:
+            path.addEllipse(c - half, r - half, size, size)
+        self._add_path(path, QPen(Qt.PenStyle.NoPen), QBrush(QColor(colour)))
+
+    def draw_contour(self, points: np.ndarray, colour: str = "#ef4444",
+                     width: float = 1.5, closed: bool = True) -> None:
+        """Draw *points* (N, 2) ``[row, col]`` as a connected polyline."""
+        pts = np.asarray(points, dtype=float).reshape(-1, 2)
+        if len(pts) < 2:
+            return
+        path = QPainterPath()
+        path.moveTo(pts[0, 1], pts[0, 0])
+        for r, c in pts[1:]:
+            path.lineTo(c, r)
+        if closed:
+            path.closeSubpath()
+        self._add_path(path, _cosmetic_pen(colour, width), QBrush(Qt.BrushStyle.NoBrush))
+
+    def draw_fit_outline(self, points: np.ndarray | None, colour: str = "#ef4444") -> None:
+        """Draw a fit's boundary: a closed polyline for an ordered contour,
+        otherwise the individual edge points."""
+        if points is None or len(points) == 0:
+            return
+        if is_ordered_contour(points):
+            self.draw_contour(points, colour)
+        else:
+            self.draw_points(points, colour, 2.0)
+
+    def _add_path(self, path: QPainterPath, pen: QPen, brush: QBrush) -> None:
+        item = QGraphicsPathItem(path)
+        item.setPen(pen)
+        item.setBrush(brush)
+        self._scene.addItem(item)
+        self._overlay_items.append(item)
 
     def draw_roi_rect(self, gridx: tuple[int, int], gridy: tuple[int, int],
                       colour: str = "#10b981"):
         """Draw an ROI rectangle (1-indexed coords)."""
-        pen = QPen(QColor(colour), 2)
         rs, cs = roi_to_slice(gridx, gridy)
         r0, r1 = rs.start, rs.stop
         c0, c1 = cs.start, cs.stop
-        item = self._scene.addRect(c0, r0, c1 - c0, r1 - r0, pen)
+        item = self._scene.addRect(c0, r0, c1 - c0, r1 - r0, _cosmetic_pen(colour, 1.5))
         self._overlay_items.append(item)
 
     def clear_overlays(self):
@@ -181,34 +272,52 @@ class ImagePanel(QWidget):
         if mode == "roi":
             self._view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
-            self._view.setStyleSheet("border:2px solid #f59e0b; border-radius:8px; background:#0c0d12;")
         elif mode == "point":
             self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
-            self._view.setStyleSheet("border:2px solid #6366f1; border-radius:8px; background:#0c0d12;")
         else:
             self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self._view.unsetCursor()
-            self._view.setStyleSheet("border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;")
+        self._view.setStyleSheet(_VIEW_STYLE.get(mode, _VIEW_STYLE["normal"]))
 
     # -- ROI label --
     def set_roi_text(self, gridx: tuple[int, int], gridy: tuple[int, int]) -> None:
         """Update the ROI coordinate display in the toolbar."""
         self._roi_label.setText(
-            f"X: {gridy[0]}\u2013{gridy[1]}  Y: {gridx[0]}\u2013{gridx[1]}"
+            f"X: {gridy[0]}–{gridy[1]}  Y: {gridx[0]}–{gridx[1]}"
         )
 
-    # -- Zoom helpers --
-    def _zoom_in(self):
-        self._view.scale(1.25, 1.25)
+    # -- Zoom --
+    @property
+    def auto_fit(self) -> bool:
+        """True while the image follows the panel size (no manual zoom)."""
+        return self._auto_fit
 
-    def _zoom_out(self):
-        self._view.scale(0.8, 0.8)
+    def zoom_in(self) -> None:
+        self.zoom_by(1.25)
 
-    def _zoom_reset(self):
+    def zoom_out(self) -> None:
+        self.zoom_by(0.8)
+
+    def zoom_by(self, factor: float) -> None:
+        self._auto_fit = False
+        self._view.scale(factor, factor)
+
+    def reset_zoom(self) -> None:
+        """Fit the whole image into the panel and follow its size again."""
+        self._auto_fit = True
+        self._fit()
+
+    def _fit(self) -> None:
+        if self._image_size is None:
+            return
         self._view.resetTransform()
-        if self._scene.sceneRect():
-            self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+        self._view.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    # Backwards-compatible names (shortcut wiring in the controller)
+    _zoom_in = zoom_in
+    _zoom_out = zoom_out
+    _zoom_reset = reset_zoom
 
 
 class _PanZoomView(QGraphicsView):
@@ -222,8 +331,12 @@ class _PanZoomView(QGraphicsView):
         self.setRenderHint(self.renderHints())
 
     def wheelEvent(self, event: QWheelEvent):
-        factor = 1.15 if event.angleDelta().y() > 0 else 1 / 1.15
-        self.scale(factor, factor)
+        self._panel.zoom_by(1.15 if event.angleDelta().y() > 0 else 1 / 1.15)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self._panel.auto_fit:
+            self._panel._fit()
 
     def mousePressEvent(self, event: QMouseEvent):
         if (self._panel._mode == "point"

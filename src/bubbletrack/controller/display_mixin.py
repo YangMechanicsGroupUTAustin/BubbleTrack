@@ -13,6 +13,7 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
+from bubbletrack.model.export import locate_rmax
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
 from bubbletrack.model.removing_factor import compute_removing_factor
@@ -181,28 +182,15 @@ def display_frame(
                 composite = create_wipe(cur_img, full_bin)
             window.original_panel.set_image_rgb(composite)
         else:
-            # Side-by-side (default)
+            # Image only (default) or side by side: the raw frame on the left;
+            # the mask panel is filled either way (it is hidden in IMAGE mode)
+            # so switching modes never shows a stale mask.
             window.original_panel.set_image(cur_img)
             window.binary_panel.set_image(bin_display)
 
-        # Draw ROI rectangle on original panel
         window.original_panel.draw_roi_rect(state.gridx, state.gridy)
-
-        # Draw existing circle fit if available
-        if (state.radius is not None
-                and state.radius[idx] > 0
-                and state.circle_fit_par is not None):
-            rc = state.circle_fit_par[idx, 0]
-            cc = state.circle_fit_par[idx, 1]
-            r = state.radius[idx]
-            is_area = (state.region_count is not None
-                       and state.region_count[idx] > 0)
-            if not is_area:
-                window.original_panel.draw_circle(rc, cc, r, "#6366f1")
-            if state.circle_xy and state.circle_xy[idx] is not None:
-                window.original_panel.draw_points(
-                    state.circle_xy[idx], "#ef4444", 2.0,
-                )
+        draw_fit_overlay(state, window.original_panel, idx)
+        window.radius_chart.set_current_frame(idx)
 
         window.status_bar.update_frame(
             frame_to_display(idx), state.total_frames,
@@ -217,8 +205,58 @@ def display_frame(
         window.header.set_status(f"Error: {exc}", "#ef4444")
 
 
+def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
+    """Draw frame *idx*'s fitted circle and its boundary on an image panel.
+
+    The boundary is a closed polyline when ``circle_xy`` holds an ordered
+    contour (Edge engine), otherwise the detected edge points.  Area-mode
+    results have no meaningful circle, so only their boundary is drawn.
+    """
+    if state.radius is None or idx >= len(state.radius) or state.radius[idx] <= 0:
+        return
+    is_area = state.region_count is not None and state.region_count[idx] > 0
+    if not is_area and state.circle_fit_par is not None \
+            and np.isfinite(state.circle_fit_par[idx]).all():
+        rc, cc = state.circle_fit_par[idx]
+        panel.draw_circle(rc, cc, state.radius[idx], "#6366f1")
+    if state.circle_xy is not None and state.circle_xy[idx] is not None:
+        panel.draw_fit_outline(state.circle_xy[idx], "#ef4444")
+
+
+def chart_scores(state: AppState) -> tuple[np.ndarray, str] | None:
+    """Per-frame marker scores for the R(t) chart and the ramp's name.
+
+    Edge mode uses the engine's own confidence (the validated measure; the
+    geometric quality score rates wrong fits highly); other modes use the
+    geometric fit quality, NaN for area-mode frames.  Frames with
+    radius <= 0 score 0.  None without results.
+    """
+    if state.radius is None:
+        return None
+    if state.detection_mode == "edge" and state.fit_confidence is not None:
+        return np.where(state.radius > 0, state.fit_confidence, 0.0), "confidence"
+    scores = compute_all_quality_scores(
+        state.radius, state.circle_fit_par, state.circle_xy,
+        state.gridx, state.gridy,
+    )
+    if state.region_count is not None:
+        scores[(state.region_count > 0) & (state.radius > 0)] = np.nan
+    return scores, "fit quality"
+
+
+def rmax_window(state: AppState) -> tuple[float, int, int] | None:
+    """(Rmax frame, fit-window start, end), 1-based, as the RofT export uses."""
+    if state.radius is None:
+        return None
+    try:
+        estimate = locate_rmax(state.radius, state.rmax_fit_length)
+    except ValueError:  # no valid frame yet
+        return None
+    return estimate.frame, estimate.window[0], estimate.window[1]
+
+
 def refresh_chart(state: AppState, window) -> np.ndarray | None:
-    """Redraw R-t chart with per-frame quality coloring.
+    """Redraw the R(t) chart: markers by source/score/flags, Rmax window.
 
     Returns
     -------
@@ -226,26 +264,22 @@ def refresh_chart(state: AppState, window) -> np.ndarray | None:
         Quality scores with full-frame indexing (length == len(state.radius)).
         Frames with radius <= 0 have score 0.0.  None if no radius data.
     """
-    if state.radius is not None and state.detection_mode == "edge" \
-            and state.fit_confidence is not None:
-        # The Edge engine scores its own fits; its confidence is the validated
-        # measure (the geometric quality score rates wrong fits highly).
-        frames = np.arange(1, len(state.radius) + 1)
-        scores = np.where(state.radius > 0, state.fit_confidence, 0.0)
-        window.radius_chart.plot_all(frames, state.radius, scores)
-        return scores
-    if state.radius is not None:
-        frames = np.arange(1, len(state.radius) + 1)
-        scores = compute_all_quality_scores(
-            state.radius, state.circle_fit_par, state.circle_xy,
-            state.gridx, state.gridy,
-        )
-        if state.region_count is not None:
-            area_mask = (state.region_count > 0) & (state.radius > 0)
-            scores[area_mask] = np.nan
-        window.radius_chart.plot_all(frames, state.radius, scores)
-        return scores
-    return None
+    scored = chart_scores(state)
+    if scored is None:
+        return None
+    scores, name = scored
+    chart = window.radius_chart
+    chart.set_score_name(name)
+    chart.plot_all(
+        np.arange(1, len(state.radius) + 1), state.radius, scores,
+        sources=state.fit_source, flags=state.fit_flags, locked=state.fit_locked,
+    )
+    rmax = rmax_window(state)
+    if rmax is None:
+        chart.set_rmax_info(None)
+    else:
+        chart.set_rmax_info(*rmax)
+    return scores
 
 
 def redraw_original(state: AppState, window) -> None:
