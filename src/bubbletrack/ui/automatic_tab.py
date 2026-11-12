@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QSpinBox,
+    QHBoxLayout, QLabel, QProgressBar, QPushButton, QSpinBox,
     QVBoxLayout, QWidget,
 )
 
@@ -45,15 +45,6 @@ class AutomaticTab(QWidget):
         self._end_spin.setMinimumWidth(70)
         range_row.addWidget(self._end_spin)
         layout.addLayout(range_row)
-
-        self._track_check = QCheckBox("Track the bubble across frames (Edge)")
-        self._track_check.setChecked(True)
-        self._track_check.setToolTip(
-            "After Fit All, follow the bubble from frame to frame: frames whose\n"
-            "result does not fit the track are re-measured near the predicted\n"
-            "circle, and doubtful frames are added to the Review queue.\n"
-            "Manual and locked frames are kept and anchor the track.")
-        layout.addWidget(self._track_check)
 
         # Progress
         self._progress_label = QLabel("Ready")
@@ -122,9 +113,6 @@ class AutomaticTab(QWidget):
         self._end_spin.setMaximum(total)
         self._end_spin.setValue(total)
 
-    def tracking_enabled(self) -> bool:
-        return self._track_check.isChecked()
-
     def get_range(self) -> tuple[int, int]:
         """Return 1-indexed (start, end)."""
         return self._start_spin.value(), self._end_spin.value()
@@ -151,7 +139,6 @@ class AutomaticTab(QWidget):
         """Clear / Batch are disabled while a fit runs (Stop stays available)."""
         self._clear_btn.setEnabled(enabled)
         self._batch_btn.setEnabled(enabled)
-        self._track_check.setEnabled(enabled)
 
     def reset_progress(self):
         self._progress.setValue(0)

@@ -279,7 +279,7 @@ class AutoController(BaseController):
         if worker is not self._worker:
             return
         if (not self._stop_requested and self._edge_job is not None
-                and self.w.left_panel.automatic_tab.tracking_enabled()):
+                and self.w.left_panel.pretune_tab.edge_box.tracking_enabled()):
             self._start_tracking()
         else:
             self._finish_run(stopped=self._stop_requested)

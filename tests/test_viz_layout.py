@@ -191,7 +191,7 @@ class TestStyling:
         buttons = window.compare_toolbar._buttons
         for btn in buttons.values():
             btn.resize(110, 28)
-        active = _centre_colour(buttons[CompareMode.IMAGE])
+        active = _centre_colour(buttons[CompareMode.SIDE_BY_SIDE])
         idle = _centre_colour(buttons[CompareMode.WIPE])
         assert active.blue() > 200  # indigo fill
         assert idle.blue() < 80

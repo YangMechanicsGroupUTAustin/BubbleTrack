@@ -1,5 +1,5 @@
-"""Interactive R(t) chart (pyqtgraph): marker SHAPE = fit source, COLOUR =
-score (colour-blind-safe ramp), white ring = flagged; current-frame cursor,
+"""Interactive R(t) chart (pyqtgraph): marker SHAPE = computed or decided by
+the user, COLOUR = score (red -> green); current-frame cursor,
 Rmax window + t = 0, collapse lines, Shift+drag range selection with a menu.
 Frame arguments are 0-based unless named ``_1based`` (the x axis is 1-based).
 """
@@ -82,16 +82,12 @@ class RadiusChart(QWidget):
             symbol="o", size=5, pen=pg.mkPen(None), brush=pg.mkBrush(161, 161, 170, 90),
         )
         self._solved_series = pg.PlotDataItem(pen=pg.mkPen("#e4e4e7", width=2), connect="finite")
-        self._flag_rings = pg.ScatterPlotItem(
-            symbol="o", size=18, pen=pg.mkPen(cs.FLAG_RING_COLOUR, width=1.5), brush=None,
-        )
         self._scatter = pg.ScatterPlotItem(pen=pg.mkPen(cs.SURFACE_COLOUR, width=1))
         self._highlight = pg.ScatterPlotItem(
             pen=pg.mkPen("#818cf8", width=2), brush=pg.mkBrush(99, 102, 241, 50),
             symbol="o", size=22,
         )
-        for layer in (self._raw_series, self._solved_series, self._flag_rings,
-                      self._scatter, self._highlight):
+        for layer in (self._raw_series, self._solved_series, self._scatter, self._highlight):
             item.addItem(layer)
 
         self._hover_label = pg.TextItem(color="#e4e4e7", anchor=(0, 1), fill=pg.mkBrush(12, 13, 18, 220))
@@ -162,23 +158,21 @@ class RadiusChart(QWidget):
         All arrays are per frame, aligned with *frames* (1-based numbers).
         *quality_scores* in [0, 1] colour the markers (NaN = unscored, grey);
         *sources* (FitSource codes) and *locked* pick the marker shape;
-        frames with non-empty *flags* get a white ring.
+        *flags* (per-frame sets) appear in the hover text.
         """
         frames = np.asarray(frames)
         radii = np.asarray(radii, dtype=float)
         mask = np.isfinite(radii) & (radii > 0)
         sel = lambda a: None if a is None else np.asarray(a)[mask]  # noqa: E731
-        flag_all = cs.flag_mask(flags, len(radii)) if flags is not None else None
         self._set_points(
             frames[mask], radii[mask], sel(quality_scores), sel(sources), sel(locked),
-            None if flag_all is None else flag_all[mask],
             None if flags is None or isinstance(flags, np.ndarray)
             else [flags[i] for i in np.flatnonzero(mask)],
         )
         self.data_changed.emit()
 
     def _set_points(self, frames, radii, scores=None, sources=None, locked=None,
-                    flagged=None, flag_sets=None) -> None:
+                    flag_sets=None) -> None:
         self._frames = np.asarray(frames, dtype=float)
         self._radii = np.asarray(radii, dtype=float)
         self._quality_scores = None if scores is None else np.asarray(scores, dtype=float)
@@ -188,7 +182,6 @@ class RadiusChart(QWidget):
         n = len(self._frames)
         if n == 0:
             self._scatter.setData([], [])
-            self._flag_rings.setData([], [])
             self._highlight.setData([], [])
             return
         symbols = cs.marker_symbols(sources, locked, n)
@@ -196,8 +189,6 @@ class RadiusChart(QWidget):
             x=self._frames, y=self._radii, symbol=symbols, size=cs.marker_sizes(symbols),
             brush=cs.score_brushes(self._quality_scores, n),
         )
-        ring = np.zeros(n, dtype=bool) if flagged is None else np.asarray(flagged, dtype=bool)
-        self._flag_rings.setData(self._frames[ring], self._radii[ring])
         self._refresh_highlight()
 
     def plot_series(self, frames: np.ndarray, raw: np.ndarray | None,

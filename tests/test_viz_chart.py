@@ -22,35 +22,34 @@ from bubbletrack.ui.radius_chart import RadiusChart
 # -- pure helpers ----------------------------------------------------------------
 
 class TestMarkerEncoding:
-    def test_ramp_runs_from_bright_poor_to_dark_good(self):
+    def test_ramp_runs_from_red_poor_to_green_good(self):
         assert cs.ramp_colour(0.0) == cs.RAMP_STOPS[-1]
         assert cs.ramp_colour(1.0) == cs.RAMP_STOPS[0]
         assert cs.ramp_colour(float("nan")) == cs.UNSCORED_COLOUR
 
-        def lightness(hex_colour):
-            r, g, b = (int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
-            return 0.2126 * r + 0.7152 * g + 0.0722 * b
+        def rgb(hex_colour):
+            return tuple(int(hex_colour[i:i + 2], 16) for i in (1, 3, 5))
 
-        # Poor fits stand out on the dark background: monotonically brighter.
-        ramp = [lightness(cs.ramp_colour(s)) for s in np.linspace(1, 0, 11)]
-        assert all(b > a for a, b in zip(ramp, ramp[1:]))
+        red, green = rgb(cs.ramp_colour(0.0)), rgb(cs.ramp_colour(1.0))
+        assert red[0] > 200 and red[1] < 100      # poor = red
+        assert green[1] > 150 and green[0] < 100  # good = green
+        # The red share falls steadily as the score rises.
+        share = [rgb(cs.ramp_colour(s))[0] / max(sum(rgb(cs.ramp_colour(s))), 1)
+                 for s in np.linspace(0, 1, 11)]
+        assert all(b <= a + 1e-9 for a, b in zip(share, share[1:]))
 
     def test_bins(self):
         bins = cs.ramp_bins(np.array([0.0, 1.0, np.nan, 2.0, -1.0]))
         assert bins.tolist() == [0, cs.RAMP_BINS - 1, -1, cs.RAMP_BINS - 1, 0]
 
-    def test_shape_by_source_and_star_when_locked(self):
+    def test_two_shapes_computed_or_decided_by_the_user(self):
         sources = np.array([FitSource.AUTO, FitSource.MANUAL, FitSource.REFIT,
-                            FitSource.NEIGHBOR, FitSource.NONE, FitSource.AUTO])
+                            FitSource.NEIGHBOR, FitSource.TRACKED, FitSource.AUTO])
         locked = np.array([False, False, False, False, False, True])
         symbols = cs.marker_symbols(sources, locked, 6)
-        assert symbols.tolist() == ["o", "d", "s", "t1", "o", "star"]
-        assert len(set(symbols.tolist())) == 5  # five distinct shapes
+        assert symbols.tolist() == ["o", "d", "o", "o", "o", "d"]
         assert cs.marker_symbols(None, None, 2).tolist() == ["o", "o"]
-
-    def test_flag_mask(self):
-        assert cs.flag_mask([frozenset(), frozenset({"x"})], 2).tolist() == [False, True]
-        assert cs.flag_mask(None, 3).tolist() == [False] * 3
+        assert [name for _, name in cs.SHAPE_LEGEND] == ["computed", "manual / locked"]
 
     def test_hover_text(self):
         text = hover_text(44, 16.39, file_tag="_054", score=0.25,
@@ -105,11 +104,11 @@ class TestPlotAll:
 
         data = chart._scatter.data
         assert data["x"].tolist() == [1, 2, 4, 5, 6]
-        assert list(data["symbol"]) == ["o", "d", "s", "t1", "star"]
+        assert list(data["symbol"]) == ["o", "d", "o", "o", "d"]
         bins = cs.RAMP_BINS - 1
         assert data["brush"][1].color().name() == cs.ramp_colour(round(0.1 * bins) / bins)
         assert data["brush"][2].color().name() == cs.UNSCORED_COLOUR  # NaN score
-        assert sorted(chart._flag_rings.data["x"].tolist()) == [2, 5]
+        assert not hasattr(chart, "_flag_rings")  # flags live in the hover text and Review
 
     def test_legacy_call_without_extras(self, chart):
         frames, radii = _series(5)
@@ -330,8 +329,7 @@ class TestChartWiring:
         refresh_chart(state, window)
         chart = window.radius_chart
         symbols = dict(zip(chart._scatter.data["x"].tolist(), chart._scatter.data["symbol"]))
-        assert symbols[8] == "d" and symbols[10] == "star" and symbols[1] == "o"
-        assert chart._flag_rings.data["x"].tolist() == [13]
+        assert symbols[8] == "d" and symbols[10] == "d" and symbols[1] == "o"
         est = locate_rmax(state.radius, state.rmax_fit_length)
         t0, band = chart.rmax_info()
         assert t0 == pytest.approx(est.frame)

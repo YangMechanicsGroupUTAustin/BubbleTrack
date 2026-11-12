@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
-    QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QWidget,
+    QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
 
 _DEFINITIONS = (
@@ -33,7 +33,7 @@ def _select(box: QComboBox, value: str) -> None:
 
 
 class EdgeOptionsBox(QGroupBox):
-    """Edge definition, bubble polarity, reference frame and seed point."""
+    """Edge definition, bubble polarity, reference frame, seed point, tracking."""
 
     options_changed = pyqtSignal()
     use_current_reference_clicked = pyqtSignal()
@@ -104,6 +104,16 @@ class EdgeOptionsBox(QGroupBox):
         grid.addWidget(self._seed_label, 4, 1)
         grid.addLayout(seed_buttons, 5, 1, 1, 2)
 
+        self._track_check = QCheckBox("Track across frames after Fit All")
+        self._track_check.setChecked(True)
+        self._track_check.setToolTip(
+            "Follow the bubble from frame to frame once every frame is fitted:\n"
+            "a frame whose result does not fit the track is measured again near\n"
+            "the predicted circle, and doubtful frames join the Review queue.\n"
+            "Manual and locked frames are kept and anchor the track.\n"
+            "Turn off to keep pure single-frame results.")
+        grid.addWidget(self._track_check, 6, 0, 1, 3)
+
     # -- values ---------------------------------------------------------- #
 
     def edge_definition(self) -> str:
@@ -111,6 +121,9 @@ class EdgeOptionsBox(QGroupBox):
 
     def polarity(self) -> str:
         return self._polarity.currentData()
+
+    def tracking_enabled(self) -> bool:
+        return self._track_check.isChecked()
 
     def set_options(self, edge_definition: str, polarity: str) -> None:
         """Set values without emitting options_changed."""

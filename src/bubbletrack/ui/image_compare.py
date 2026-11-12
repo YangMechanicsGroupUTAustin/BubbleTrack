@@ -17,8 +17,9 @@ from PyQt6.QtWidgets import (
 class CompareMode(Enum):
     """Supported image viewing modes.
 
-    ``IMAGE`` (the default) shows only the raw frame with the fitted outline;
-    the other modes add the binary mask beside, over, or wiped into it.
+    ``SIDE_BY_SIDE`` (the default, "Image + Mask") shows the raw frame with the
+    fitted outline next to the binary mask; ``IMAGE`` hides the mask; the others
+    lay the mask over, or wipe it into, the frame.
     """
 
     IMAGE = "image"
@@ -26,6 +27,8 @@ class CompareMode(Enum):
     OVERLAY = "overlay"
     WIPE = "wipe"
 
+
+DEFAULT_MODE = CompareMode.SIDE_BY_SIDE  # the mask is what users tune against
 
 _MODE_LABELS = {
     CompareMode.IMAGE: ("Image", "Raw frame with the fitted outline (mask hidden)"),
@@ -71,7 +74,7 @@ class CompareToolbar(QWidget):
             self._group.addButton(btn)
             self._buttons[mode] = btn
             layout.addWidget(btn)
-        self._buttons[CompareMode.IMAGE].setChecked(True)
+        self._buttons[DEFAULT_MODE].setChecked(True)
         layout.addStretch()
 
         self._group.buttonClicked.connect(self._on_click)
@@ -81,7 +84,7 @@ class CompareToolbar(QWidget):
         """Return the currently selected :class:`CompareMode`."""
         checked = self._group.checkedButton()
         if checked is None:
-            return CompareMode.IMAGE
+            return DEFAULT_MODE
         return CompareMode(checked.property("compare_mode"))
 
     def set_mode(self, mode: CompareMode) -> None:

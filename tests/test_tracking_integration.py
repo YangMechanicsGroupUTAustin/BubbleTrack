@@ -156,7 +156,7 @@ def _fit_all(qapp, gui, folder, truth, *, track: bool):
     controller._state = update_state(controller._get_state(), detection_mode="edge",
                                      reference_frame=0,
                                      edge_seed=(truth["rc"][peak], truth["cc"][peak]))
-    window.left_panel.automatic_tab._track_check.setChecked(track)
+    window.left_panel.pretune_tab.edge_box._track_check.setChecked(track)
     events = []
     controller.bus.subscribe(RESULTS_CHANGED, lambda *a: events.append(a))
     controller.auto_ctrl.on_auto_fit()
@@ -199,7 +199,7 @@ def test_manual_fix_anchors_tracking_and_survives(qapp, gui, drift_sequence):
     state.radius[5], state.circle_fit_par[5] = 99.0, [10.0, 10.0]  # deliberately odd
     state.fit_source[5] = FitSource.MANUAL
     controller.auto_ctrl._ask_manual_policy = lambda n: "keep"
-    window.left_panel.automatic_tab._track_check.setChecked(True)
+    window.left_panel.pretune_tab.edge_box._track_check.setChecked(True)
     controller.auto_ctrl.on_auto_fit()
     _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
     state = controller._get_state()

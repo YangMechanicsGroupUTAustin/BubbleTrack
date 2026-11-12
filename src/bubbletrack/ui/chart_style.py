@@ -1,14 +1,15 @@
-"""Marker encoding for the R(t) chart: shape = provenance, colour = score.
+"""Marker encoding for the R(t) chart: shape = who decided, colour = score.
 
-Colour-blind safe by construction: the score ramp is a segment of viridis
-(perceptually uniform, readable with every common colour-vision deficiency),
-reversed so that *poor* fits are the brightest marks on the dark plot
-background, and provenance is carried by marker shape, never by colour.
+Two shapes only: a dot for results the software computed (Fit All, refits,
+tracking) and a diamond for results the user decided (manual fits and locked
+frames).  Colour runs from red (poor) through yellow to green (good); frames
+without a score are grey.  The exact source and any flags are in the hover
+text, and flagged frames are listed in the Review queue rather than marked
+on the chart (rings overlapped badly on dense series).
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from functools import lru_cache
 
 import numpy as np
@@ -16,31 +17,23 @@ import pyqtgraph as pg
 
 from bubbletrack.model.provenance import FitSource
 
-# Viridis samples from t = 0.375 (blue-teal) to t = 1.0 (yellow).  Score 1
+# Green -> yellow -> red, bright enough for the dark plot background.  Score 1
 # (best) maps to the first stop, score 0 (worst) to the last.
 RAMP_STOPS: tuple[str, ...] = (
-    "#2c728e", "#21918c", "#27ad81", "#5ec962", "#addc30", "#fde725",
+    "#22c55e", "#a3e635", "#facc15", "#fb923c", "#ef4444",
 )
 RAMP_BINS = 32
 UNSCORED_COLOUR = "#a1a1aa"  # no score (area mode, or a live run)
-SURFACE_COLOUR = "#0c0d12"   # plot background, used as the marker ring
-FLAG_RING_COLOUR = "#fafafa"
+SURFACE_COLOUR = "#0c0d12"   # plot background, used as the marker outline
 
-SOURCE_SYMBOLS: dict[int, str] = {
-    int(FitSource.NONE): "o",
-    int(FitSource.AUTO): "o",
-    int(FitSource.MANUAL): "d",
-    int(FitSource.REFIT): "s",
-    int(FitSource.NEIGHBOR): "t1",
-    int(FitSource.TRACKED): "h",
-}
-LOCKED_SYMBOL = "star"
-SYMBOL_SIZES = {"o": 9, "d": 11, "s": 9, "t1": 11, "h": 10, "star": 14}
+# Computed results are dots; only a manual fit gets a diamond.
+SOURCE_SYMBOLS: dict[int, str] = {int(FitSource.MANUAL): "d"}
+LOCKED_SYMBOL = "d"  # accepted in review: decided by the user, like a manual fit
+SYMBOL_SIZES = {"o": 9, "d": 12}
 
 # (glyph, label) pairs for the legend, in display order.
 SHAPE_LEGEND: tuple[tuple[str, str], ...] = (
-    ("●", "auto"), ("◆", "manual"), ("■", "refit"),
-    ("▲", "neighbour"), ("⬢", "tracked"), ("★", "locked"),
+    ("●", "computed"), ("◆", "manual / locked"),
 )
 
 
@@ -102,15 +95,6 @@ def marker_sizes(symbols: np.ndarray) -> np.ndarray:
     return np.array([SYMBOL_SIZES.get(s, 9) for s in symbols], dtype=float)
 
 
-def flag_mask(flags: Sequence | np.ndarray | None, n: int) -> np.ndarray:
-    """Boolean per frame: True when the frame carries any flag."""
-    if flags is None:
-        return np.zeros(n, dtype=bool)
-    if isinstance(flags, np.ndarray) and flags.dtype == bool:
-        return flags.copy()
-    return np.array([bool(f) for f in flags], dtype=bool)
-
-
 def source_name(source: int | None, locked: bool = False) -> str:
     if locked:
         return "locked"
@@ -130,9 +114,8 @@ def ramp_gradient_css() -> str:
 
 
 def shape_legend_html() -> str:
-    """Legend text for the marker shapes and the flag ring."""
+    """Legend text for the marker shapes."""
     shapes = "&nbsp;&nbsp;".join(
         f'<span style="color:#e4e4e7;">{glyph}</span> {name}' for glyph, name in SHAPE_LEGEND
     )
-    return (f'<span style="color:#a1a1aa; font-size:11px;">{shapes}&nbsp;&nbsp;'
-            f'<span style="color:{FLAG_RING_COLOUR};">\u25EF</span> flagged</span>')
+    return f'<span style="color:#a1a1aa; font-size:11px;">{shapes}</span>'

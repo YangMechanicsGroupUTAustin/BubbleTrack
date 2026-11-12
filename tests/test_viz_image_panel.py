@@ -156,20 +156,20 @@ class TestFitOverlayOnRawImage:
 
 
 class TestViewModesInWindow:
-    def test_image_mode_is_default_and_hides_mask(self, gui):
+    def test_image_and_mask_is_default(self, gui):
         window, _ = gui
-        assert window.compare_mode is CompareMode.IMAGE
-        assert window.binary_panel.isHidden()
-        assert window.compare_toolbar._buttons[CompareMode.IMAGE].isChecked()
-
-    def test_mask_toggle_and_active_button(self, gui):
-        window, _ = gui
-        toolbar = window.compare_toolbar
-        toolbar._buttons[CompareMode.SIDE_BY_SIDE].click()
         assert window.compare_mode is CompareMode.SIDE_BY_SIDE
         assert not window.binary_panel.isHidden()
+        assert window.compare_toolbar._buttons[CompareMode.SIDE_BY_SIDE].isChecked()
+
+    def test_image_only_hides_the_mask_and_marks_its_button(self, gui):
+        window, _ = gui
+        toolbar = window.compare_toolbar
+        toolbar._buttons[CompareMode.IMAGE].click()
+        assert window.compare_mode is CompareMode.IMAGE
+        assert window.binary_panel.isHidden()
         checked = [m for m, b in toolbar._buttons.items() if b.isChecked()]
-        assert checked == [CompareMode.SIDE_BY_SIDE]
+        assert checked == [CompareMode.IMAGE]
         toolbar._buttons[CompareMode.OVERLAY].click()
         assert window.binary_panel.isHidden()
 
