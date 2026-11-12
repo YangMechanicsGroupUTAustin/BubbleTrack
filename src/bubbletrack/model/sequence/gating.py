@@ -4,8 +4,8 @@ The track keeps the accepted circles of its pass.  The next frame is predicted
 from the last one plus the damped centre velocity and radius rate measured
 between the last two accepted frames.  The centre gate grows with the measured
 speed, the recent prediction errors, the number of lost frames and (on the
-first step from a seed, before any velocity is known) with the radius, so a
-fast drift is followed without widening the gate for a still bubble.
+first step from a seed, before any rate is known) with the radius, so a fast
+drift or growth is followed without widening the gate for a still bubble.
 
 The radius window is the prediction +- the radius gate, with two collapse
 rules: a shrinking bubble may also reverse (rebound up to the last radius plus
@@ -88,7 +88,7 @@ def predict(history: tuple[TrackPoint, ...], frame: int, centre_errors: tuple[fl
     centre_gate = (c_floor * grow + cfg.gate_speed_k * math.hypot(*vc) * dt_e
                    + cfg.gate_error_k * _median(centre_errors, cfg.error_window) + unknown)
     radius_gate = (r_floor * grow + cfg.gate_rate_k * abs(vr) * dt_e
-                   + cfg.gate_error_k * _median(radius_errors, cfg.error_window))
+                   + cfg.gate_error_k * _median(radius_errors, cfg.error_window) + unknown)
     r_pred = max(r_l + vr * dt_e, 0.0)
     rebound = r_l + abs(vr_raw) * dt_e
     released = rates is not None and r_l + vr_raw * dt_e < cfg.release_ratio * r_l

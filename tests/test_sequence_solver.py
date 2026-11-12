@@ -197,9 +197,23 @@ def test_nothing_to_track():
     assert res.collapse_frames == () and res.cycles == () and res.review == ()
 
 
+def test_empty_sequence():
+    res = solve_sequence((), lambda i, p: Observation(NAN, NAN, NAN, 0.0))
+    assert res.frames == () and res.seed_frame == -1 and res.review == () and res.cycles == ()
+
+
 # --------------------------------------------------------------------------- #
 #  Anchors
 # --------------------------------------------------------------------------- #
+def test_anchors_on_the_first_last_and_adjacent_frames():
+    truth, det = world(n=20, cycles=((-1, 22, 40.0),))
+    anchors = {0: truth[0], 1: truth[1], 19: truth[19], 9: (NAN, NAN, 0.0), 10: truth[10]}
+    res = solve_sequence(observe(truth), det, anchors=anchors)
+    assert [res.frames[i].source for i in anchors] == ["anchor"] * len(anchors)
+    assert all(close(res.frames[i], truth[i]) for i in range(20) if i not in anchors)
+    assert det.calls == []
+
+
 def test_anchor_is_copied_and_seeds_the_track():
     truth, det = world()
     raw = observe(truth)

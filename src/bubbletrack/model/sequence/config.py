@@ -34,7 +34,8 @@ class SequenceConfig:
     gate_error_k: float = 2.0
     """... + gate_error_k * median of the recent prediction errors (centre and radius gates)."""
     gate_unknown_frac: float = 0.5
-    """... + gate_unknown_frac * R * dt on the first step from a seed (no velocity measured yet)."""
+    """... + gate_unknown_frac * R * dt on the first step from a seed (no rate measured yet);
+    the radius gate gets the same term."""
     gate_radius_px: float = 2.0
     gate_radius_frac: float = 0.12
     """Radius gate floor = max(gate_radius_px, gate_radius_frac * R)."""
