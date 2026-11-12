@@ -44,7 +44,7 @@ from bubbletrack.model.edge.region import own_cell
 from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 
-ENGINE_VERSION = "edge-1.1.0"
+ENGINE_VERSION = "edge-1.1.1"
 
 __all__ = ["ENGINE_VERSION", "EdgeParams", "EdgeResult", "detect_edge", "detect_edge_with_config"]
 

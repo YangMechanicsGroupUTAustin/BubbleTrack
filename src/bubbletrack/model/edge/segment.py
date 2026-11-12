@@ -186,9 +186,16 @@ def _prior_factor(circle: tuple[float, float, float], area: float, holds_prior: 
         return 1.0
     pr, pc, p_rad = prior
     d_centre = 0.0 if holds_prior else np.hypot(circle[0] - pr, circle[1] - pc)
-    d_radius = min(abs(circle[2] - p_rad), abs(np.sqrt(area / np.pi) - p_rad))
     return float(np.exp(-d_centre / (cfg.prior_centre_frac * p_rad + cfg.prior_centre_px))
-                 * np.exp(-d_radius / (cfg.prior_radius_frac * p_rad + cfg.prior_radius_px)))
+                 * _prior_radius_term(circle, area, prior, cfg))
+
+
+def _prior_radius_term(circle: tuple[float, float, float], area: float, prior: tuple[float, float, float],
+                       cfg: SegmentConfig) -> np.floating:
+    """The size part of :func:`_prior_factor` (the better of the circle and the area radius)."""
+    p_rad = prior[2]
+    d_radius = min(abs(circle[2] - p_rad), abs(np.sqrt(area / np.pi) - p_rad))
+    return np.exp(-d_radius / (cfg.prior_radius_frac * p_rad + cfg.prior_radius_px))
 
 
 def _inside_fractions(crop: np.ndarray, r0: int, c0: int, pts: np.ndarray,
@@ -247,6 +254,21 @@ def _score_component(prop, coarse: CoarseMask, near_invalid: np.ndarray | None, 
                      interior=_interior(prop.image, r0, c0), holds_prior=holds_prior)
 
 
+def _holder_runner_up(best: Candidate, cands: list[Candidate], prior: tuple[float, float, float],
+                      cfg: SegmentConfig) -> float:
+    """Ambiguity of a component chosen because it holds the prior centre.
+
+    Its own score is taken without the prior's size term: the centre chose it, and a radius
+    that is off (a rough circle dragged by the user, a click) must not make a rival look
+    stronger, e.g. the bubble's own dark core when the radius fits the core.  Rivals keep
+    their full prior factor."""
+    others = [c for c in cands if c is not best]
+    if not others or best.score <= 0:
+        return 0.0
+    free = best.score / max(float(_prior_radius_term(best.circle, best.area, prior, cfg)), 1e-300)
+    return float(min(max(c.score for c in others) / free, 1.0))
+
+
 def _runner_up(best: Candidate, cands: list[Candidate], by_seed: bool) -> float:
     others = [c for c in cands if c is not best]
     if not others:
@@ -273,7 +295,9 @@ def select_candidate(coarse: CoarseMask, invalid: np.ndarray, cfg: SegmentConfig
     are taken, so a single dark object of any shape is found.  With a
     *seed*, the component containing it, or else the one whose circle centre
     is nearest, is chosen; with a *prior*, the component containing its
-    centre, or else the best score.
+    centre, or else the best score.  The ambiguity of a component chosen for
+    holding the prior centre ignores the prior radius (:func:`_holder_runner_up`),
+    so a rough radius costs no confidence.
 
     Parameters
     ----------
@@ -314,4 +338,6 @@ def select_candidate(coarse: CoarseMask, invalid: np.ndarray, cfg: SegmentConfig
         best = min(cands, key=lambda c: c.seed_distance)
     else:
         best = holding[0] if holding else max(cands, key=lambda c: c.score)
+    if holding and not by_seed:
+        return Selection(best, tuple(cands), _holder_runner_up(best, cands, prior, cfg), method)
     return Selection(best, tuple(cands), _runner_up(best, cands, by_seed), method)

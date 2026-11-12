@@ -152,3 +152,21 @@ def test_candidate_interior_is_a_dark_pixel_even_in_a_crescent():
     sel = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT)
     r, c = (int(round(v)) for v in sel.best.interior)
     assert crescent[r, c]
+
+
+def _ring_with_core(shape=SHAPE):
+    """A bubble seen as a dark ring (R 35-50) around a bright annulus and a dark core (R 12)."""
+    def cov(r):
+        return _coverage(shape, 80, 130, r)
+    n = 1.0 - 0.9 * cov(50) + 0.9 * cov(35) - 0.9 * cov(12)
+    return ndimage.gaussian_filter(n, 1.0).astype(np.float32)
+
+
+@pytest.mark.parametrize("radius", [12.5, 25.0, 50.0, 100.0])
+def test_a_rough_prior_radius_does_not_make_the_held_body_ambiguous(radius):
+    """The body holding the prior centre is chosen; a dragged radius that is off (here it fits
+    the dark core better than the bubble) must not turn the core into a strong rival."""
+    sel = select_candidate(_segment(_ring_with_core()), np.zeros(SHAPE, bool), SEG, FIT,
+                           prior=(80.0, 130.0, radius))
+    assert sel.best.holds_prior and sel.best.circle[2] == pytest.approx(50, abs=3.0)
+    assert sel.runner_up < 0.3          # without the fix: 1.0 at R 12.5 (confidence 0), 0.51 at R 25
