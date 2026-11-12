@@ -35,7 +35,7 @@ _CIRCLE_FIT = "circle fit (Taubin)"
 _RADIUS_DEFINITIONS: dict[tuple[str, str | None], str] = {
     ("area", None): "area-equivalent (dark regions)",
     ("edge", "steep"): "area-equivalent sqrt(A/pi) of the 50% iso-contour",
-    ("edge", "outer"): "outer extent of the bubble shadow (Edge definition B)",
+    ("edge", "outer"): "area-equivalent sqrt(A/pi) of the outer extent contour (Edge definition B)",
 }
 
 
