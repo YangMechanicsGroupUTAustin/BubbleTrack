@@ -14,6 +14,7 @@ import numpy as np
 from scipy import ndimage
 from skimage import measure
 
+from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.edge.config import FitConfig, NormalizeConfig, SegmentConfig
 from bubbletrack.model.edge.fit import fit_circle
 from bubbletrack.model.edge.normalize import noise_sigma
@@ -49,6 +50,17 @@ class Candidate:
     circularity: float
     contrast: float
     inside_fraction: float
+    """Fraction of the component inside its robust circle (the polarity test)."""
+    inside_any: float = 1.0
+    """The same for the better of the robust and the whole-boundary Taubin circle."""
+    interior: tuple[float, float] = (float("nan"), float("nan"))
+    """Deepest dark pixel of the component (distance-transform maximum): inside any shape."""
+    holds_prior: bool = False
+    """The prior centre lies inside the filled component."""
+
+    def passes_polarity(self, cfg: SegmentConfig) -> bool:
+        """Inside its own circle, or chosen by the user (seed click) or the tracker (prior)."""
+        return self.inside_fraction >= cfg.polarity_min_inside or self.seed_distance == 0.0 or self.holds_prior
 
 
 @dataclass(frozen=True)
@@ -150,24 +162,52 @@ def _annulus_contrast(smooth: np.ndarray, circle: tuple[float, float, float], da
     return float(np.clip((np.median(ring) - dark) / max(c0, 1e-3), 0, 1))
 
 
-def _seed_distance(crop: np.ndarray, r0: int, c0: int, circle: tuple[float, float, float],
+def _contains(crop: np.ndarray, r0: int, c0: int, point) -> bool:
+    if point is None:
+        return False
+    sr, sc = int(round(point[0])) - r0, int(round(point[1])) - c0
+    return bool(0 <= sr < crop.shape[0] and 0 <= sc < crop.shape[1] and crop[sr, sc])
+
+
+def _seed_distance(holds_seed: bool, circle: tuple[float, float, float],
                    seed: tuple[float, float] | None) -> float:
     if seed is None:
         return float("inf")
-    sr, sc = int(round(seed[0])) - r0, int(round(seed[1])) - c0
-    if 0 <= sr < crop.shape[0] and 0 <= sc < crop.shape[1] and crop[sr, sc]:
+    if holds_seed:
         return 0.0
     return float(np.hypot(circle[0] - seed[0], circle[1] - seed[1]))
 
 
-def _prior_factor(circle: tuple[float, float, float], prior: tuple[float, float, float] | None,
-                  cfg: SegmentConfig) -> float:
+def _prior_factor(circle: tuple[float, float, float], area: float, holds_prior: bool,
+                  prior: tuple[float, float, float] | None, cfg: SegmentConfig) -> float:
+    """Proximity to the expected circle, judged by the better of the circle fit and the
+    region itself (centre inside it, area-equivalent radius), so shape costs nothing."""
     if prior is None:
         return 1.0
     pr, pc, p_rad = prior
-    d_centre = np.hypot(circle[0] - pr, circle[1] - pc)
+    d_centre = 0.0 if holds_prior else np.hypot(circle[0] - pr, circle[1] - pc)
+    d_radius = min(abs(circle[2] - p_rad), abs(np.sqrt(area / np.pi) - p_rad))
     return float(np.exp(-d_centre / (cfg.prior_centre_frac * p_rad + cfg.prior_centre_px))
-                 * np.exp(-abs(circle[2] - p_rad) / (cfg.prior_radius_frac * p_rad + cfg.prior_radius_px)))
+                 * np.exp(-d_radius / (cfg.prior_radius_frac * p_rad + cfg.prior_radius_px)))
+
+
+def _inside_fractions(crop: np.ndarray, r0: int, c0: int, pts: np.ndarray,
+                      circle: tuple[float, float, float], cfg: SegmentConfig) -> tuple[float, float]:
+    """Fraction of the component inside its robust circle, and inside the better of that and
+    the plain Taubin circle of the whole boundary (a peanut lies inside the latter)."""
+    yy, xx = np.nonzero(crop)
+    yy, xx = yy + r0, xx + c0
+    out = []
+    for rc, cc, radius in (circle, tuple(circle_fit_taubin(pts))):
+        ok = np.isfinite(radius) and radius > 0
+        out.append(float(np.mean(np.hypot(yy - rc, xx - cc) <= radius + cfg.polarity_margin_px)) if ok else 0.0)
+    return out[0], max(out)
+
+
+def _interior(crop: np.ndarray, r0: int, c0: int) -> tuple[float, float]:
+    dt = cv2.distanceTransform(np.pad(crop, 1).astype(np.uint8), cv2.DIST_L2, 3)[1:-1, 1:-1]
+    i, j = np.unravel_index(int(np.argmax(dt)), dt.shape)
+    return float(i + r0), float(j + c0)
 
 
 def _score_component(prop, coarse: CoarseMask, near_invalid: np.ndarray | None, cfg: SegmentConfig,
@@ -191,19 +231,20 @@ def _score_component(prop, coarse: CoarseMask, near_invalid: np.ndarray | None, 
     res = np.abs(np.hypot(pts[:, 0] - rc, pts[:, 1] - cc) - radius)
     rms = float(np.sqrt(np.mean(np.minimum(res, cfg.rms_clip_frac * radius) ** 2)))
     q_circ = float(np.exp(-(rms / max(radius, 1.0)) / cfg.circularity_scale))
-    yy, xx = np.nonzero(crop)
-    inside = float(np.mean(np.hypot(yy + r0 - rc, xx + c0 - cc) <= radius + cfg.polarity_margin_px))
-    if inside < cfg.polarity_min_inside:
-        return None        # dark region lies outside its own circle: aperture corner, wall
+    holds_seed, holds_prior = _contains(crop, r0, c0, seed), _contains(crop, r0, c0, prior)
+    inside, inside_any = _inside_fractions(crop, r0, c0, pts, circle, cfg)
+    if inside_any < cfg.polarity_min_inside and not (holds_seed or holds_prior):
+        return None        # dark region lies outside any circle of its own: aperture corner, wall
     dark = float(np.median(coarse.smooth[r0:r1, c0:c1][crop]))
     q_con = _annulus_contrast(coarse.smooth, circle, dark, coarse.contrast, cfg)
     band = (r1 - r0) > cfg.band_fraction * h or (c1 - c0) > cfg.band_fraction * w
     area = float(crop.sum())
     score = np.sqrt(area) * q_circ * q_con * (cfg.band_penalty if band else 1.0)
-    score *= _prior_factor(circle, prior, cfg)
+    score *= _prior_factor(circle, area, holds_prior, prior, cfg)
     return Candidate(label=int(prop.label), area=area, score=float(score), circle=circle,
-                     seed_distance=_seed_distance(crop, r0, c0, circle, seed),
-                     circularity=q_circ, contrast=q_con, inside_fraction=inside)
+                     seed_distance=_seed_distance(holds_seed, circle, seed),
+                     circularity=q_circ, contrast=q_con, inside_fraction=inside, inside_any=inside_any,
+                     interior=_interior(prop.image, r0, c0), holds_prior=holds_prior)
 
 
 def _runner_up(best: Candidate, cands: list[Candidate], by_seed: bool) -> float:
@@ -215,8 +256,8 @@ def _runner_up(best: Candidate, cands: list[Candidate], by_seed: bool) -> float:
             return 0.0      # the click lies inside the chosen component
         nearest_other = min(c.seed_distance for c in others)
         return float(min(best.seed_distance / max(nearest_other, 1e-9), 1.0))
-    scores = sorted((c.score for c in cands), reverse=True)
-    return float(scores[1] / scores[0]) if scores[0] > 0 else 0.0
+    rival = max(c.score for c in others)
+    return float(min(rival / best.score, 1.0)) if best.score > 0 else 0.0
 
 
 def select_candidate(coarse: CoarseMask, invalid: np.ndarray, cfg: SegmentConfig, fit_cfg: FitConfig,
@@ -226,8 +267,13 @@ def select_candidate(coarse: CoarseMask, invalid: np.ndarray, cfg: SegmentConfig
 
     Score = sqrt(area) x circularity x local-annulus contrast (x prior
     proximity).  Components that lie mostly outside their own circle are
-    rejected (polarity test).  With a *seed*, the component containing it, or
-    else the one whose circle centre is nearest, is chosen.
+    rejected (polarity test), unless they hold the seed or the prior centre:
+    a clicked or tracked bubble is never rejected for its shape.  When no
+    component passes, those inside the Taubin circle of their whole boundary
+    are taken, so a single dark object of any shape is found.  With a
+    *seed*, the component containing it, or else the one whose circle centre
+    is nearest, is chosen; with a *prior*, the component containing its
+    centre, or else the best score.
 
     Parameters
     ----------
@@ -249,18 +295,23 @@ def select_candidate(coarse: CoarseMask, invalid: np.ndarray, cfg: SegmentConfig
     props = [p for p in measure.regionprops(labels) if p.area >= cfg.min_area_px]
     props = sorted(props, key=lambda p: p.area, reverse=True)[:cfg.max_candidates * cfg.props_factor]
     rng = np.random.default_rng(cfg.rng_seed)
-    cands: list[Candidate] = []
+    scored: list[Candidate] = []
     for prop in props:
         cand = _score_component(prop, coarse, near_invalid, cfg, fit_cfg, rng, seed, prior)
         if cand is not None:
-            cands.append(cand)
-            if len(cands) >= cfg.max_candidates:
+            scored.append(cand)
+            if sum(c.passes_polarity(cfg) for c in scored) >= cfg.max_candidates:
                 break
+    # a shape outside its robust circle (a peanut) is only taken when nothing passes the test
+    cands = [c for c in scored if c.passes_polarity(cfg)] or scored
     method = "seed" if seed is not None else "score"
     method += "+prior" if prior is not None else ""
     if not cands:
         return Selection(None, (), 0.0, method)
     by_seed = seed is not None
-    best = (min(cands, key=lambda c: c.seed_distance) if by_seed
-            else max(cands, key=lambda c: c.score))
+    holding = [c for c in cands if c.holds_prior]
+    if by_seed:
+        best = min(cands, key=lambda c: c.seed_distance)
+    else:
+        best = holding[0] if holding else max(cands, key=lambda c: c.score)
     return Selection(best, tuple(cands), _runner_up(best, cands, by_seed), method)
