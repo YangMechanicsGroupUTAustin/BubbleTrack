@@ -15,7 +15,7 @@ Measured at the port (engine edge-1.0.0), single frame -> solved:
   ring is tracked as a bubble); review list 819 frames (2-28 on 01-04, 09, 10); 193 redetect
   calls for 2560 frames.
 * lic_hard (8 x ~256 frames, 182 labelled bubble frames): 80 -> 82 correct; 31/31 -> 31/31
-  rejected; review list 1118 frames; 296 redetect calls for 2045 frames.
+  rejected; review list 1114 frames; 299 redetect calls for 2045 frames.
 * solver cost without redetect 0.03-0.2 ms / frame.  Whole module: about 70 s (8 processes).
 
 Most remaining misses are frames where no circle the engine can produce agrees with the

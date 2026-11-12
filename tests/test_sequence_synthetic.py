@@ -13,8 +13,10 @@ A frame counts when the true bubble is measurable (R >= 3 px, centre inside the 
 must be a verified solution with |dR| <= max(1 px, 3 %) and centre error <= max(2 px, 10 % R).
 Cloud frames must be ``none`` with the ``cloud`` flag.
 
-Measured (edge-1.0.0): every measurable frame correct in both set-ups; single-frame Fit All
-alone gets 12/20 (drift 20, click) and 0-1/20 (no click, satellite picked).
+Measured (edge-1.0.0): every measurable frame correct in both set-ups (19-33 per scenario).
+Single-frame Fit All alone: with the click 11/19 at drift 20, 15/19 at drift 15, 18/21 on the
+jet; without it 0/19 wherever the larger satellite is in view.  Redetect calls: 4-12 per
+sequence with the click (collapse and the frames the click misses), 14-22 without it.
 """
 
 from __future__ import annotations
