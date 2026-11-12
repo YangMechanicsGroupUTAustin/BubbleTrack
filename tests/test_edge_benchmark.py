@@ -8,10 +8,17 @@ Error = |R - R_eq| / R_eq against the exact area-equivalent radius.  A failure i
 above 5 % or no radius at all.  Three scenes are ambiguous by construction (two halos and a
 smaller target beside a bigger distractor without a click) and are excluded from the score.
 
-Measured at the port (engine edge-1.0.0), on the 50 non-ambiguous scenes:
+Measured at the port (engine edge-1.0.0, circle fit), on the 50 non-ambiguous scenes:
   * with the reference frame:  98.0 % within 2 %, 0 failures, median error 0.158 %
   * reference-free:            98.0 % within 2 %, 0 failures, median error 0.161 %
 (the one miss is tiny_R6, 2.8 %, a 6-px bubble).  Both match the research prototype exactly.
+
+Measured with the region layer (edge-1.1.0, area-equivalent radius):
+  * with the reference frame:  98.0 % within 2 %, 0 failures, median error 0.159 %
+  * reference-free:            98.0 % within 2 %, 0 failures, median error 0.162 %
+(miss: tiny_R6, 2.8 %).  Ellipses improve (1.3: 0.6 % -> 0.2 %); two_touching stays at 0.07 %
+because the smaller bubble is split off at the neck; debris_attached is 1.75 % (the attached
+debris is part of the dark region).
 """
 
 from __future__ import annotations

@@ -121,3 +121,34 @@ def test_no_dark_component_gives_no_candidate():
     img = np.ones(SHAPE, np.float32)
     sel = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT)
     assert sel.best is None and sel.candidates == ()
+
+
+def test_a_single_peanut_is_found_without_a_seed():
+    """It used to fail the polarity test: its robust circle holds only one lobe."""
+    sel = select_candidate(_segment(_scene([(80, 100, 30, 0.9), (80, 148, 30, 0.9)])), np.zeros(SHAPE, bool),
+                           SEG, FIT)
+    assert sel.best is not None and sel.best.area > 4000
+    assert sel.best.inside_fraction < SEG.polarity_min_inside <= sel.best.inside_any
+
+
+def test_a_seed_or_prior_keeps_a_non_circular_component():
+    """Scoring may prefer a round dot without a seed, but a click or a prior on the peanut wins."""
+    img = _scene([(80, 100, 30, 0.9), (80, 148, 30, 0.9), (30, 230, 6, 0.9)])
+    seeded = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT, seed=(80.0, 124.0))
+    primed = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT, prior=(80.0, 124.0, 40.0))
+    assert seeded.best.area > 4000 and primed.best.area > 4000
+
+
+def test_prior_centre_inside_a_component_chooses_it():
+    img = _scene([(80, 80, 25, 0.9), (80, 200, 12, 0.9)])
+    sel = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT, prior=(78.0, 203.0, 25.0))
+    assert sel.best.holds_prior and sel.best.circle[1] == pytest.approx(200, abs=1.0)
+
+
+def test_candidate_interior_is_a_dark_pixel_even_in_a_crescent():
+    yy, xx = np.mgrid[0:SHAPE[0], 0:SHAPE[1]]
+    crescent = (np.hypot(yy - 80, xx - 130) < 50) & ~(np.hypot(yy - 80, xx - 150) < 42)
+    img = ndimage.gaussian_filter(np.where(crescent, 0.1, 1.0), 1.0).astype(np.float32)
+    sel = select_candidate(_segment(img), np.zeros(SHAPE, bool), SEG, FIT)
+    r, c = (int(round(v)) for v in sel.best.interior)
+    assert crescent[r, c]

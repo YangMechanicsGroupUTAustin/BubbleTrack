@@ -153,6 +153,14 @@ def test_no_bubble_frame_has_low_confidence(scene, use_ref):
     assert res.confidence < 0.3 and not res.accepted
 
 
+def test_a_frame_below_the_gate_reports_the_circle():
+    """An untrusted region (no-bubble texture here) falls back to the circle fit, still rejected."""
+    res = measure(Scene(static=1), ref=False)
+    assert np.isfinite(res.radius) and not res.accepted
+    assert res.radius_kind == "circle" and "circle_fallback" in res.flags
+    assert res.radius == res.r_circle and np.isfinite(res.r_area)
+
+
 def test_reference_free_mode_is_flagged():
     with_ref, without = measure(BASE), measure(BASE, ref=False)
     assert "no_reference" in without.flags and "no_reference" not in with_ref.flags
@@ -164,8 +172,8 @@ def test_clean_bubble_has_no_shoulder():
     res = measure(BASE)
     assert res.accepted and "shoulder" not in res.flags
     assert 1.0 < res.shoulder_width < 3.0
-    assert res.outer_radius == pytest.approx(res.radius + res.shoulder_width)
-    assert res.r_area == pytest.approx(res.radius, rel=0.01)
+    assert res.outer_radius == pytest.approx(res.r_circle + res.shoulder_width)   # steep mode: circle fits
+    assert res.r_area == res.radius == pytest.approx(res.r_circle, abs=0.1)
 
 
 def test_two_step_edge_raises_the_shoulder_flag():
@@ -176,10 +184,13 @@ def test_two_step_edge_raises_the_shoulder_flag():
 
 
 def test_outer_definition_reports_the_outer_extent():
+    """Outer mode measures the region at the outer-extent level (its area radius); steep mode
+    reports B from the circle fit of the outer-extent points.  On a round bubble they agree."""
     steep, outer = measure(HALO6), measure(HALO6, edge_definition="outer")
-    assert outer.radius == pytest.approx(steep.outer_radius, abs=1e-9)
-    assert outer.shoulder_width == pytest.approx(steep.shoulder_width, abs=1e-9)
+    assert outer.radius == outer.outer_radius == pytest.approx(steep.outer_radius, abs=0.1)
+    assert outer.shoulder_width == pytest.approx(steep.shoulder_width, abs=0.1)
     assert outer.provenance["steep_radius"] == pytest.approx(steep.radius, abs=1e-9)
+    assert outer.r_circle == pytest.approx(steep.outer_radius, abs=1e-9)
     assert "shoulder" in outer.flags and outer.accepted
 
 
@@ -189,9 +200,10 @@ def test_edge_choice_inner_takes_the_ring_nearest_the_core():
     assert rel_err(inner, HALO12) < 0.02
 
 
-def test_clipped_bubble_is_flagged_and_has_no_area_radius():
+def test_clipped_bubble_is_completed_with_its_circle():
     res = measure(CLIPPED)
-    assert "clipped" in res.flags and np.isnan(res.r_area)
+    assert {"clipped", "clipped_completed"} <= res.flags and res.radius_kind == "area+circle_completion"
+    assert res.r_area == res.radius == pytest.approx(res.r_circle, rel=0.005)
     assert rel_err(res, CLIPPED) < 0.01
 
 
@@ -226,8 +238,9 @@ def test_result_carries_mask_and_provenance():
     assert prov["engine"] == ENGINE_VERSION and prov["failure"] is None
     for key in ("normalize", "segment", "select", "edges", "fit", "outer", "params", "fallbacks"):
         assert key in prov
-    assert set(prov["confidence_terms"]) == {"arc", "inliers", "precision", "snr", "selection", "edge_unique"}
-    assert {"normalize", "segment_select", "edges_fit", "outer", "total"} <= set(prov["timings_ms"])
+    assert set(prov["confidence_terms"]) == {"support", "precision", "completion", "snr", "selection",
+                                             "edge_unique"}
+    assert {"normalize", "segment_select", "edges_fit", "outer", "region", "total"} <= set(prov["timings_ms"])
     json.dumps(prov)                                         # storable in sessions / exports as is
     assert 0 < res.radius_sigma < 0.1 and 0.9 < res.arc_coverage <= 1 and res.inlier_fraction > 0.9
 
@@ -240,16 +253,22 @@ def test_failure_names_its_reason():
 
 
 def test_speed_on_a_250x400_roi():
-    """Median of 20 frames.  Target 80 ms; the bound is generous so CI does not flake.
+    """Median of 20 frames.  Target 40 ms; the absolute bound is generous so CI does not flake,
+    the region stage's share is checked instead (it scales with machine load like the rest).
 
-    Measured at the port: median 22.5 ms with a reference, 20.1 ms reference-free (one core).
+    Measured at the port (edge-1.0.0): median 22.5 ms with a reference, 20.1 ms reference-free.
+    Region layer (edge-1.1.0): the region stage adds 14 % (median) to the other stages, i.e. about
+    26-29 ms on that machine; on a loaded machine both versions ran at 47-56 vs 52-68 ms.
     """
     scenes = [Scene(bubbles=(Bubble(rc=125.0, cc=200.0, r=10.0 + 4.0 * k),), seed=k) for k in range(20)]
     frames = [frame(s) for s in scenes]
     detect_edge(frames[0][0], *FULL, reference=frames[0][1]["ref"])       # warm-up
-    times = []
+    times, share = [], []
     for img, meta in frames:
         t0 = time.perf_counter()
-        detect_edge(img, *FULL, reference=meta["ref"])
+        res = detect_edge(img, *FULL, reference=meta["ref"])
         times.append(time.perf_counter() - t0)
+        laps = res.provenance["timings_ms"]
+        share.append(laps["region"] / (laps["total"] - laps["region"]))
     assert np.median(times) <= 0.200
+    assert np.median(share) <= 0.35

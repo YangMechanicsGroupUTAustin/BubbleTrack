@@ -165,6 +165,41 @@ class FitConfig:
 
 
 @dataclass(frozen=True)
+class RegionConfig:
+    """Stage G: the bubble as a region (iso-contour), border completion and fragments."""
+
+    level_window_deg: float = 15.0
+    """The outline follows the per-ray 50 % levels smoothed by a running median over this
+    polar angle (0 = one global median level for the whole region)."""
+    neck_ratio: float = 0.5
+    """Two lobes are separate bodies when the inscribed radius at their neck is below this
+    fraction of the smaller lobe's.  Two bubbles touching with a 3-px overlap measure 0.36,
+    a peanut-shaped bubble (two disks overlapping by 16 px) 0.59."""
+    min_lobe_px: float = 3.0
+    """A lobe needs an inscribed radius of at least this many px to be split off."""
+    crop_margin_px: int = 2
+    invalid_touch_px: int = 3
+    """Contour vertices within this window of excluded pixels close the region, they are no edge."""
+    fragment_reach: float = 2.0
+    """Fragments are other dark regions within this many main-body radii of it."""
+    fragment_min_px: float = 12.0
+    fragment_min_frac: float = 0.003
+    """A fragment's area must exceed max(fragment_min_px, fragment_min_frac * main area)."""
+    disk_nodes: int = 2048
+    """Quadrature nodes for the part of the fitted disk outside the ROI."""
+    arc_samples: int = 720
+    """Samples of the fitted circle for the hidden arc (perimeter and hull)."""
+    gap_frac: float = 0.03
+    gap_max_px: float = 4.0
+    """Gaps in the bubble wall narrower than ~2 x min(gap_frac * R, gap_max_px) are bridged
+    when looking for its enclosed interior (a jet slot 16 px wide in R = 60 is not)."""
+    rim_inset_px: float = 1.0
+    """The ray-edge line that closes a broken wall runs this far inside the edge points."""
+    step_px: float = 2.0
+    """Half-distance along the contour normal of the step-amplitude test."""
+
+
+@dataclass(frozen=True)
 class QualityConfig:
     """Stage F: confidence terms and flags."""
 
@@ -173,13 +208,17 @@ class QualityConfig:
     ambiguous_flag: float = 0.5
     low_snr_ratio: float = 6.0
     non_circular_rel: float = 0.02
+    non_circular_solidity: float = 0.95
     shoulder_flag_px: float = 3.5
-    complete_arc_gap_deg: float = 30.0
-    arc_full: float = 0.5
-    precision_scale: float = 0.01
+    precision_scale: float = 0.02
+    """Precision term = exp(-(sigma_R / R) / scale), sigma_R from the noise along the outline.
+    Calibrated on LIC: 78/85 no-bubble frames below 0.3 (75 before), 182 labelled bubble frames
+    accepted and correct (178 before); synthetic no-bubble frames stay below 0.13."""
     snr_floor: float = 3.0
     snr_span: float = 7.0
     multi_scale: float = 0.3
+    completion_free: float = 0.5
+    """Hidden (extrapolated) area fractions up to this cost no confidence; beyond, linearly to 0 at 1."""
     min_roi_px: int = 8
 
 
@@ -209,6 +248,7 @@ class EdgeConfig:
     fit: FitConfig = field(default_factory=FitConfig)
     quality: QualityConfig = field(default_factory=QualityConfig)
     reference: ReferenceConfig = field(default_factory=ReferenceConfig)
+    region: RegionConfig = field(default_factory=RegionConfig)
 
 
 DEFAULT_CONFIG = EdgeConfig()

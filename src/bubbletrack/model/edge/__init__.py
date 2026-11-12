@@ -12,6 +12,9 @@ Public API::
     if res.accepted:
         use(res.radius, res.rc, res.cc)                            # 1-based full-image coords
 
+``radius`` is the area-equivalent radius of the bubble region (any shape; completed with
+the circle fit where the ROI border hides it); ``r_circle`` is the robust circle fit.
+
 No Qt imports: this package belongs to the model layer.
 """
 
