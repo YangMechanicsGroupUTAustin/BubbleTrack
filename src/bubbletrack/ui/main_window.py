@@ -45,6 +45,7 @@ class MainWindow(QMainWindow):
     # Session persistence signals (handled by the controller)
     save_session_requested = pyqtSignal()
     load_session_requested = pyqtSignal()
+    export_hard_case_requested = pyqtSignal()  # File > Export Hard Case...
     compare_mode_changed = pyqtSignal(str)
 
     def __init__(self):
@@ -155,7 +156,7 @@ class MainWindow(QMainWindow):
     # -- Menubar -------------------------------------------------------- #
 
     def _build_menubar(self) -> None:
-        """File > Save/Load Session; View > layout helpers."""
+        """File > Save/Load Session, Export Hard Case; View > layout helpers."""
         menubar: QMenuBar = self.menuBar()
         file_menu: QMenu = menubar.addMenu("&File")
 
@@ -171,6 +172,14 @@ class MainWindow(QMainWindow):
 
         self.save_session_action = save_action
         self.load_session_action = load_action
+
+        file_menu.addSeparator()
+        hard_case = QAction("Export &Hard Case...", self)
+        hard_case.setStatusTip("Save frames the app gets wrong, with your fixes, "
+                               "as one .zip to send to the maintainer")
+        hard_case.triggered.connect(self.export_hard_case_requested.emit)
+        file_menu.addAction(hard_case)
+        self.export_hard_case_action = hard_case
 
         view_menu: QMenu = menubar.addMenu("&View")
         self.reset_zoom_action = QAction("Reset Image Zoom\t0", self)

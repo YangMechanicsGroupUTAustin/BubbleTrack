@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 # Emitted (no arguments) after anything edits per-frame results in place:
 # autosave, the review queue and the filmstrip listen for it.
 RESULTS_CHANGED = "results_changed"
+# Emitted with a tuple of 0-based frames whose results the user deleted (the
+# chart menus or Review's Delete); hard-case export labels them "no bubble".
+FRAMES_DELETED = "frames_deleted"
 
 
 @dataclass

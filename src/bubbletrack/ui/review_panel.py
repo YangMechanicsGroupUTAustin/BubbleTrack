@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
 
-from PyQt6.QtCore import QModelIndex, Qt, pyqtSignal
+from PyQt6.QtCore import QModelIndex, QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QAbstractItemView, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget,
     QListWidgetItem, QMenu, QPushButton, QSizePolicy, QStackedWidget, QToolButton,
@@ -59,6 +59,7 @@ class ReviewPanel(QWidget):
     frame_activated = pyqtSignal(int)  # the user picked a row: show this frame
     action_requested = pyqtSignal(str)  # one of ACTIONS
     segment_changed = pyqtSignal(object)  # the selected ReviewSegment, or None
+    export_case_requested = pyqtSignal(object)  # a row's ReviewSegment (its right-click menu)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -120,6 +121,8 @@ class ReviewPanel(QWidget):
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._list.currentRowChanged.connect(self._on_row_changed)
         self._list.clicked.connect(self._on_clicked)
+        self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._list.customContextMenuRequested.connect(self._on_context_menu)
         self._empty = QLabel()
         self._empty.setObjectName("reviewEmpty")
         self._empty.setWordWrap(True)
@@ -269,6 +272,31 @@ class ReviewPanel(QWidget):
         self._shown = segment.start
         self._refresh_view()
         self.frame_activated.emit(segment.start)
+
+    def context_menu_at(self, pos: QPoint) -> QMenu | None:
+        """The right-click menu of the row at *pos* (list viewport coordinates).
+
+        It acts on that row without selecting it (selecting would move to
+        its first frame).
+        """
+        item = self._list.itemAt(pos)
+        row = self._list.row(item) if item is not None else -1
+        if not 0 <= row < len(self._visible):
+            return None
+        segment = self._visible[row]
+        menu = QMenu(self._list)
+        menu.setToolTipsVisible(True)
+        action = menu.addAction("Export as hard case...")
+        action.setToolTip("Save these frames, the settings and your fixes as one .zip "
+                          "to send to the maintainer")
+        action.triggered.connect(lambda: self.export_case_requested.emit(segment))
+        return menu
+
+    def _on_context_menu(self, pos: QPoint) -> None:
+        menu = self.context_menu_at(pos)
+        if menu is not None:
+            menu.exec(self._list.viewport().mapToGlobal(pos))
+            menu.deleteLater()
 
     def _set_row(self, row: int) -> None:
         self._list.blockSignals(True)
