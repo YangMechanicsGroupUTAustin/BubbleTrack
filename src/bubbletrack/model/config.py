@@ -10,6 +10,8 @@ from __future__ import annotations
 import json
 import logging
 import math
+import os
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -41,6 +43,7 @@ PERSIST_KEYS: frozenset[str] = frozenset({
 DETECTION_MODES: tuple[str, ...] = ("intensity", "gradient", "area", "edge")
 EDGE_DEFINITIONS: tuple[str, ...] = ("steep", "outer")
 EDGE_POLARITIES: tuple[str, ...] = ("dark", "bright")
+EXPORT_FORMATS: tuple[str, ...] = ("mat", "csv", "xlsx")
 
 
 # ------------------------------------------------------------------ #
@@ -191,6 +194,12 @@ def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
     return result
 
 
+def _write_config(data: dict[str, Any]) -> None:
+    """Write *data* as CONFIG_FILE, creating the directory; raises OSError."""
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
 def save_config(state: object) -> None:
     """Persist the PERSIST_KEYS fields of *state* to CONFIG_FILE.
 
@@ -202,7 +211,6 @@ def save_config(state: object) -> None:
     can always shut down cleanly.
     """
     try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         data: dict[str, Any] = dict(_load_raw_config())
         for key in sorted(PERSIST_KEYS):
             value = getattr(state, key, None)
@@ -210,7 +218,7 @@ def save_config(state: object) -> None:
             if isinstance(value, tuple):
                 value = list(value)
             data[key] = value
-        CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        _write_config(data)
         logger.info("Config saved to %s", CONFIG_FILE)
     except (OSError, TypeError, ValueError) as exc:
         logger.warning("Failed to save config: %s", exc)
@@ -263,7 +271,87 @@ def set_onboarding_done() -> None:
     config = _load_raw_config()
     config["onboarding_done"] = True
     try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_FILE.write_text(json.dumps(config, indent=2), encoding="utf-8")
+        _write_config(config)
     except (OSError, TypeError, ValueError) as exc:
         logger.warning("Failed to save onboarding flag: %s", exc)
+
+
+# ------------------------------------------------------------------ #
+#  App bookkeeping (meta-config, not persisted AppState parameters)
+# ------------------------------------------------------------------ #
+#
+# Validated like the parameters above, but kept apart: load_config()
+# feeds AppState, which has no such fields.
+
+_MAX_PATH_CHARS = 4096
+
+
+def _as_folder(value: Any) -> str:
+    """An absolute folder path; whether it still exists is the caller's concern."""
+    text = value.strip() if isinstance(value, str) else ""
+    if not text or "\x00" in text or len(text) > _MAX_PATH_CHARS or not os.path.isabs(text):
+        raise ValueError("expected an absolute folder path")
+    return text
+
+
+def _as_timestamp(value: Any) -> float:
+    """Seconds since the epoch (``time.time()``)."""
+    number = _as_number(value)
+    if number < 0:
+        raise ValueError("must not be negative")
+    return number
+
+
+_META_VALIDATORS: dict[str, Callable[[Any], Any]] = {
+    "last_export_dir": _as_folder,                  # export dialogs start here
+    "last_export_format": _one_of(EXPORT_FORMATS),  # pre-selected Format combo
+    "last_clean_exit": _as_timestamp,               # newer autosave => offer restore
+}
+
+
+def _meta_validator(key: str) -> Callable[[Any], Any]:
+    validator = _META_VALIDATORS.get(key)
+    if validator is None:
+        raise ValueError(f"unknown config meta key {key!r}")
+    return validator
+
+
+def get_meta(key: str) -> Any | None:
+    """Return the validated value of a meta key, or None if unset or invalid.
+
+    Raises ValueError for a key that is not a known meta key.
+    """
+    validator = _meta_validator(key)
+    raw = _load_raw_config()
+    if key not in raw:
+        return None
+    try:
+        return validator(raw[key])
+    except ValueError as exc:
+        logger.warning("config: ignoring %s=%r (%s)", key, raw[key], exc)
+        return None
+
+
+def set_meta(**values: Any) -> bool:
+    """Validate and merge meta keys into CONFIG_FILE; other keys are kept.
+
+    Returns False (and logs) if the file cannot be written.  Raises
+    ValueError for an unknown key or an invalid value, before writing.
+    """
+    clean: dict[str, Any] = {}
+    for key, value in values.items():
+        try:
+            clean[key] = _meta_validator(key)(value)
+        except ValueError as exc:
+            raise ValueError(f"{key}={value!r}: {exc}") from exc
+    try:
+        _write_config({**_load_raw_config(), **clean})
+    except (OSError, TypeError, ValueError) as exc:
+        logger.warning("Failed to save %s: %s", ", ".join(clean), exc)
+        return False
+    return True
+
+
+def record_clean_exit(when: float | None = None) -> bool:
+    """Remember that the app closed normally (default: now)."""
+    return set_meta(last_clean_exit=time.time() if when is None else when)

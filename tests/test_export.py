@@ -315,12 +315,12 @@ class TestRmaxOutlierWarning:
         assert "median" in msg
 
     def test_threshold_constant_is_used(self, monkeypatch):
-        import bubbletrack.model.export as export_mod
+        import bubbletrack.model.rmax as rmax_mod
 
         R = np.full(30, 100.0)
         R[14] = 105.0
         assert locate_rmax(R, 11).warnings == ()
-        monkeypatch.setattr(export_mod, "RMAX_OUTLIER_TOLERANCE", 0.01)
+        monkeypatch.setattr(rmax_mod, "RMAX_OUTLIER_TOLERANCE", 0.01)
         assert len(locate_rmax(R, 11).warnings) == 1
 
 

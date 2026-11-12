@@ -4,6 +4,11 @@ Restoring is done in three steps so nothing the user saved is lost:
 1. load the image folder (this resets the frame-dependent views),
 2. re-apply the saved parameters (ROI, thresholds, frame position, ...),
 3. put the saved results back if the frame count still matches.
+
+The full session is also autosaved to ``<CONFIG_DIR>/recovery/autosave.brt``:
+after results change (debounced, at most once per minute) and on close.
+At the next launch an autosave newer than the last clean exit is moved
+aside to ``previous_session.brt`` and offered for restoring (see app.py).
 """
 
 from __future__ import annotations
@@ -11,10 +16,12 @@ from __future__ import annotations
 import dataclasses
 import logging
 import os
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+from PyQt6.QtCore import QTimer
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.event_bus import EventBus
@@ -29,9 +36,55 @@ RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_sou
                "fit_confidence", "fit_metrics", "fit_flags", "fit_locked")
 _NOT_PARAMS = {"version", "folder_path", "video_path", "images", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
-LAST_SESSION_NAME = "last_session.brt"
+
+AUTOSAVE_NAME = "autosave.brt"
+PREVIOUS_SESSION_NAME = "previous_session.brt"
+AUTOSAVE_MIN_INTERVAL_S = 60.0  # at most one autosave per minute ...
+AUTOSAVE_DEBOUNCE_S = 2.0       # ... starting this long after the first change
+RECOVERY_MTIME_SLACK_S = 2.0    # file-time resolution (FAT: 2 s) vs the clean-exit stamp
+RESULTS_CHANGED_EVENT = "results_changed"  # bus event: any controller edited results
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
+
+
+def recovery_dir() -> Path:
+    """``<CONFIG_DIR>/recovery``, resolved at call time (tests patch CONFIG_DIR)."""
+    return Path(config_module.CONFIG_DIR) / "recovery"
+
+
+def autosave_path() -> Path:
+    return recovery_dir() / AUTOSAVE_NAME
+
+
+def has_results(state: AppState) -> bool:
+    radius = state.radius
+    return radius is not None and bool(np.any(np.asarray(radius) > 0))
+
+
+def claim_pending_recovery() -> Path | None:
+    """Return the session to offer for restoring after an unclean exit, or None.
+
+    An autosave newer than the last recorded clean exit (or with no clean
+    exit on record) means the app did not close normally.  It is moved to
+    ``previous_session.brt`` first, so this session's autosaves cannot
+    overwrite it whatever the user decides; if it cannot be moved, the
+    autosave itself is returned.
+    """
+    path = autosave_path()
+    try:
+        mtime = path.stat().st_mtime
+    except OSError:
+        return None  # no autosave
+    clean_exit = config_module.get_meta("last_clean_exit")
+    if clean_exit is not None and mtime <= clean_exit + RECOVERY_MTIME_SLACK_S:
+        return None
+    claimed = path.with_name(PREVIOUS_SESSION_NAME)
+    try:
+        os.replace(path, claimed)
+    except OSError as exc:
+        logger.warning("Could not move %s aside: %s", path, exc)
+        return path
+    return claimed
 
 
 def split_session(data: dict) -> tuple[str, dict, dict]:
@@ -106,7 +159,7 @@ def restore_results(state: AppState, results: dict) -> str | None:
 
 
 class SessionController(BaseController):
-    """Save/load sessions and keep a last-session recovery file."""
+    """Save/load sessions and keep the autosaved recovery session up to date."""
 
     def __init__(
         self,
@@ -119,12 +172,23 @@ class SessionController(BaseController):
         is_busy: Callable[[], bool],
         locate_folder: Callable[[str], str],
         after_restore: Callable[[], None],
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._file_ctrl = file_ctrl
         self._is_busy = is_busy
         self._locate_folder = locate_folder
         self._after_restore = after_restore
+
+        self._clock = clock
+        self._autosave_dirty = False
+        self._autosave_target: Path | None = None
+        self._last_autosave: float | None = None
+        self._autosave_timer = QTimer()
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.timeout.connect(self.autosave_if_due)
+        self.bus.subscribe("run_state_changed", self._on_run_state_changed)
+        self.bus.subscribe(RESULTS_CHANGED_EVENT, lambda *_: self.notify_results_changed())
 
     def save(self, path: str) -> bool:
         try:
@@ -194,17 +258,83 @@ class SessionController(BaseController):
             self.w.header.set_status(f"Session loaded: {name}", _OK)
         return True
 
-    def save_last_session(self) -> str | None:
-        """Write ~/.bubbletrack/recovery/last_session.brt if there are results."""
-        radius = self.state.radius
-        if radius is None or not np.any(np.asarray(radius) > 0):
+    # -- autosave ----------------------------------------------------------
+
+    def notify_results_changed(self) -> None:
+        """Schedule an autosave: results changed (fit, edit, refit, review...).
+
+        Cheap to call often: saves are debounced and happen at most once per
+        ``AUTOSAVE_MIN_INTERVAL_S``, never while a run is writing results.
+        Sub-controllers can emit ``RESULTS_CHANGED_EVENT`` on the bus instead.
+        """
+        self._autosave_dirty = True
+        self._autosave_target = autosave_path()
+        if not self._autosave_timer.isActive():
+            self._arm(max(AUTOSAVE_DEBOUNCE_S, self._wait_for_interval()))
+
+    def autosave_if_due(self) -> str | None:
+        """Timer slot: write the autosave if one is pending and allowed now.
+
+        Returns the written path, or None.  While a run is active nothing is
+        written; the end of the run notifies again.
+        """
+        self._autosave_timer.stop()  # when called directly, not by the timer
+        if not self._autosave_dirty or self._is_busy():
             return None
-        path = Path(config_module.CONFIG_DIR) / "recovery" / LAST_SESSION_NAME
+        wait = self._wait_for_interval()
+        if wait > 0:
+            self._arm(wait)
+            return None
+        if not has_results(self.state):
+            self._autosave_dirty = False
+            return None
+        self._last_autosave = self._clock()
+        path = self._write_recovery(self._autosave_target or autosave_path())
+        if path is not None:
+            self._autosave_dirty = False
+        return path
+
+    def stop_autosave(self) -> None:
+        """Cancel a pending autosave (the window is closing)."""
+        self._autosave_timer.stop()
+
+    def save_last_session(self) -> str | None:
+        """Write the autosave now (on close) if there are results.
+
+        Same file as the periodic autosave, so there is one recovery
+        session; a pending debounced save is cancelled.
+        """
+        self.stop_autosave()
+        self._autosave_dirty = False
+        if not has_results(self.state):
+            return None
+        return self._write_recovery(autosave_path())
+
+    def _on_run_state_changed(self, running: bool) -> None:
+        if not running:
+            self.notify_results_changed()
+
+    def _wait_for_interval(self) -> float:
+        if self._last_autosave is None:
+            return 0.0
+        return self._last_autosave + AUTOSAVE_MIN_INTERVAL_S - self._clock()
+
+    def _arm(self, seconds: float) -> None:
+        self._autosave_timer.start(max(0, int(round(seconds * 1000))))
+
+    def _write_recovery(self, path: Path) -> str | None:
+        """Save the session to *path* atomically; None (logged) on failure.
+
+        Written to a temporary file and renamed, so a crash mid-write never
+        destroys the previous good autosave.
+        """
+        tmp = path.with_name(path.name + ".tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            save_session(str(path), self.state)
+            save_session(str(tmp), self.state)
+            os.replace(tmp, path)
         except Exception as exc:
             logger.warning("Could not write %s: %s", path, exc)
             return None
-        logger.info("Last session saved to %s", path)
+        logger.info("Session autosaved to %s", path)
         return str(path)

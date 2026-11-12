@@ -3,18 +3,25 @@
 from __future__ import annotations
 
 import multiprocessing
-import os
 import sys
+from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore import QObject, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QColor, QIcon, QPalette
 from PyQt6.QtWidgets import QApplication, QMessageBox, QWidget
 
 from bubbletrack.controller.controller import AppController
+from bubbletrack.controller.session_controller import claim_pending_recovery
 from bubbletrack.crash_handler import CrashHandler
 from bubbletrack.logging_config import setup_logging
-from bubbletrack.model.config import is_onboarding_done, save_config, set_onboarding_done
+from bubbletrack.model.config import (
+    is_onboarding_done,
+    record_clean_exit,
+    save_config,
+    set_onboarding_done,
+)
 from bubbletrack.ui.main_window import MainWindow
 from bubbletrack.ui.welcome_dialog import WelcomeDialog
 
@@ -79,6 +86,56 @@ def _install_crash_handler(window: MainWindow, controller: AppController) -> Cra
     return handler
 
 
+# (parent, session path, on_restore) -> None; must not block.
+RestorePrompt = Callable[[QWidget | None, Path, Callable[[], None]], None]
+
+
+def ask_restore_session(parent: QWidget | None, path: Path,
+                        on_restore: Callable[[], None]) -> None:
+    """Ask "Restore previous session?" without blocking; Restore calls *on_restore*."""
+    try:
+        saved = datetime.fromtimestamp(path.stat().st_mtime).strftime("%Y-%m-%d %H:%M")
+    except OSError:
+        saved = "unknown time"
+    box = QMessageBox(
+        QMessageBox.Icon.Question, "Restore previous session?",
+        "BubbleTrack did not close normally last time.\n\n"
+        f"Restore the session autosaved at {saved}?\n\n"
+        f"Either way it stays available as:\n{path}\n(File > Load Session).",
+        parent=parent,
+    )
+    restore = box.addButton("Restore", QMessageBox.ButtonRole.AcceptRole)
+    box.addButton("Discard", QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(restore)
+    box.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+    def _chosen(button) -> None:
+        if button == restore:
+            QTimer.singleShot(0, on_restore)  # after the box has closed
+
+    box.buttonClicked.connect(_chosen)
+    box.open()
+
+
+def offer_session_restore(window: QWidget | None, session_ctrl, *,
+                          prompt: RestorePrompt = ask_restore_session) -> Path | None:
+    """Offer the autosave of a session that did not exit cleanly; return its path.
+
+    Returns None (and asks nothing) when there is nothing to recover.
+    """
+    path = claim_pending_recovery()
+    if path is None:
+        return None
+    prompt(window, path, lambda: session_ctrl.load(str(path)))
+    return path
+
+
+def on_about_to_quit(state) -> None:
+    """Persist the parameters, then record the clean exit (after the close autosave)."""
+    save_config(state)
+    record_clean_exit()
+
+
 def main():
     setup_logging(log_dir=LOG_DIR)
 
@@ -118,8 +175,9 @@ def main():
     controller = AppController(window)
     _install_crash_handler(window, controller)
 
-    # Auto-save user parameters on application exit
-    app.aboutToQuit.connect(lambda: save_config(controller._get_state()))
+    # Save parameters and record a clean exit; the window's close guard has
+    # already written the session autosave, so it is older than this stamp.
+    app.aboutToQuit.connect(lambda: on_about_to_quit(controller._get_state()))
 
     # Show onboarding dialog on first launch
     if not is_onboarding_done():
@@ -129,6 +187,7 @@ def main():
             set_onboarding_done()
 
     window.show()
+    offer_session_restore(window, controller.session_ctrl)
     sys.exit(app.exec())
 
 
