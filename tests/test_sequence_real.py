@@ -12,10 +12,10 @@ Measured at the port (engine edge-1.0.0), single frame -> solved:
   review list 6 frames (collapse neighbours only).
 * lic (10 x 256 frames, 235 labelled bubble frames): 205 -> 205 correct; no-bubble frames
   rejected 75/85 -> 75/85 (01: 18 -> 20, the cloud is stopped; 05: 12 -> 10, its microbubble
-  ring is tracked as a bubble); review list 819 frames (2-28 on 01-04, 09, 10); 193 redetect
+  ring is tracked as a bubble); review list 818 frames (2-28 on 01-04, 09, 10); 190 redetect
   calls for 2560 frames.
 * lic_hard (8 x ~256 frames, 182 labelled bubble frames): 80 -> 82 correct; 31/31 -> 31/31
-  rejected; review list 1114 frames; 299 redetect calls for 2045 frames.
+  rejected; review list 1111 frames; 293 redetect calls for 2045 frames.
 * solver cost without redetect 0.03-0.2 ms / frame.  Whole module: about 70 s (8 processes).
 
 Most remaining misses are frames where no circle the engine can produce agrees with the
