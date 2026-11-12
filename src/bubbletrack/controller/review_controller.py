@@ -1,200 +1,52 @@
 """Review queue: which frames are likely wrong, and one-key actions to fix them.
 
-``build_review_items`` is pure (state in, sorted items out).  ``ReviewController``
-wires the queue to the running app: it refreshes on bus events and edits, and
-routes each action to the existing AppController handlers.
+The rules are pure (``review_queue`` lists frames, ``review_segments`` groups
+them into runs).  ``ReviewController`` wires the queue to the running app: it
+refreshes on bus events and edits, keeps the R(t) chart showing the selected
+run, and routes each action to the existing AppController handlers.
 """
 
 from __future__ import annotations
 
 import logging
-from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
 
 import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDockWidget, QMenu
 
+from bubbletrack.controller.review_queue import (
+    ReviewItem, build_review_items, next_after_action,
+)
+from bubbletrack.controller.review_segments import (
+    ReviewSegment, anchor_frame, build_segments,
+)
 from bubbletrack.event_bus import RESULTS_CHANGED
-from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.sequence import CONTEXT_FLAGS
 from bubbletrack.model.state import AppState
-from bubbletrack.ui.review_panel import ReviewEntry, ReviewPanel, item_text
+from bubbletrack.ui.review_panel import ReviewPanel
+from bubbletrack.ui.review_text import DASH
 from bubbletrack.ui.shortcuts import ReviewShortcuts
 from bubbletrack.ui.tab_bar import MANUAL
 
 logger = logging.getLogger(__name__)
 
-LOW_CONFIDENCE = 0.5  # engine confidence below this is worth a look
-JUMP_FRACTION = 0.15  # |dR| to both valid neighbours, relative to each neighbour
-
-# Higher = more likely wrong.  Engine and sequence flags share these keys.
-REASON_WEIGHTS: dict[str, int] = {
-    "lost": 100,
-    "rejected": 90,
-    "disagree": 85,
-    "jump": 80,
-    "low_confidence": 60,  # rises to 90 as the confidence falls to 0
-    "multiple_edges": 60,
-    "non_circular": 55,
-    "fragmented": 50,
-    "clipped_completed": 45,
-    "reacquired": 40,
-    "collapse": 35,
-    "cloud": 30,
-    "shoulder": 25,
-}
-UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
-REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
-# Routine engine flags: they describe a listed frame and add to its rank, but
-# never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
-CONTEXT_REASONS = CONTEXT_FLAGS
-
 MANUAL_TAB = MANUAL  # TabBar name of the Manual tab
-_OK, _WARN = "#10b981", "#f59e0b"
+_OK = "#10b981"
 
 
-@dataclass(frozen=True)
-class ReviewItem:
-    frame: int  # 0-based
-    reasons: tuple[str, ...]  # most severe first
-    severity: int  # higher = more likely wrong
-    confidence: float = float("nan")  # engine confidence, NaN if not scored
+def span_text(segment: ReviewSegment) -> str:
+    """'Frame 5' or 'Frames 10–44' (1-based), for status messages."""
+    if segment.is_single:
+        return f"Frame {segment.start + 1}"
+    return f"Frames {segment.start + 1}{DASH}{segment.end + 1}"
 
-
-# --------------------------------------------------------------------------- #
-#  Pure queue logic
-# --------------------------------------------------------------------------- #
-
-def build_review_items(state: AppState, extra: Iterable[ReviewItem] | None = None,
-                       ) -> list[ReviewItem]:
-    """Frames worth a second look, most likely wrong first, then by frame.
-
-    *extra* (e.g. the sequence solver's list) is merged per frame.  Locked
-    frames (accepted in review) are never listed.
-    """
-    if state.radius is None:
-        return []
-    radius = np.asarray(state.radius, dtype=float)
-    n = len(radius)
-    conf = _per_frame(state.fit_confidence, n, np.nan, float)
-    locked = _per_frame(state.fit_locked, n, False, bool)
-    own = _frame_reasons(state, radius, conf)
-    added = _merge_extra(extra, n)
-    items = [_make_item(f, own.get(f, ()), added.get(f), float(conf[f]))
-             for f in sorted(set(own) | set(added)) if not locked[f]]
-    items = [item for item in items if not CONTEXT_REASONS.issuperset(item.reasons)]
-    return sorted(items, key=lambda item: (-item.severity, item.frame))
-
-
-def jump_frames(radius: np.ndarray, threshold: float = JUMP_FRACTION) -> np.ndarray:
-    """Frames that spike above or dip below BOTH nearest valid neighbours.
-
-    A steady fast change (collapse, rebound) is not a jump: each frame there
-    lies between its neighbours.
-    """
-    radius = np.asarray(radius, dtype=float)
-    valid = np.flatnonzero(np.isfinite(radius) & (radius > 0))
-    if len(valid) < 3:
-        return np.empty(0, dtype=int)
-    r = radius[valid]
-    mid, prev, nxt = r[1:-1], r[:-2], r[2:]
-    up = (mid > prev * (1 + threshold)) & (mid > nxt * (1 + threshold))
-    down = (mid < prev * (1 - threshold)) & (mid < nxt * (1 - threshold))
-    return valid[1:-1][up | down]
-
-
-def next_after_action(old: list[int], frame: int, new: list[int]) -> int | None:
-    """Frame to show after acting on *frame*: the next old item still listed."""
-    remaining = set(new)
-    if frame in old:
-        pos = old.index(frame)
-        candidates = old[pos + 1:] + old[:pos]
-    else:
-        candidates = old
-    for f in candidates:
-        if f in remaining and f != frame:
-            return f
-    return next((f for f in new if f != frame), new[0] if new else None)
-
-
-def _per_frame(values, n: int, fill, dtype) -> np.ndarray:
-    if values is None or len(values) != n:
-        return np.full(n, fill, dtype=dtype)
-    return np.asarray(values, dtype=dtype)
-
-
-def _frame_reasons(state: AppState, radius: np.ndarray, conf: np.ndarray,
-                   ) -> dict[int, list[str]]:
-    n = len(radius)
-    source = _per_frame(state.fit_source, n, FitSource.NONE, int)
-    manual = source == FitSource.MANUAL
-    # A manual fix supersedes the engine's verdict on that frame.
-    engine = np.isfinite(conf) & ~manual
-    fitted = np.isfinite(radius) & (radius > 0)
-    found: dict[int, list[str]] = defaultdict(list)
-
-    def add(i, reason: str) -> None:
-        if reason not in found[int(i)]:
-            found[int(i)].append(reason)
-
-    for i in np.flatnonzero(engine & ~fitted):
-        add(i, "rejected")
-    for i in np.flatnonzero(engine & (conf < LOW_CONFIDENCE)):
-        add(i, "low_confidence")
-    for i, flags in enumerate((state.fit_flags or ())[:n]):
-        if flags and not manual[i]:
-            for reason in sorted(flags & REVIEW_FLAGS):
-                add(i, reason)
-    unscored = ~np.isfinite(conf)  # legacy modes produce no flags of their own
-    for i in jump_frames(radius):
-        if unscored[i]:
-            add(i, "jump")
-    return found
-
-
-def _merge_extra(extra: Iterable[ReviewItem] | None, n: int) -> dict[int, ReviewItem]:
-    merged: dict[int, ReviewItem] = {}
-    for item in extra or ():
-        if not 0 <= item.frame < n:
-            continue
-        prev = merged.get(item.frame)
-        if prev is None:
-            merged[item.frame] = item
-        else:
-            reasons = prev.reasons + tuple(r for r in item.reasons if r not in prev.reasons)
-            merged[item.frame] = ReviewItem(item.frame, reasons,
-                                            max(prev.severity, item.severity))
-    return merged
-
-
-def _weight(reason: str, confidence: float) -> int:
-    if reason == "low_confidence" and np.isfinite(confidence):
-        shortfall = (LOW_CONFIDENCE - min(max(confidence, 0.0), LOW_CONFIDENCE)) / LOW_CONFIDENCE
-        return REASON_WEIGHTS[reason] + round(30 * shortfall)
-    return REASON_WEIGHTS.get(reason, UNKNOWN_REASON_WEIGHT)
-
-
-def _make_item(frame: int, own: Iterable[str], extra: ReviewItem | None,
-               confidence: float) -> ReviewItem:
-    reasons = list(own)
-    if extra is not None:
-        reasons += [r for r in extra.reasons if r not in reasons]
-    ordered = tuple(sorted(reasons, key=lambda r: -_weight(r, confidence)))
-    worst = max((_weight(r, confidence) for r in ordered), default=0)
-    severity = worst + max(len(ordered) - 1, 0)  # more reasons rank higher
-    if extra is not None:
-        severity = max(severity, extra.severity)
-    return ReviewItem(frame, ordered, severity, confidence)
-
-
-# --------------------------------------------------------------------------- #
-#  Qt wiring
-# --------------------------------------------------------------------------- #
 
 class ReviewController:
-    """Keeps the review panel in sync with the app and performs its actions."""
+    """Keeps the review panel in sync with the app and performs its actions.
+
+    Accept, Refit, Delete and Skip act on the whole selected row (segment);
+    Neighbours and Manual act on the frame on screen.
+    """
 
     def __init__(self, window, app, panel: ReviewPanel, dock: QDockWidget) -> None:
         self.w = window
@@ -205,11 +57,12 @@ class ReviewController:
         self._extra_keys: dict[int, tuple] = {}  # frame -> result the item was made for
         self._dismissed: dict[int, tuple] = {}  # frame -> result it was skipped with
         self._running = False
-        # (frame, its edge points before, queue order) while a Manual fit runs
-        self._manual_pending: tuple[int, object, list[int]] | None = None
+        # (frame, its edge points before, queue order, anchor) while a Manual fit runs
+        self._manual_pending: tuple[int, object, list[int], int] | None = None
 
         panel.frame_activated.connect(self._go)
         panel.action_requested.connect(self.perform)
+        panel.segment_changed.connect(self._show_range)
         app.bus.subscribe("run_state_changed", self._on_run_state)
         app.bus.subscribe("source_loaded", self._on_source_loaded)
         app.bus.subscribe("frame_changed", self._on_frame_changed)
@@ -220,7 +73,7 @@ class ReviewController:
             "next": lambda: panel.step(1),
             "prev": lambda: panel.step(-1),
         }, is_active=self._shortcuts_active)
-        dock.visibilityChanged.connect(lambda _visible: self.shortcuts.sync())
+        dock.visibilityChanged.connect(self._on_dock_visibility)
         self.refresh()
 
     # -- public API -------------------------------------------------------- #
@@ -255,51 +108,77 @@ class ReviewController:
                  and self._extra_keys.get(item.frame) == self._result_key(state, item.frame)]
         items = [item for item in build_review_items(state, extra)
                  if not self._is_dismissed(state, item.frame)]
-        self.panel.set_entries([ReviewEntry(item.frame, item_text(item, state.images),
-                                            item.severity) for item in items])
+        self.panel.set_segments(build_segments(items), state.images,
+                                fitted=_has_results(state))
 
     def perform(self, action: str) -> None:
-        """Apply *action* (see ``ReviewPanel.ACTIONS``) to the selected item,
-        then show the next item (Manual advances after Done instead)."""
+        """Apply *action* (see ``ReviewPanel.ACTIONS``) to the selected row,
+        then show the next one (Manual advances after Done instead)."""
         if action not in ReviewPanel.ACTIONS:
             raise ValueError(f"unknown review action {action!r}")
-        frame = self.panel.current_frame()
-        if self._running or frame is None:
+        segment, frame = self.panel.current_segment(), self.panel.current_frame()
+        if self._running or segment is None or frame is None:
             return
-        logger.info("Review: %s frame %d", action, frame + 1)
+        logger.info("Review: %s %s (frame %d shown)", action, span_text(segment), frame + 1)
+        anchor = anchor_frame(segment, frame)  # the queue continues after it
         if action == "manual":
-            self._start_manual(frame)
+            self._start_manual(frame, anchor)
             return
         old = self.panel.frames()
-        getattr(self, f"_{action}")(frame)
-        self._advance(old, frame)
+        if action == "refit_neighbors":
+            self._refit_neighbors(frame)
+        elif getattr(self, f"_{action}")(segment):
+            anchor = segment.end  # the whole row is done: continue after it
+        else:
+            return  # nothing happened (e.g. the range fit was cancelled): stay
+        self._advance(old, anchor)
 
-    # -- actions ----------------------------------------------------------- #
+    # -- actions on a row (each returns False if it did nothing) ----------- #
 
-    def _refit(self, frame: int) -> None:
-        self._app._on_refit_point(frame)
+    def _accept(self, segment: ReviewSegment) -> bool:
+        locked = self._state().fit_locked
+        if locked is None:
+            return False
+        # Every listed frame, with or without a result ("no bubble here"), as
+        # a single-frame Accept does; the range lock adds the span's other
+        # fitted frames and updates the chart and the autosave.
+        locked[list(segment.frames)] = True  # provenance (fit_source) is left as it was
+        self._app._on_lock_range(segment.start, segment.end, locked=True)
+        self.w.header.set_status(f"{span_text(segment)} accepted and locked", _OK)
+        return True
+
+    def _refit(self, segment: ReviewSegment) -> bool:
+        if segment.is_single:
+            self._app._on_refit_point(segment.start)
+            return True
+        # In the background, like the chart's "Refit range"; a started run
+        # announces itself (run_state_changed) before fit_range returns.
+        self._app.auto_ctrl.fit_range(segment.start, segment.end)
+        return self._running
+
+    def _delete(self, segment: ReviewSegment) -> bool:
+        if segment.is_single:
+            self._app._on_delete_point(segment.start)
+        else:
+            self._app._on_delete_range(segment.start, segment.end)
+        # The user has decided: keep these frames out of the queue until
+        # they get a new result.
+        for frame in segment.frames:
+            self._dismiss(frame)
+        return True
+
+    def _skip(self, segment: ReviewSegment) -> bool:
+        for frame in segment.frames:
+            self._dismiss(frame)
+        self.w.header.set_status(f"{span_text(segment)} skipped", _OK)
+        return True
+
+    # -- actions on the shown frame ---------------------------------------- #
 
     def _refit_neighbors(self, frame: int) -> None:
         self._app._on_refit_point_with_neighbors(frame)
 
-    def _accept(self, frame: int) -> None:
-        locked = self._state().fit_locked
-        if locked is None:
-            return
-        locked[frame] = True  # provenance (fit_source) is left as it was
-        self.w.header.set_status(f"Frame {frame + 1} accepted and locked", _OK)
-
-    def _delete(self, frame: int) -> None:
-        self._app._on_delete_point(frame)
-        # The deleted frame keeps its confidence, so it would come back as
-        # "rejected"; the user has decided, so keep it out of the queue.
-        self._dismiss(frame)
-
-    def _skip(self, frame: int) -> None:
-        self._dismiss(frame)
-        self.w.header.set_status(f"Frame {frame + 1} skipped", _OK)
-
-    def _start_manual(self, frame: int) -> None:
+    def _start_manual(self, frame: int, anchor: int) -> None:
         """Manual tab on *frame* with point selection running."""
         self._go(frame)  # navigate first: a frame change cancels a selection
         lp = self.w.left_panel
@@ -311,7 +190,7 @@ class ReviewController:
         self._app.manual_ctrl.on_manual_select()
         xy = self._state().circle_xy
         self._manual_pending = (frame, xy[frame] if xy is not None else None,
-                                self.panel.frames())
+                                self.panel.frames(), anchor)
 
     def _on_manual_done(self) -> None:
         """Runs after ManualController: advance once the manual fit is stored."""
@@ -320,14 +199,14 @@ class ReviewController:
         if pending is None or state.circle_xy is None or state.image_no != pending[0]:
             self.refresh()
             return
-        frame, before, order = pending
+        frame, before, order, anchor = pending
         if state.circle_xy[frame] is before:  # not committed (e.g. < 3 points)
             self._manual_pending = pending
             self.refresh()
             return
         # The queue was already refreshed by RESULTS_CHANGED: advance by the
         # order it had when the Manual fit started.
-        self._advance(order, frame)
+        self._advance(order, anchor)
 
     # -- helpers ----------------------------------------------------------- #
 
@@ -337,11 +216,20 @@ class ReviewController:
     def _go(self, frame: int) -> None:
         self._app.file_ctrl.on_frame_changed(frame)
 
-    def _advance(self, old: list[int], frame: int) -> None:
+    def _advance(self, old: list[int], anchor: int) -> None:
         self.refresh()
-        target = next_after_action(old, frame, self.panel.frames())
-        if target is not None and self.panel.select_frame(target):
+        target = next_after_action(old, anchor, self.panel.frames())
+        if target is not None and self.panel.select_frame(target, keep_row=False):
             self._go(target)
+
+    def _show_range(self, segment: ReviewSegment | None) -> None:
+        """Shade the selected run on the R(t) chart while the dock is open.
+
+        A shading of its own, not the chart's range selection: the user's
+        brushed range and the point menus inside a run stay as they were.
+        """
+        shown = segment is not None and not segment.is_single and not self.dock.isHidden()
+        self.w.radius_chart.set_review_span((segment.start, segment.end) if shown else None)
 
     @staticmethod
     def _result_key(state: AppState, frame: int) -> tuple:
@@ -376,6 +264,10 @@ class ReviewController:
             self.refresh()
         self.shortcuts.sync()
 
+    def _on_dock_visibility(self, _visible: bool) -> None:
+        self.shortcuts.sync()
+        self._show_range(self.panel.current_segment())
+
     def _on_source_loaded(self, _n: int) -> None:
         self._dismissed.clear()
         self._extra = ()
@@ -388,7 +280,16 @@ class ReviewController:
             self._manual_pending = None
         if not self._running:
             self.refresh()
-        self.panel.select_frame(idx)  # clears the selection off the queue
+        self.panel.select_frame(idx)  # keeps the row while its span holds idx
+
+
+def _has_results(state: AppState) -> bool:
+    """Any frame fitted or scored (picks the panel's empty-state message)."""
+    if state.radius is None:
+        return False
+    conf = state.fit_confidence
+    return bool(np.any(np.asarray(state.radius) > 0)
+                or (conf is not None and np.any(np.isfinite(conf))))
 
 
 def _view_menu(window) -> QMenu:

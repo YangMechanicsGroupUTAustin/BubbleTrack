@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bubbletrack.controller.review_controller import (
+from bubbletrack.controller.review_queue import (
     ReviewItem,
     build_review_items,
     jump_frames,
@@ -13,7 +13,6 @@ from bubbletrack.controller.review_controller import (
 )
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import AppState
-from bubbletrack.ui.review_panel import file_number, item_text
 
 
 def _state(radii, conf=None) -> AppState:
@@ -170,19 +169,16 @@ class TestNextAfterAction:
         assert next_after_action([2], 2, [2, 3]) == 3
 
 
-class TestLabels:
-    def test_file_number_from_trailing_digits(self):
-        assert file_number("C:/data/run_7/frame_033.tiff", 22) == "033"
-        assert file_number("img00012.tif", 3) == "00012"
+class TestEquality:
+    def test_unscored_items_compare_equal(self):
+        # NaN confidences must not make an unchanged queue look changed
+        # (the panel skips its rebuild when the queue is the same).
+        state = _state([50.0, 50.0, 80.0, 50.0, 50.0])
+        assert build_review_items(state) == build_review_items(state)
+        nan_a, nan_b = float("nan"), float("nan")
+        assert ReviewItem(1, ("jump",), 80, nan_a) == ReviewItem(1, ("jump",), 80, nan_b)
+        assert hash(ReviewItem(1, ("jump",), 80, nan_a)) == hash(ReviewItem(1, ("jump",), 80))
 
-    def test_file_number_falls_back_to_one_based_index(self):
-        assert file_number("C:/data/bubble.tif", 4) == "5"
-        assert file_number("video:12", 12) == "13"
-
-    def test_item_text(self):
-        item = ReviewItem(22, ("low_confidence", "non_circular"), 80, 0.214)
-        text = item_text(item, ("x",) * 22 + ("C:/d/frame_033.tif",))
-        assert text == "Frame 23 (file _033) \u00b7 low confidence 0.21 \u00b7 non_circular"
-
-    def test_item_text_without_a_file_list(self):
-        assert item_text(ReviewItem(4, ("jump",), 80), ()) == "Frame 5 \u00b7 jump"
+    def test_different_confidences_differ(self):
+        assert ReviewItem(1, ("jump",), 80, 0.2) != ReviewItem(1, ("jump",), 80, 0.3)
+        assert ReviewItem(1, ("jump",), 80, 0.2) != ReviewItem(1, ("jump",), 80)

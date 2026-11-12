@@ -386,6 +386,28 @@ QPushButton#filmstripToggle:hover {
     color: #e4e4e7;
 }
 
+/* ---------- Review dock (rows are painted by ReviewRowDelegate) ---------- */
+QListWidget#ReviewList {
+    background: transparent;
+    border: none;
+}
+QToolButton#reviewFilter {
+    background: transparent;
+    color: #a1a1aa;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 6px;
+    padding: 2px 8px;
+    font-size: 11px;
+}
+QToolButton#reviewFilter:hover {
+    background: rgba(255, 255, 255, 0.06);
+    color: #e4e4e7;
+}
+QToolButton#reviewFilter::menu-indicator {
+    image: none;
+    width: 0;
+}
+
 /* ---------- Scroll area ---------- */
 QScrollArea {
     border: none;
