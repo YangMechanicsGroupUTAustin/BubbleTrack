@@ -172,7 +172,7 @@ def test_opening_teaching_drops_a_refused_circle_and_its_prompt(app):
     assert "Fix of frame" in window.header.status_text()
 
 
-@pytest.mark.parametrize("how", ["card button", "F key", "chart menu"])
+@pytest.mark.parametrize("how", ["card button", "chart menu"])
 def test_fix_while_teaching_leaves_teaching_first(app, how):
     window, controller = app
     controller.ml.open_teaching()
@@ -181,8 +181,6 @@ def test_fix_while_teaching_leaves_teaching_first(app, how):
     frame = controller._get_state().image_no
     if how == "card button":
         review.panel.action_requested.emit("fix")
-    elif how == "F key":
-        review.shortcuts.shortcuts["fix"].activated.emit()
     else:
         window.radius_chart.fix_requested.emit(frame)
     assert not teach.active and controller.ml.dock.isHidden()
@@ -192,6 +190,21 @@ def test_fix_while_teaching_leaves_teaching_first(app, how):
     seen = _gestures(window)
     _mouse_drag(window, _stroke_points())
     assert seen == ["circle"]                                    # the fix owns the mouse now
+
+
+def test_review_keys_wait_while_teaching_covers_review(app):
+    # Review's keys act only while Review is in view (as A / N): F behind the
+    # ML assist tab says where Review is and leaves teaching (and its brush) alone.
+    from bubbletrack.controller.review_controller import REVIEW_BEHIND
+
+    window, controller = app
+    controller.ml.open_teaching()
+    teach, review = _teach(controller), controller.review
+    teach.panel.set_painting(True)
+    review.shortcuts.shortcuts["fix"].activated.emit()
+    assert teach.active and not review.fix.active
+    assert window.original_panel.mode == "paint"
+    assert window.header.status_text() == REVIEW_BEHIND
 
 
 def test_after_a_fix_teaching_opens_again_with_its_work(app):

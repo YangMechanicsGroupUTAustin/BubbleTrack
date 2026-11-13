@@ -12,7 +12,7 @@ from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QComboBox, QDockWidget, QSpinBox
 
 from bubbletrack.controller.review_controller import (
-    REVIEW_HIDDEN, build_review_items, install_review,
+    REVIEW_BEHIND, REVIEW_HIDDEN, build_review_items, install_review,
 )
 from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
@@ -501,6 +501,27 @@ class TestKeys:
         assert not state.fit_locked[2]
         assert window.header.status_text() == REVIEW_HIDDEN
         rc.dock.show()
+        qapp.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_A)
+        assert state.fit_locked[2]
+
+    def test_keys_do_nothing_while_review_is_behind_another_tab(self, qapp, review):
+        """A dock tabbed behind another (e.g. ML assist) still reports isVisible()
+        in Qt 6: A/N acted on a frame the user could not see in Review."""
+        window, controller, rc = review
+        _show(qapp, window)
+        state = _flag(controller, rc, f2=0.1)
+        rc.panel.step(1)
+        other = QDockWidget("Other", window)
+        window.addDockWidget(window.dockWidgetArea(rc.dock), other)
+        window.tabifyDockWidget(rc.dock, other)
+        other.show()
+        other.raise_()
+        qapp.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_A)
+        assert not state.fit_locked[2]
+        assert window.header.status_text() == REVIEW_BEHIND
+        rc.dock.raise_()
         qapp.processEvents()
         QTest.keyClick(window, Qt.Key.Key_A)
         assert state.fit_locked[2]

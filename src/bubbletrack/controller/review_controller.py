@@ -99,6 +99,9 @@ class ReviewController:
         strip.active_changed.connect(lambda _on: self.fix_keys.sync())
         strip.active_changed.connect(panel.card.set_fixing)
         strip.active_changed.connect(self._on_fix_active)
+        # In view, as visibilityChanged reports it: a dock tabbed behind another
+        # one still says isVisible() in Qt 6, but its keys must not act then.
+        self._dock_shown = dock.isVisible()
         dock.visibilityChanged.connect(self._on_dock_visibility)
         self.refresh()
 
@@ -293,7 +296,7 @@ class ReviewController:
 
     def _key(self, act: Callable[[], None]) -> None:
         """A review key: act while the dock shows, else say where it is."""
-        if self.dock.isVisible():
+        if self._dock_shown:
             act()
         elif not self.w.isMinimized():
             self.w.header.set_status(REVIEW_HIDDEN if self.dock.isHidden() else REVIEW_BEHIND,
@@ -312,7 +315,7 @@ class ReviewController:
         return not self._fit_run  # a hidden dock answers with a hint (``_key``)
 
     def _fix_keys_active(self) -> bool:
-        return self.fix.active and self.dock.isVisible() and not self._fit_run
+        return self.fix.active and self._dock_shown and not self._fit_run
 
     # -- bus events -------------------------------------------------------- #
 
@@ -372,11 +375,12 @@ class ReviewController:
         if on:
             self.flow.clear()  # the last action's line (and its Undo) steps aside
 
-    def _on_dock_visibility(self, _visible: bool) -> None:
+    def _on_dock_visibility(self, visible: bool) -> None:
+        self._dock_shown = bool(visible)
         self.shortcuts.sync()
         self.fix_keys.sync()
         self._show_range(self.panel.current_segment())
-        if self.fix.active and not self.dock.isVisible() and not self.w.isMinimized():
+        if self.fix.active and not self._dock_shown and not self.w.isMinimized():
             self.fix.cancel()  # its strip is out of sight
 
     def _on_source_loaded(self, _n: int) -> None:
