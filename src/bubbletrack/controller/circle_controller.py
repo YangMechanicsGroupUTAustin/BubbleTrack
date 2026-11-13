@@ -11,12 +11,20 @@ gets ``RESULT_UNDONE`` with the edit, and Review shows its frame.
 
 The tool is on while ``set_active(True)`` holds (``FixMode``), the Auto
 engine is in use and no fit runs; its prompt shows in the attached view.
+
+A refused circle shows only what the decision is about, on both panels: the
+user's circle (cyan dashes) and the wall Auto found near it (grey), never
+the frame's stored result; the prompt names the rule that failed.  Closing
+the prompt (Cancel, Keep my circle, a new drag, another frame) redraws the
+frame as usual.
 """
 
 from __future__ import annotations
 
 import logging
+import math
 from contextlib import contextmanager
+from dataclasses import dataclass
 
 import numpy as np
 from PyQt6.QtCore import Qt
@@ -28,7 +36,7 @@ from bubbletrack.controller.display_mixin import current_source, display_frame, 
 from bubbletrack.event_bus import CIRCLE_FIXED, EventBus
 from bubbletrack.model import edge_pipeline, guided_fit
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.guided_fit import UserCircle
+from bubbletrack.model.guided_fit import CENTRE_TOLERANCE, MIN_CONFIDENCE, UserCircle
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.ui.circle_tool import CIRCLE_UNAVAILABLE_TIP
@@ -42,6 +50,58 @@ logger = logging.getLogger(__name__)
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
 RESULT_UNDONE = "result_undone"  # bus event (ResultEdit) after Ctrl+Z restored an edit
 _MANUAL_OUTLINE_POINTS = 72  # a stored circle's outline, for both panels
+
+
+@dataclass(frozen=True, eq=False)
+class Refusal:
+    """A drawn circle that was not stored, waiting for the user's decision."""
+
+    frame: int
+    circle: UserCircle
+    found: np.ndarray | None
+    """(N, 2) 1-based [row, col] outline of the wall Auto found near it, if any."""
+
+
+def found_outline(fit) -> np.ndarray | None:
+    """The outline Auto found for a refused circle: its wall, or its faint guess."""
+    if fit.radius > 0 and len(fit.edge_xy):
+        return np.asarray(fit.edge_xy, dtype=float)
+    guess = getattr(fit, "suggestion", None)
+    if guess is not None and len(guess.edge_xy):
+        return np.asarray(guess.edge_xy, dtype=float)
+    return None
+
+
+def refusal_reason(circle: UserCircle, fit) -> str:
+    """Why *fit* was not stored for *circle*, naming the rule (``guided_fit``)."""
+    if fit.radius > 0:
+        ref = circle.radius if circle.sized else fit.radius
+        offset = math.hypot(fit.rc - circle.rc, fit.cc - circle.cc)
+        if offset > CENTRE_TOLERANCE * ref:
+            why = (f"its centre is {offset:.0f} px from yours, more than half your circle's "
+                   f"radius ({CENTRE_TOLERANCE * ref:.0f} px)")
+        else:
+            why = (f"its radius is {fit.radius:.0f} px, yours is {ref:.0f} px: "
+                   "they differ by more than half")
+        return f"Auto found a wall (grey) that does not match your circle: {why}."
+    if str(fit.rejected_reason).startswith("low confidence"):
+        where = "here (grey)" if found_outline(fit) is not None else "near your circle"
+        return (f"The wall Auto found {where} is too faint: confidence {fit.confidence:.2f}, "
+                f"below the {MIN_CONFIDENCE:.2f} a drawn circle needs.")
+    if fit.rejected_reason == "implausible radius":
+        return "Auto found only a wall larger than any plausible bubble near your circle."
+    return "Auto found no wall near your circle."
+
+
+def refusal_text(frame: int, circle: UserCircle, fit, stored_radius: float) -> str:
+    """The prompt: what happened and why, then what the user can do."""
+    text = f"Frame {frame + 1}: {refusal_reason(circle, fit)} Nothing was stored."
+    if not circle.dragged:
+        return text + " Drag from the centre to the wall to give its size."
+    text += " Keep your circle as this frame's result, or drag again."
+    if np.isfinite(stored_radius) and stored_radius > 0:
+        text += f" Keeping it replaces this frame's result (R = {stored_radius:.1f} px)."
+    return text
 
 
 @contextmanager
@@ -72,12 +132,14 @@ class CircleController(BaseController):
         self.history = history
         self._retrack = retrack  # RetrackController: cancelled/muted by undo
         self._is_run_active = is_run_active  # a Fit All / batch run writes results
-        self._pending: tuple[int, UserCircle] | None = None  # refused circle on screen
+        self._pending: Refusal | None = None  # refused circle on screen
         self._active = False  # the user chose the tool (Review's Fix)
         self._view: FixView = NoFixView()
         bus.subscribe("run_state_changed", lambda _running: self.sync_tool())
         bus.subscribe("frame_changed", self._on_frame_changed)
         bus.subscribe("source_loaded", self._on_source_loaded)
+        # Every redraw of the refused frame shows the decision, not the result.
+        window.frame_display_hooks.append(self._on_display)
 
     def set_view(self, view: FixView) -> None:
         """Show the tool's availability and prompt in *view* (the fix strip)."""
@@ -118,7 +180,7 @@ class CircleController(BaseController):
         elif not on and panel.mode == "circle":
             panel.set_mode("normal")
         if not on:
-            self._drop_prompt()
+            self.discard_prompt()  # the refused view goes with it
 
     # -- the gesture -------------------------------------------------------- #
 
@@ -178,13 +240,13 @@ class CircleController(BaseController):
                                      f"circle (confidence {fit.confidence:.2f}{flags})")
 
     def use_circle_as_manual(self) -> None:
-        """Prompt choice: store the refused circle itself (source MANUAL)."""
+        """Prompt choice "Keep my circle": store the refused circle itself (source MANUAL)."""
         pending, self._pending = self._pending, None
         self._view.hide_circle_prompt()
         state = self.state
-        if pending is None or pending[0] != state.image_no or not pending[1].dragged:
+        if pending is None or pending.frame != state.image_no or not pending.circle.dragged:
             return
-        idx, circle = pending
+        idx, circle = pending.frame, pending.circle
         before = snapshot(state, [idx])
         state.radius[idx] = circle.radius
         state.circle_fit_par[idx] = [circle.rc, circle.cc]
@@ -210,27 +272,36 @@ class CircleController(BaseController):
         self.bus.emit(CIRCLE_FIXED, idx)
 
     def _refuse(self, idx: int, circle: UserCircle, fit, reason: str) -> None:
-        self._pending = (idx, circle)
-        self._redraw(idx)
-        panel = self.w.original_panel
-        if fit.radius > 0:
-            panel.draw_fit_outline(fit.edge_xy, FOUND_COLOUR)
-        if circle.dragged:  # drawn where the user drew it (scene = 1-based - 0.5)
-            panel.draw_circle(circle.rc - 0.5, circle.cc - 0.5, circle.radius,
-                              USER_CIRCLE_COLOUR, dashed=True)
-        text = f"Frame {idx + 1}: {reason}. Nothing was stored."
-        if not circle.dragged:
-            text += " Drag from the centre to the wall to give its size."
-        self._view.show_circle_prompt(text, offer_manual=circle.dragged)
+        stored = float(self.state.radius[idx])
+        self._pending = Refusal(idx, circle, found_outline(fit))
+        self._redraw(idx)  # the display hook draws the refused view
+        self._view.show_circle_prompt(refusal_text(idx, circle, fit, stored),
+                                      offer_manual=circle.dragged)
         self.w.header.set_status(f"Frame {idx + 1}: {reason}", _WARN)
+
+    def _on_display(self, state, idx: int) -> None:
+        """Display hook: while a refused circle waits, only it and what Auto found."""
+        refusal = self._pending
+        if refusal is None or refusal.frame != idx:
+            return
+        circle = refusal.circle
+        # Drawn where the user drew it (scene = 1-based - 0.5); the Auto view is the ROI.
+        roi = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
+        for panel, origin in ((self.w.original_panel, np.zeros(2)), (self.w.binary_panel, roi)):
+            panel.clear_overlays()
+            if refusal.found is not None:
+                panel.draw_fit_outline(refusal.found - origin, FOUND_COLOUR)
+            if circle.dragged:
+                panel.draw_circle(circle.rc - 0.5 - origin[0], circle.cc - 0.5 - origin[1],
+                                  circle.radius, USER_CIRCLE_COLOUR, dashed=True)
 
     def discard_prompt(self) -> bool:
         """Drop a refused circle and its drawing (no message); False if none."""
-        if self._pending is None:
-            return False
+        pending = self._pending is not None
         self._drop_prompt()
-        self._redraw(self.state.image_no)
-        return True
+        if pending:
+            self._redraw(self.state.image_no)
+        return pending
 
     def _drop_prompt(self) -> None:
         self._pending = None

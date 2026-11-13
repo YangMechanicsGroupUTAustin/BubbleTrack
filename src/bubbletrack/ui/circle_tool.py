@@ -1,5 +1,5 @@
 """The two fix tools' names and texts, and the non-blocking prompt shown when
-Auto found no wall matching a drawn circle ("Use my circle as a manual fit")."""
+Auto found no wall matching a drawn circle ("Keep my circle" / "Cancel")."""
 
 from __future__ import annotations
 
@@ -19,12 +19,14 @@ CIRCLE_UNAVAILABLE_TIP = (
     "Drag a circle uses the Auto (reference frame) engine.\n"
     "Choose \"Auto (reference frame)\" as the detection mode to use it."
 )
-USE_CIRCLE_TEXT = "Use my circle as a manual fit"
+USE_CIRCLE_TEXT = "Keep my circle"
+USE_CIRCLE_TIP = ("Store the circle you drew as this frame's result\n"
+                  "(a manual fit, locked; Ctrl+Z undoes)")
 
 
 class CirclePrompt(QFrame):
-    """Hidden until a drawn circle is refused: its reason, then
-    'Use my circle as a manual fit' / 'Cancel'."""
+    """Hidden until a drawn circle is refused: what happened and why, then
+    'Keep my circle' / 'Cancel'."""
 
     use_circle_clicked = pyqtSignal()
     cancel_clicked = pyqtSignal()
@@ -45,7 +47,7 @@ class CirclePrompt(QFrame):
         box.addWidget(self._text)
         row = QHBoxLayout()
         self._use_btn = QPushButton(USE_CIRCLE_TEXT)
-        self._use_btn.setToolTip("Store the circle you drew as this frame's result (source MANUAL)")
+        self._use_btn.setToolTip(USE_CIRCLE_TIP)
         self._use_btn.clicked.connect(self.use_circle_clicked)
         self._cancel_btn = QPushButton("Cancel")
         self._cancel_btn.setObjectName("secondaryBtn")
