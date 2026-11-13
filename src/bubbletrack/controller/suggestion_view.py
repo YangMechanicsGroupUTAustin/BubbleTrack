@@ -12,6 +12,7 @@ import numpy as np
 from bubbletrack.model.state import AppState
 from bubbletrack.model.suggestion import Suggestion, shown_suggestion
 from bubbletrack.ui.image_panel import is_ordered_contour
+from bubbletrack.ui.review_text import NOT_A_BUBBLE_HINT
 
 # Light grey dashes over a dark grey line: the dashes show on dark images, the
 # gaps between them on the light Auto view (one grey alone vanishes there).
@@ -46,7 +47,7 @@ def draw_guess(state: AppState, panel, idx: int, offset: np.ndarray | None = Non
         else:
             panel.draw_circle(suggestion.rc - shift[0], suggestion.cc - shift[1],
                               suggestion.radius, colour, GUESS_WIDTH, dashed=dashed)
-    panel.set_overlay_tip(guess_text(suggestion))
+    panel.set_overlay_tip(f"{guess_text(suggestion)}\n{NOT_A_BUBBLE_HINT}")
     return True
 
 

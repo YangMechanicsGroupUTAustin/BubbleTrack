@@ -47,7 +47,7 @@ class ReviewPanel(QWidget):
     ACTIONS = ("accept", "refit", "refit_neighbors", "circle", "manual", "delete", "skip")
     _BUTTONS = (  # (action, label, tooltip), laid out in pairs
         ("accept", "Accept (A)", "Keep the results of the whole row and lock them against Fit All "
-                                 "(a frame showing Auto's dashed guess gets the guess)"),
+                                 "(on a frame showing Auto's dashed guess: store that guess only)"),
         ("skip", "Skip (S)", "Leave the row as it is and drop it from the queue"),
         ("refit", "Refit (R)", "Run detection again on every frame of the row"),
         ("refit_neighbors", "Neighbours (N)",
@@ -344,8 +344,10 @@ class ReviewPanel(QWidget):
         shown = segment is not None and frame is not None
         item = self._items.get(frame) if shown else None  # may be of another type
         self._detail.setVisible(shown)
-        self._detail.setText(detail_text(item, frame, self._images) if shown else "")
-        self._detail.setToolTip(detail_text(item, frame, self._images, None) if shown else "")
+        self._detail.setText(detail_text(item, frame, self._images, segment=segment)
+                             if shown else "")
+        self._detail.setToolTip(detail_text(item, frame, self._images, None, segment=segment)
+                                if shown else "")
         if segment != self._selected:
             self._selected = segment
             self.segment_changed.emit(segment)

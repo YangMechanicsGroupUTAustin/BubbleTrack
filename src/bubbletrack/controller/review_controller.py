@@ -46,7 +46,9 @@ class ReviewController:
     """Keeps the review panel in sync with the app and performs its actions.
 
     Accept, Refit, Delete and Skip act on the whole selected row (segment);
-    Neighbours, Circle and Manual act on the frame on screen.
+    Neighbours, Circle and Manual act on the frame on screen.  Auto's guesses
+    are the exception: Accept stores only the guess on screen, and a row
+    Accept leaves frames with a guess alone (``suggestion_actions``).
     """
 
     def __init__(self, window, app, panel: ReviewPanel, dock: QDockWidget) -> None:
@@ -136,34 +138,53 @@ class ReviewController:
             self._start_circle(frame, anchor)
             return
         old = self.panel.frames()
+        prefer, status = None, ""
         if action == "refit_neighbors":
             self._refit_neighbors(frame)
+        elif action == "accept":
+            accepted = self._accept(segment, frame)
+            if accepted is None:
+                return
+            outcome, status = accepted
+            if outcome == "row":
+                anchor = segment.end
+            # Each guess needs its own look: show the row's next one, if any.
+            prefer = suggestion_actions.next_guess(self._state(), segment, frame)
         elif getattr(self, f"_{action}")(segment):
             anchor = segment.end  # the whole row is done: continue after it
         else:
             return  # nothing happened (e.g. the range fit was cancelled): stay
-        self._advance(old, anchor)
+        self._advance(old, anchor, prefer)
+        if status:  # over the next frame's own message (e.g. its guess)
+            self.w.header.set_status(status, _OK)
 
     # -- actions on a row (each returns False if it did nothing) ----------- #
 
-    def _accept(self, segment: ReviewSegment) -> bool:
+    def _accept(self, segment: ReviewSegment, frame: int) -> tuple[str, str] | None:
+        """(what was accepted, status text), None if nothing happened.
+
+        "guess": *frame* (on screen) showed Auto's guess, now its result;
+        "row": the row was accepted.
+        """
         state = self._state()
         locked = state.fit_locked
         if locked is None:
-            return False
-        # A frame showing Auto's guess gets the guess as its result (an
-        # undoable edit); every other listed frame is locked as it is.
-        promotion = suggestion_actions.promote_guesses(state, segment)
+            return None
+        promotion = suggestion_actions.accept_shown_guess(state, frame)
+        if promotion is not None:  # only the guess the user is looking at
+            self._app._on_lock_range(frame, frame, locked=True)  # chart, autosave
+            return "guess", suggestion_actions.finish_promotion(self._app, promotion)
         # Every listed frame, with or without a result ("no bubble here"), as
-        # a single-frame Accept does; the range lock adds the span's other
-        # fitted frames and updates the chart and the autosave.
-        locked[list(segment.frames)] = True  # provenance (fit_source) is left as it was
+        # a single-frame Accept does, except frames showing Auto's guess
+        # (nobody has looked at them yet); the range lock adds the span's
+        # other fitted frames and updates the chart and the autosave.
+        unseen = suggestion_actions.guessed_frames(state, segment)
+        locked[[f for f in segment.frames if f not in unseen]] = True  # fit_source kept
         self._app._on_lock_range(segment.start, segment.end, locked=True)
         text = f"{span_text(segment)} accepted and locked"
-        if promotion is not None:
-            text = suggestion_actions.finish_promotion(self._app, promotion, text)
-        self.w.header.set_status(text, _OK)
-        return True
+        if unseen:
+            text += f"; {len(unseen)} frame(s) with Auto's guess left to look at"
+        return "row", text
 
     def _refit(self, segment: ReviewSegment) -> bool:
         if segment.is_single:
@@ -260,9 +281,11 @@ class ReviewController:
     def _go(self, frame: int) -> None:
         self._app.file_ctrl.on_frame_changed(frame)
 
-    def _advance(self, old: list[int], anchor: int) -> None:
+    def _advance(self, old: list[int], anchor: int, prefer: int | None = None) -> None:
+        """Refresh, then show *prefer* if still listed, else the next frame after *anchor*."""
         self.refresh()
-        target = next_after_action(old, anchor, self.panel.frames())
+        new = self.panel.frames()
+        target = prefer if prefer in new else next_after_action(old, anchor, new)
         if target is not None and self.panel.select_frame(target, keep_row=False):
             self._go(target)
 

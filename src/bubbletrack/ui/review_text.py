@@ -23,6 +23,7 @@ DASH = "–"  # en dash, for spans
 STEP_HINT = ("←/→ step through these frames, a click on the row goes back to "
              "its first one; J/K move between rows.")
 DETAIL_REASONS = 3  # the detail line names this many; the tooltip has them all
+NOT_A_BUBBLE_HINT = "Not a bubble? Shift+drag on the chart > Mark as no bubble"
 
 REASON_LABELS: dict[str, str] = {
     "lost": "lost track",
@@ -129,25 +130,55 @@ def tooltip_lines(segment: ReviewSegment, images: Sequence[str]) -> list[str]:
 
 
 def guess_lines(segment: ReviewSegment) -> list[str]:
-    """What Accept does on a row with Auto's guesses (none: no line)."""
-    guessed = sum(GUESS in item.reasons for item in segment.items)
+    """What Accept does on a row with Auto's guesses (none: no line).
+
+    A guess becomes a result only once seen: Accept stores the guess on
+    screen; on a frame without one it accepts the row but skips the guesses.
+    """
+    guessed = _guess_count(segment)
     if not guessed:
         return []
     if segment.is_single:
-        return ["Accept (A) stores Auto's guess (dashed outline) as the result"]
-    empty = sum("rejected" in item.reasons and GUESS not in item.reasons
-                for item in segment.items)  # no result and no guess: "no bubble"
-    text = f"Accept (A) stores Auto's guess on {guessed} frame{'s' if guessed != 1 else ''}"
-    return [text + (f"; {empty} without one are locked as no bubble" if empty else "")]
+        return ["Auto's guess (dashed outline): Accept (A) stores it as the result",
+                NOT_A_BUBBLE_HINT]
+    lines = [f"Auto's guess on {guessed} of {segment.count} frames (dashed): Accept (A) "
+             "stores the one on screen, then shows the next"]
+    if guessed < segment.count:
+        lines.append("A on a frame without a guess accepts the rest of the row "
+                     "and leaves the guesses to look at")
+    return lines + [NOT_A_BUBBLE_HINT]
+
+
+def guess_hint(item: ReviewItem | None, segment: ReviewSegment | None) -> str:
+    """What A does on the shown frame of a row with guesses ('' otherwise)."""
+    if segment is None:
+        return ""
+    guessed = _guess_count(segment)
+    if item is not None and GUESS in item.reasons:
+        more = guessed - 1
+        return "A accepts the guess shown" + (
+            f"; {more} more guess{'es' if more != 1 else ''} to look at" if more else "")
+    if guessed:
+        return f"A skips the {guessed} frame{'s' if guessed != 1 else ''} with a guess"
+    return ""
+
+
+def _guess_count(segment: ReviewSegment) -> int:
+    return sum(GUESS in item.reasons for item in segment.items)
 
 
 def detail_text(item: ReviewItem | None, frame: int, images: Sequence[str],
-                limit: int | None = DETAIL_REASONS) -> str:
+                limit: int | None = DETAIL_REASONS,
+                segment: ReviewSegment | None = None) -> str:
     """The shown *frame* and why it is listed (its *item*, None if it is
-    not): the leading *limit* reasons, None = all of them."""
+    not): the leading *limit* reasons, None = all of them.  With the
+    selected *segment*, what A does there if the row has Auto's guesses."""
     if item is None:
-        return f"{frame_title(frame, images)} — not flagged"
-    return item_text(item, images, limit)
+        text = f"{frame_title(frame, images)} — not flagged"
+    else:
+        text = item_text(item, images, limit)
+    hint = guess_hint(item, segment)
+    return f"{text}. {hint}" if hint else text
 
 
 def _reason_counts(segment: ReviewSegment) -> list[tuple[str, int]]:
