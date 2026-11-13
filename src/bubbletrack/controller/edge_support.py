@@ -13,10 +13,12 @@ from bubbletrack.model import edge_pipeline
 from bubbletrack.model.edge_pipeline import EdgeFrameFit, EdgeJob
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import AppState
+from bubbletrack.model.suggestion import Suggestion, set_suggestion, shown_suggestion
 
 # Auto-selected reference per source; choosing reads several frames.
 _reference_cache: dict[tuple, int | None] = {}
 _reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference frame
+GUESS_HINT = "Auto's guess is shown dashed (A in Review accepts it)"
 
 
 def _source_key(state: AppState) -> tuple:
@@ -86,7 +88,8 @@ def fit_frame(state: AppState, idx: int, max_radius: float, *,
 
 
 def store_fit(state: AppState, idx: int, fit: EdgeFrameFit, source: FitSource) -> None:
-    """Write a fit into the result arrays (rejected fits mark the frame unfitted)."""
+    """Write a fit into the result arrays (rejected fits mark the frame unfitted
+    and keep the engine's guess, if any, as the frame's suggestion)."""
     accepted = fit.radius > 0
     state.radius[idx] = fit.radius if accepted else -1.0
     state.circle_fit_par[idx] = [fit.rc, fit.cc] if accepted else [np.nan, np.nan]
@@ -95,19 +98,48 @@ def store_fit(state: AppState, idx: int, fit: EdgeFrameFit, source: FitSource) -
         state.region_count[idx] = 0
     if state.fit_confidence is not None:
         state.fit_confidence[idx] = fit.confidence
-    store_meta(state, idx, {"flags": fit.flags, "metrics": fit.metrics})
+    store_meta(state, idx, {"flags": fit.flags, "metrics": fit.metrics,
+                            "suggestion": None if accepted else fit.suggestion})
     if state.fit_source is not None:
         state.fit_source[idx] = source if accepted else FitSource.NONE
 
 
 def store_meta(state: AppState, idx: int, meta: dict) -> None:
-    """Write per-frame flags and shape metrics (unreported metrics become NaN)."""
+    """Write per-frame flags and shape metrics (unreported metrics become NaN)
+    and Auto's guess for a rejected frame (cleared unless *meta* has one)."""
     if state.fit_flags is not None:
         state.fit_flags[idx] = frozenset(meta.get("flags", ()))
     if state.fit_metrics is not None:
         reported = meta.get("metrics", {})
         for key, values in state.fit_metrics.items():
             values[idx] = reported.get(key, np.nan)
+    set_suggestion(state, idx, meta.get("suggestion"))
+
+
+def clear_suggestion(state: AppState, idx: int) -> None:
+    """Drop frame *idx*'s guess (a new result or fit attempt replaces it)."""
+    set_suggestion(state, idx, None)
+
+
+def fit_from_suggestion(suggestion: Suggestion) -> EdgeFrameFit:
+    """The fit a suggestion stands for, as the engine reported it."""
+    return EdgeFrameFit(suggestion.radius, suggestion.rc, suggestion.cc,
+                        np.array(suggestion.edge_xy, dtype=np.float64), None,
+                        suggestion.confidence, suggestion.flags, "",
+                        metrics=suggestion.metrics_dict)
+
+
+def accept_suggestion(state: AppState, idx: int) -> bool:
+    """Accept frame *idx*'s shown guess: store it as an Auto result and lock it
+    (locked = accepted by the user; Fit All and tracking keep it).  False if
+    the frame shows no guess."""
+    suggestion = shown_suggestion(state, idx)
+    if suggestion is None:
+        return False
+    store_fit(state, idx, fit_from_suggestion(suggestion), FitSource.AUTO)
+    if state.fit_locked is not None:
+        state.fit_locked[idx] = True
+    return True
 
 
 def status_text(idx: int, fit: EdgeFrameFit) -> tuple[str, str]:
@@ -116,4 +148,8 @@ def status_text(idx: int, fit: EdgeFrameFit) -> tuple[str, str]:
         flags = f", {', '.join(sorted(fit.flags))}" if fit.flags else ""
         return (f"Frame {idx + 1}: R = {fit.radius:.1f} px "
                 f"(confidence {fit.confidence:.2f}{flags})", "#10b981")
-    return (f"Frame {idx + 1}: {fit.rejected_reason} — not accepted", "#f59e0b")
+    text = f"Frame {idx + 1}: {fit.rejected_reason} — not accepted"
+    if fit.suggestion is not None:
+        text += f"; {GUESS_HINT}"
+    return text, "#f59e0b"
+

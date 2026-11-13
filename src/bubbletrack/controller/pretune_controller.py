@@ -19,7 +19,7 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
-from bubbletrack.controller import edge_support
+from bubbletrack.controller import edge_support, suggestion_view
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.quality import compute_fit_quality
@@ -236,6 +236,8 @@ class PretuneController(BaseController):
         if fit.radius > 0:
             self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1")
             self.w.original_panel.draw_points(fit.edge_xy, "#ef4444", 2.0)
+        else:  # rejected: its guess, if any, dashed
+            suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
         refresh_chart(self.state, self.w)
         self.w.left_panel.pretune_tab.hide_quality()
         self.w.header.set_status(*edge_support.status_text(idx, fit))

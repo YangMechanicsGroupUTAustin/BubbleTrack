@@ -11,6 +11,7 @@ import logging
 
 import numpy as np
 
+from bubbletrack.controller import suggestion_view
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
@@ -213,6 +214,7 @@ def display_frame(
                 f"Area-equivalent R = {state.radius[idx]:.1f} px; "
                 f"regions = {state.region_count[idx]}", "#10b981",
             )
+        suggestion_view.announce_guess(state, window, idx)
     except Exception as exc:
         window.header.set_status(f"Error: {exc}", "#ef4444")
 
@@ -247,9 +249,11 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
         return
     panel.set_image(np.clip(view / _VIEW_WHITE, 0.0, 1.0).astype(np.float32))
     xy = state.circle_xy[idx] if state.circle_xy is not None else None
+    origin = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
     if xy is not None and state.radius is not None and state.radius[idx] > 0:
-        origin = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
         panel.draw_fit_outline(np.asarray(xy, dtype=float) - origin, "#ef4444")
+    else:  # no result: Auto's rejected guess, if any, dashed
+        suggestion_view.draw_guess(state, panel, idx, offset=origin)
 
 
 def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
@@ -258,8 +262,10 @@ def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
     The boundary is a closed polyline when ``circle_xy`` holds an ordered
     contour (Edge engine), otherwise the detected edge points.  Area-mode
     results have no meaningful circle, so only their boundary is drawn.
+    A frame without a result shows Auto's rejected guess, if any, dashed.
     """
     if state.radius is None or idx >= len(state.radius) or state.radius[idx] <= 0:
+        suggestion_view.draw_guess(state, panel, idx)
         return
     is_area = state.region_count is not None and state.region_count[idx] > 0
     if not is_area and state.circle_fit_par is not None \

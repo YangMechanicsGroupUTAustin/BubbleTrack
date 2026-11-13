@@ -65,13 +65,15 @@ def _process_single_frame(args: tuple):
 def _process_single_frame_edge(args: tuple):
     """Edge-engine counterpart of ``_process_single_frame`` (module-level, picklable).
 
-    Returns the same 7 fields plus the fit confidence.
+    Returns the same 7 fields plus the fit's meta: confidence, flags, metrics
+    and, for a frame rejected for low confidence, Auto's guess ("suggestion").
     """
     idx, source, gridx, gridy, job = args
     from bubbletrack.model.edge_pipeline import fit_edge, read_raw
 
     fit = fit_edge(read_raw(source), gridx, gridy, job)
-    meta = {"confidence": fit.confidence, "flags": fit.flags, "metrics": fit.metrics}
+    meta = {"confidence": fit.confidence, "flags": fit.flags, "metrics": fit.metrics,
+            "suggestion": fit.suggestion}
     return (idx, fit.radius, fit.edge_xy, fit.mask, fit.rc, fit.cc, 0, meta)
 
 
@@ -89,7 +91,7 @@ class BatchWorker(QThread):
     progress = pyqtSignal(int, int)
     frame_done = pyqtSignal(int, float, object, object, float, float, int)
     frame_error = pyqtSignal(int, str)  # (frame_idx, error_message)
-    frame_meta = pyqtSignal(int, object)  # (frame_idx, {confidence, flags, metrics}) — Edge only
+    frame_meta = pyqtSignal(int, object)  # (frame_idx, {confidence, flags, metrics, suggestion}) — Edge only
 
     # Run frames in this process (threads) instead of a process pool.
     # Used by tests that inject fakes, and handy when debugging.

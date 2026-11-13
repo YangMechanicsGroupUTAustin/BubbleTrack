@@ -1,4 +1,4 @@
-"""Undo history of per-frame results (circle fixes, automatic re-tracks).
+"""Undo history of per-frame results (circle fixes, automatic re-tracks, accepted guesses).
 
 An edit records each changed frame's result before and after.  Undo puts
 the "before" back exactly, but only while every frame still holds what the
@@ -14,6 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from bubbletrack.model.suggestion import Suggestion, same_suggestion
 from bubbletrack.model.undo import UndoStack
 
 _NAN = float("nan")
@@ -32,6 +33,7 @@ class FrameResult:
     metrics: tuple[tuple[str, float], ...]
     flags: frozenset
     locked: bool
+    suggestion: Suggestion | None = None  # Auto's rejected guess (immutable, not copied)
 
 
 def _item(values, idx: int, default):
@@ -53,6 +55,7 @@ def capture(state, idx: int) -> FrameResult:
                       for key, values in sorted((state.fit_metrics or {}).items())),
         flags=frozenset(_item(state.fit_flags, idx, frozenset())),
         locked=bool(_item(state.fit_locked, idx, False)),
+        suggestion=_item(getattr(state, "fit_suggestion", None), idx, None),
     )
 
 
@@ -71,6 +74,7 @@ def restore(state, idx: int, result: FrameResult) -> None:
     _set(state.fit_confidence, idx, result.confidence)
     _set(state.fit_flags, idx, result.flags)
     _set(state.fit_locked, idx, result.locked)
+    _set(getattr(state, "fit_suggestion", None), idx, result.suggestion)
     metrics = dict(result.metrics)
     for key, values in (state.fit_metrics or {}).items():
         values[idx] = metrics.get(key, _NAN)
@@ -93,7 +97,8 @@ def same_result(a: FrameResult, b: FrameResult) -> bool:
                                                                    b.flags, b.locked)
             and len(a.metrics) == len(b.metrics)
             and all(ka == kb and _same_float(va, vb)
-                    for (ka, va), (kb, vb) in zip(a.metrics, b.metrics)))
+                    for (ka, va), (kb, vb) in zip(a.metrics, b.metrics))
+            and same_suggestion(a.suggestion, b.suggestion))
 
 
 def snapshot(state, frames: Iterable[int]) -> dict[int, FrameResult]:

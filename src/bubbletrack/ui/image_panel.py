@@ -223,7 +223,7 @@ class ImagePanel(QWidget):
         self._add_path(path, QPen(Qt.PenStyle.NoPen), QBrush(QColor(colour)))
 
     def draw_contour(self, points: np.ndarray, colour: str = "#ef4444",
-                     width: float = 1.5, closed: bool = True) -> None:
+                     width: float = 1.5, closed: bool = True, *, dashed: bool = False) -> None:
         """Draw *points* (N, 2) ``[row, col]`` as a connected polyline."""
         pts = np.asarray(points, dtype=float).reshape(-1, 2)
         if len(pts) < 2:
@@ -234,7 +234,8 @@ class ImagePanel(QWidget):
             path.lineTo(c, r)
         if closed:
             path.closeSubpath()
-        self._add_path(path, _cosmetic_pen(colour, width), QBrush(Qt.BrushStyle.NoBrush))
+        pen = dashed_pen(colour, width) if dashed else _cosmetic_pen(colour, width)
+        self._add_path(path, pen, QBrush(Qt.BrushStyle.NoBrush))
 
     def draw_fit_outline(self, points: np.ndarray | None, colour: str = "#ef4444") -> None:
         """Draw a fit's boundary: a closed polyline for an ordered contour,
@@ -266,6 +267,15 @@ class ImagePanel(QWidget):
         for item in self._overlay_items:
             self._scene.removeItem(item)
         self._overlay_items.clear()
+        self.set_overlay_tip("")
+
+    def set_overlay_tip(self, text: str) -> None:
+        """Tooltip of the image area, describing an overlay (cleared with the overlays)."""
+        if self._view.toolTip() != text:
+            self._view.setToolTip(text)
+
+    def overlay_tip(self) -> str:
+        return self._view.toolTip()
 
     @property
     def mode(self) -> str:

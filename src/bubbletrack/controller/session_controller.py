@@ -33,7 +33,8 @@ from bubbletrack.model.state import AppState, update_state
 logger = logging.getLogger(__name__)
 
 RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_source",
-               "fit_confidence", "fit_metrics", "fit_flags", "fit_locked")
+               "fit_confidence", "fit_metrics", "fit_flags", "fit_locked",
+               "fit_suggestion")
 _NOT_PARAMS = {"version", "folder_path", "video_path", "images", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
 
@@ -146,6 +147,9 @@ def restore_results(state: AppState, results: dict) -> str | None:
     locked = results.get("fit_locked")
     if locked is not None and len(locked) == n and state.fit_locked is not None:
         state.fit_locked[:] = locked
+    guesses = results.get("fit_suggestion")  # Auto's rejected guesses (display only)
+    if guesses is not None and len(guesses) == n and state.fit_suggestion is not None:
+        state.fit_suggestion[:] = list(guesses)
     confidence = results.get("fit_confidence")
     if confidence is not None and len(confidence) == n and state.fit_confidence is not None:
         state.fit_confidence[:] = confidence
