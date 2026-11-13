@@ -44,7 +44,7 @@ def make_params(*, edge_definition: str = "steep", polarity: str = "dark",
                 prior: tuple[float, float, float] | None = None,
                 non_round: bool = False):
     """``EdgeParams``; *non_round* ("Bubble may be non-round") makes R the outline's
-    area-equivalent radius instead of the circle through the wall."""
+    area-equivalent radius instead of the least-squares circle through the bubble outline."""
     return _params_class()(edge_definition=edge_definition, polarity=polarity,
                            seed=seed, prior=prior, non_round=bool(non_round))
 
@@ -137,6 +137,14 @@ def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     from bubbletrack.model.edge.engine import engine_view
 
     return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
+
+
+def unusable_pixels(reference: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int]) -> np.ndarray:
+    """The ROI's pixels Auto cannot use with *reference* (too dark or saturated there);
+    see ``engine.unusable_mask``."""
+    from bubbletrack.model.edge import engine
+
+    return engine.unusable_mask(reference, gridx, gridy)
 
 
 def _rejected_guess(res, confidence: float, metrics: dict,

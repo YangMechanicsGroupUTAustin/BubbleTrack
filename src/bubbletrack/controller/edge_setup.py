@@ -31,7 +31,8 @@ NO_REFERENCE_FOUND = "not found — results may be less accurate"
 REFERENCE_QUESTION = ("Frame {n} seems to contain a bubble; the reference must be "
                       "bubble-free. Use it anyway?")
 NON_ROUND_ON = "Bubble may be non-round: on (R from the outline's area)"
-NON_ROUND_OFF = "Bubble may be non-round: off (R from the circle through the wall)"
+NON_ROUND_OFF = ("Bubble may be non-round: off (R from the least-squares circle through the "
+                 "bubble outline)")
 FIT_AGAIN = " — Fit again to apply"
 
 

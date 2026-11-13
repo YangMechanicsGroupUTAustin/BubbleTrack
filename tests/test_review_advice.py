@@ -150,6 +150,7 @@ class TestResults:
         state = _state([40, 41, 42])
         advice = advise(state, 1, _item(1, "fragmented", "non_circular"))
         assert advice.text.startswith("Outline not round here.")
+        assert "R comes from the least-squares circle through the bubble outline" in advice.text
 
     def test_an_ml_outline_names_ml_assist(self):
         state = _state([40, 41, 42])

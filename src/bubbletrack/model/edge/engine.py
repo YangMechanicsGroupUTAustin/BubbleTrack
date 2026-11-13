@@ -27,7 +27,9 @@ from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge.config import DEFAULT_CONFIG, EdgeConfig
 from bubbletrack.model.edge.definition import FrameStats, measure
 from bubbletrack.model.edge.fit import CircleFit, fit_circle
-from bubbletrack.model.edge.normalize import GrayFrame, Normalized, normalize_roi, saturation_mask, to_gray_frame
+from bubbletrack.model.edge.normalize import (
+    normalize_frame_roi, reference_invalid, reference_unusable, to_gray_frame,
+)
 from bubbletrack.model.edge.outline import Outline, RayPoints, background_noise, measure_outline
 from bubbletrack.model.edge.quality import FitStats, confidence, fit_stats, measurement_flags
 from bubbletrack.model.edge.rays import (
@@ -119,7 +121,8 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
     if min(shape) < config.quality.min_roi_px:
         return _fail(np.zeros(shape, bool), flags, prov, "roi_too_small", params, watch)
 
-    norm, sat, image, exclude = _normalize(frame, ref, roi_to_slice(gx, gy), params, config)
+    norm, sat, image, exclude = normalize_frame_roi(frame, ref, roi_to_slice(gx, gy),
+                                                    dark=params.polarity == "dark", cfg=config.normalize)
     prov.update(normalize=norm.method, gain=norm.gain, polarity=params.polarity)
     if sat.any():
         flags.add("saturation")
@@ -203,26 +206,22 @@ def engine_view(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
     if ref is not None and ref.values.shape != frame.values.shape:
         raise ValueError(f"reference shape {ref.values.shape} differs from frame shape {frame.values.shape}")
     gx, gy, _ = _parse_roi(gridx, gridy, frame.values.shape)
-    _, _, image, _ = _normalize(frame, ref, roi_to_slice(gx, gy), params, config)
+    _, _, image, _ = normalize_frame_roi(frame, ref, roi_to_slice(gx, gy), dark=params.polarity == "dark",
+                                         cfg=config.normalize)
     return image
 
 
-def _normalize(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slice, slice], params: EdgeParams,
-               config: EdgeConfig) -> tuple[Normalized, np.ndarray, np.ndarray, np.ndarray]:
-    """Stage A on the ROI; returns (normalized, saturated, working image, excluded pixels)."""
-    values = frame.values[roi]
-    sat = saturation_mask(values, frame.full_scale, config.normalize)
-    dark = params.polarity == "dark"
-    # a bright bubble may itself be saturated: then saturation is signal, not glare
-    sat_excl = sat if dark else np.zeros_like(sat)
-    ref_values, ref_bad = None, None
-    if ref is not None:
-        ref_values = ref.values[roi]
-        ref_bad = saturation_mask(ref_values, ref.full_scale, config.normalize) | ref.non_finite[roi]
-    norm = normalize_roi(values, sat_excl, config.normalize, reference=ref_values, ref_invalid=ref_bad,
-                         invalid=frame.non_finite[roi])
-    image = norm.image if dark else (2.0 - norm.image).astype(np.float32)
-    return norm, sat, image, sat_excl | norm.invalid
+def unusable_mask(reference: np.ndarray, gridx, gridy, *, config: EdgeConfig = DEFAULT_CONFIG) -> np.ndarray:
+    """The ROI's pixels the engine cannot use with this reference frame (bool, ROI-sized).
+
+    Too dark (no light), saturated or not finite in the reference, widened a little: every
+    frame's measurement ignores them (:func:`engine_view` shows them as background).  Exactly
+    the reference part of stage A's invalid pixels.  Raises ValueError like :func:`detect_edge`.
+    """
+    ref = to_gray_frame(reference)
+    gx, gy, _ = _parse_roi(gridx, gridy, ref.values.shape)
+    roi = roi_to_slice(gx, gy)
+    return reference_unusable(ref.values[roi], reference_invalid(ref, roi, config.normalize), config.normalize)
 
 
 def _steep_edges(e: np.ndarray, invalid: np.ndarray, exclude: np.ndarray, coarse: CoarseMask,

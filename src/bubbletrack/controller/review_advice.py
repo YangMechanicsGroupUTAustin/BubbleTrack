@@ -41,7 +41,8 @@ ASK_EMPTY = "Is there a bubble? Fix it (F), or No bubble (N) if the frame is emp
 LIKE_REFERENCE = ("It looks like the reference frame, without a bubble: "
                   "No bubble (N), or Fix it (F) if there is one.")
 BEFORE_TEXT = "Before the bubble: no result, and the frame looks like the reference frame."
-NOT_ROUND_TEXT = ("R comes from the circle that fits the wall, which may be off for this shape. "
+NOT_ROUND_TEXT = ("R comes from the least-squares circle through the bubble outline, which may be "
+                  "off for this shape. "
                   "If your bubbles are not round, tick \"Bubble may be non-round\" (Auto box, "
                   "Advanced) and Fit again; otherwise accept it if the circle sits on the wall.")
 CLIPPED_NOT_ROUND_TEXT = ("The wall you can see is not round, so the circle may be off. Accept it "

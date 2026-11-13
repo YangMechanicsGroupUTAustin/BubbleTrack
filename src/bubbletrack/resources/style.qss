@@ -487,6 +487,11 @@ QLabel#sectionTitle {
     font-size: 13px;
     color: #e4e4e7;
 }
+QLabel#titleNote {
+    font-weight: bold;
+    font-size: 13px;
+    color: #f59e0b;
+}
 QLabel#dimText {
     color: #71717a;
     font-size: 11px;

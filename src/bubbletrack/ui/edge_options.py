@@ -48,7 +48,7 @@ ML_SWITCH_LOCKED_TIP = ("Not available yet: teach ML assist first (Teach…):\n"
                         "confirm two different frames where the outline is right.")
 NON_ROUND_TEXT = "Bubble may be non-round"
 NON_ROUND_TIP = (
-    "Off (default): R is the circle that best fits the bubble wall.\n"
+    "Off (default): R is the least-squares circle through the bubble outline.\n"
     "  A bubble cut by the image edge is fitted on the wall you can see.\n"
     "  If the outline is clearly not round, Review lists the frame.\n"
     "On: R is the radius of a circle with the same area as the outline,\n"
