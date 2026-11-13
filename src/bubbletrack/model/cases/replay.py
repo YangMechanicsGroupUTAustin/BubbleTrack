@@ -17,6 +17,7 @@ counts how many of the app's automatic results a replay reproduces.
 from __future__ import annotations
 
 import dataclasses
+import logging
 import math
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from bubbletrack.model.image_io import normalize_frame
 from bubbletrack.model.removing_factor import compute_removing_factor
 
 ReadFrame = Callable[[int], np.ndarray]
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -114,6 +116,43 @@ def _edge_job(case: HardCase, p: dict, read_frame: ReadFrame) -> edge_pipeline.E
                                  max_radius=case.detection.max_radius)
 
 
+def shift_examples(examples, offset: tuple[int, int], shape: tuple[int, int]):
+    """ML assist *examples* in a crop's own 1-based coordinates (pixels outside it dropped)."""
+    from bubbletrack.model.teach import LABELS, MLExamples
+
+    dr, dc = offset
+    out = MLExamples()
+    for frame, strokes in examples.strokes.items():
+        for label in LABELS:
+            px = np.array(sorted(strokes.of(label)), dtype=np.int64).reshape(-1, 2) - (dr, dc)
+            px = px[(px >= 1).all(axis=1) & (px[:, 0] <= shape[0]) & (px[:, 1] <= shape[1])]
+            if len(px):
+                out = out.paint(frame, label, px)
+    for frame, (rc, cc, r) in examples.verified.items():
+        out = out.verify(frame, (rc - dr, cc - dc, r))
+    return out
+
+
+def _ml_model(case: HardCase, read_frame: ReadFrame, gridx, gridy, job: edge_pipeline.EdgeJob):
+    """The ML assist model the user had on, retrained from the bundle (None: plain Auto)."""
+    params = case.detection.params
+    if params.get("ml_assist") is not True or params.get("ml_examples") is None:
+        return None
+    try:
+        from bubbletrack.model.teach import MLExamples, train_model
+
+        examples = shift_examples(MLExamples.from_dict(params["ml_examples"]), case.offset,
+                                  (gridx[1], gridy[1]))
+        missing = [f for f in examples.frames if case.frame(f) is None]
+        if examples.is_empty or missing:
+            logger.warning("Replay without ML assist: example frames %s are not in the bundle", missing)
+            return None
+        return train_model(examples, read_frame, gridx, gridy, reference=job.reference)
+    except Exception as exc:  # noqa: BLE001 - e.g. scikit-learn missing: replay plain Auto
+        logger.warning("Replay without ML assist: %s", exc)
+        return None
+
+
 def _track(order: list[int], fits: dict, images: Mapping[int, np.ndarray], gridx, gridy,
            job: edge_pipeline.EdgeJob) -> dict[int, Replayed]:
     """Sequence tracking over the stored frames, as after Fit All (no anchors)."""
@@ -180,7 +219,12 @@ def replay_case(case: HardCase, read_frame: ReadFrame, *,
         results = {i: _fit_legacy(images[i], params) for i in order}
     else:
         job = _edge_job(case, p, read_frame)
-        fits = {i: edge_pipeline.fit_edge(images[i], gridx, gridy, job) for i in order}
+        model = _ml_model(case, read_frame, gridx, gridy, job)
+        if model is None:
+            fits = {i: edge_pipeline.fit_edge(images[i], gridx, gridy, job) for i in order}
+        else:
+            from bubbletrack.model.ml_pipeline import measure_ml
+            fits = {i: measure_ml(model, images[i], gridx, gridy, job).fit for i in order}
         track = case.detection.tracking if tracking is None else tracking
         results = (_track(order, fits, images, gridx, gridy, job) if track and len(order) > 1
                    else {i: _from_edge(fits[i]) for i in order})

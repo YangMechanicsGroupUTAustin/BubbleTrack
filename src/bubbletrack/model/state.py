@@ -81,6 +81,11 @@ class AppState:
     reference_frame: int | None = None  # bubble-free frame index; None = auto-select
     edge_seed: tuple[float, float] | None = None  # (row, col) 1-based, picks the bubble
 
+    # ML assist (a helper of Auto, ``model.teach``), per recording: cleared when
+    # another source is loaded, kept in sessions.  On: Fit All measures with it.
+    ml_assist: bool = False
+    ml_examples: object = None  # MLExamples | None: strokes (+ verified circles at the last sync)
+
     # Visual binary polarity swap (session-only, NOT persisted across launches).
     # When True, the binary panel displays ``~processed`` instead of
     # ``processed``.  This is a pure post-detection display toggle: detection,

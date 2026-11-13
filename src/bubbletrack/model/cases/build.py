@@ -23,7 +23,7 @@ import bubbletrack
 from bubbletrack.model.cases.bundle import frame_file_name, write_bundle
 from bubbletrack.model.cases.labels import app_result, frame_label
 from bubbletrack.model.cases.schema import (
-    ROLE_CONTEXT, ROLE_REFERENCE, ROLE_SELECTED, CaseFrame, Detection, HardCase,
+    ROLE_CONTEXT, ROLE_EXAMPLE, ROLE_REFERENCE, ROLE_SELECTED, CaseFrame, Detection, HardCase,
 )
 from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.model.hpvx2_dat import DAT_EXTS
@@ -53,11 +53,12 @@ def clip_range(start: int, end: int, n_frames: int) -> tuple[int, int]:
 
 
 def plan_frames(start: int, end: int, n_frames: int, *, reference: int | None = None,
-                context: int = CONTEXT_FRAMES) -> tuple[tuple[int, str], ...]:
+                context: int = CONTEXT_FRAMES, examples=()) -> tuple[tuple[int, str], ...]:
     """(index, role) of every frame to store, in frame order.
 
     The reported frames, *context* neighbours on each side (clipped to the
-    recording) and the reference frame when it is not among them.
+    recording), the reference frame and ML assist's *examples* frames when
+    they are not among them.
     """
     if n_frames <= 0:
         return ()
@@ -66,7 +67,19 @@ def plan_frames(start: int, end: int, n_frames: int, *, reference: int | None = 
              for i in range(max(0, start - context), min(n_frames - 1, end + context) + 1)}
     if reference is not None and 0 <= reference < n_frames and reference not in roles:
         roles[reference] = ROLE_REFERENCE
+    for frame in examples:
+        if 0 <= frame < n_frames and frame not in roles:
+            roles[int(frame)] = ROLE_EXAMPLE
     return tuple(sorted(roles.items()))
+
+
+def ml_examples(state):
+    """ML assist's training examples when it is on in Auto mode (else None):
+    bundles store them in the parameters, with their frames, so replays retrain."""
+    if state.detection_mode != "edge" or not getattr(state, "ml_assist", False):
+        return None
+    from bubbletrack.model.ml_assist import examples_for_run
+    return examples_for_run(state)
 
 
 def crop_to_roi(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int]) -> np.ndarray:
@@ -132,7 +145,12 @@ def make_case(state, request: CaseRequest, frame_shape: tuple[int, ...], *,
     start, end = clip_range(int(request.start), int(request.end), n)
     mode = state.detection_mode
     reference = _reference(request.reference_index, n) if mode == "edge" else None
-    plan = plan_frames(start, end, n, reference=reference)
+    examples = ml_examples(state)
+    plan = plan_frames(start, end, n, reference=reference,
+                       examples=examples.frames if examples is not None else ())
+    params = session_parameters(state)
+    if examples is not None:
+        params["ml_examples"] = examples.to_dict()
     frames = []
     for idx, role in plan:
         result = app_result(state, idx)
@@ -146,7 +164,7 @@ def make_case(state, request: CaseRequest, frame_shape: tuple[int, ...], *,
         source=MappingProxyType(source),
         gridx=_bounds(state.gridx), gridy=_bounds(state.gridy),
         detection=Detection(
-            mode=mode, params=MappingProxyType(session_parameters(state)),
+            mode=mode, params=MappingProxyType(params),
             tracking=bool(request.tracking) and mode == "edge",
             reference_index=reference,
             reference_explicit=state.reference_frame is not None,

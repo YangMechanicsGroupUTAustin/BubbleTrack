@@ -28,6 +28,8 @@ REASON_WEIGHTS: dict[str, int] = {
     "disagree": 85,
     "jump": 80,
     "low_confidence": 60,  # rises to 90 as the confidence falls to 0
+    "ml_outline": 58,  # ML assist's own outline: always checked (see review_segments)
+    "ml_disagrees": 56,  # plain Auto kept, but ML assist saw the bubble elsewhere
     "multiple_edges": 60,
     "non_circular": 55,
     "fragmented": 50,
@@ -36,12 +38,13 @@ REASON_WEIGHTS: dict[str, int] = {
     "collapse": 35,
     "cloud": 30,
     "shoulder": 25,
+    "ml_unfamiliar": 20,  # unlike the frames ML assist was taught on (context only)
 }
 UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
 REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
 # Routine engine flags: they describe a listed frame and add to its rank, but
 # never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
-CONTEXT_REASONS = CONTEXT_FLAGS
+CONTEXT_REASONS = CONTEXT_FLAGS | {"ml_unfamiliar"}
 
 
 @dataclass(frozen=True, eq=False)

@@ -38,6 +38,9 @@ REASON_LABELS: dict[str, str] = {
     "clipped_completed": "clipped (completed)",
     "shoulder": "shoulder",
     "collapse": "near collapse",
+    "ml_outline": "ML outline",
+    "ml_disagrees": "ML disagrees",
+    "ml_unfamiliar": "unlike the taught frames",
 }
 
 

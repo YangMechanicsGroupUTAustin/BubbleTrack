@@ -126,7 +126,17 @@ def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     acceptance only (a user-drawn circle is itself evidence, see
     ``guided_fit``); below the engine's gate it still reports the circle fit.
     """
-    res = _engine()(raw, gridx, gridy, reference=job.reference, params=job.params)
+    return fit_from_result(detect(raw, gridx, gridy, job), job, min_confidence=min_confidence)
+
+
+def detect(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int], job: EdgeJob):
+    """The engine's own result (``EdgeResult``) for one raw frame, before the acceptance rules."""
+    return _engine()(raw, gridx, gridy, reference=job.reference, params=job.params)
+
+
+def fit_from_result(res, job: EdgeJob, *, min_confidence: float | None = None) -> EdgeFrameFit:
+    """The acceptance rules of :func:`fit_edge` applied to an engine result *res*
+    (an ``EdgeResult``), e.g. one that ML assist also needs as it is."""
     confidence = float(res.confidence)
     passed = res.accepted if min_confidence is None else confidence >= min_confidence
     if not np.isfinite(res.radius):
