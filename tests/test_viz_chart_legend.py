@@ -26,7 +26,7 @@ class TestKeyRow:
         row = KeyRow()
         must, extra = QLabel("must"), QLabel("extra key")
         row.add_key(must, 0, "must")
-        row.add_key(extra, 1, "C1, C2 = collapses")
+        row.add_key(extra, 1, "extra key")
         row.show()
         both = must.sizeHint().width() + extra.sizeHint().width() + row.spacing()
         row.resize(both + 4, 20)
@@ -35,7 +35,7 @@ class TestKeyRow:
         row.resize(must.sizeHint().width() + 4, 20)
         qapp.processEvents()
         assert must.isVisible() and not extra.isVisible()
-        assert "C1, C2 = collapses" in row.toolTip()
+        assert "extra key" in row.toolTip()
         row.close()
 
 
@@ -76,18 +76,18 @@ class TestLegendNeverClips:
                 assert key.width() >= key.sizeHint().width(), (width, key.toolTip())
         c.close()
 
-    def test_the_collapse_key_goes_first_the_colour_scale_last(self, qapp):
+    def test_markers_go_first_the_colour_scale_last(self, qapp):
         c = RadiusChart()
         c.resize(2400, 300)
         c.show()
         qapp.processEvents()
         assert c._legend_keys.hidden_texts() == []
-        order = ["C1, C2 = collapses", "● computed", "◆ manual / locked", "colour scale"]
+        order = ["● computed", "◆ manual / locked", "colour scale"]  # no collapse key
         for width in (900, 700, 500, 300):  # how much fits depends on the font
             c.resize(width, 300)
             qapp.processEvents()
             hidden = c._legend_keys.hidden_texts()
             assert hidden == order[:len(hidden)], width
             assert c._score_name.isVisible() == ("colour scale" not in hidden)
-        assert "C1, C2 = collapses" in c._legend_keys.toolTip()
+        assert all(text in c._legend_keys.toolTip() for text in hidden)
         c.close()

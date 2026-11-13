@@ -1,13 +1,13 @@
 """Interactive R(t) chart (pyqtgraph): marker SHAPE = computed or decided by
 the user, COLOUR = score (red -> green); current-frame cursor,
-Rmax window + t = 0, collapse lines, Shift+drag range selection with a menu.
+Rmax window + t = 0, Shift+drag range selection with a menu.
 The view never leaves the data (``chart_view``).
 Frame arguments are 0-based unless named ``_1based`` (the x axis is 1-based).
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from contextlib import contextmanager
 
 import numpy as np
@@ -219,13 +219,6 @@ class RadiusChart(QWidget):
 
     def rmax_info(self):
         return self._overlays.rmax_info()
-
-    def set_cycles(self, collapse_frames: Iterable[int]) -> None:
-        """Dashed lines at collapse frames (0-based indices); empty clears."""
-        self._overlays.set_cycles(int(f) + 1 for f in collapse_frames)
-
-    def cycle_frames(self) -> list[int]:
-        return [int(round(x)) - 1 for x in self._overlays.cycle_positions()]
 
     def highlight_frame(self, frame_1based: int) -> None:
         """Same as ``set_current_frame(frame_1based - 1)`` (kept for callers)."""

@@ -164,13 +164,6 @@ class TestAnnotations:
         chart.set_rmax_info(None)
         assert chart.rmax_info() is None
 
-    def test_cycles(self, chart):
-        chart.set_cycles([9, 30])
-        assert chart.cycle_frames() == [9, 30]
-        assert chart._overlays.cycle_positions() == [10.0, 31.0]
-        chart.set_cycles([])
-        assert chart.cycle_frames() == []
-
     def test_plot_series_raw_faint_solved_solid(self, chart):
         frames = np.arange(1, 6)
         raw = np.array([10, -1, 12, 13, np.nan])
@@ -209,12 +202,11 @@ class TestAnnotations:
         chart.plot_all(*_series(5))
         chart.set_current_frame(1)
         chart.set_rmax_info(3, 1, 5)
-        chart.set_cycles([2])
         chart.set_selection(1, 3)
         chart.set_review_span((0, 2))
         chart.clear()
         assert len(chart._frames) == 0 and chart.rmax_info() is None
-        assert chart.cycle_frames() == [] and chart.selected_range() is None
+        assert chart.selected_range() is None
         assert chart.review_span() is None
 
 
@@ -392,3 +384,23 @@ class TestChartWiring:
         assert window.radius_chart.current_frame() == 0
         controller.file_ctrl.on_frame_changed(3)
         assert window.radius_chart.current_frame() == 3
+
+
+def test_collapses_draw_no_lines_on_the_chart(gui, make_sequence):
+    """Owner: no C1, C2, ... lines; the chart shows the curve, Rmax and t = 0 only."""
+    import pyqtgraph as pg
+
+    from bubbletrack.controller.display_mixin import refresh_chart
+    from bubbletrack.model.provenance import FitSource
+
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("cycles", 48)))
+    state = controller._get_state()
+    t = np.arange(48)
+    state.radius[:] = 3.0 + 40.0 * np.abs(np.sin(np.pi * t / 16.0))  # collapses at 16 and 32
+    state.fit_source[:] = FitSource.AUTO
+    state.fit_confidence[:] = 0.9
+    refresh_chart(state, window)
+    labels = [item.label.format for item in window.radius_chart._plot.plotItem.items
+              if isinstance(item, pg.InfiniteLine) and getattr(item, "label", None) is not None]
+    assert not [text for text in labels if text.startswith("C")], labels

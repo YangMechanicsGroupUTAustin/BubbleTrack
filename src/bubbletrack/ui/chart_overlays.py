@@ -1,12 +1,10 @@
-"""Annotation layers of the R(t) chart: cursor, Rmax window, cycles, selection,
-and the span of the selected Review row.
+"""Annotation layers of the R(t) chart: cursor, Rmax window, selection, and
+the span of the selected Review row.
 
 All positions are on the chart's x axis, which is the 1-based frame number.
 """
 
 from __future__ import annotations
-
-from collections.abc import Iterable
 
 import numpy as np
 import pyqtgraph as pg
@@ -15,15 +13,11 @@ from PyQt6.QtCore import Qt
 CURSOR_PEN = pg.mkPen(228, 228, 231, 150, width=1)
 RMAX_BAND_BRUSH = pg.mkBrush(165, 180, 252, 28)
 RMAX_LINE_PEN = pg.mkPen("#a5b4fc", width=1.5, style=Qt.PenStyle.DashLine)
-CYCLE_PEN = pg.mkPen("#71717a", width=1.2, style=Qt.PenStyle.DashLine)
 SELECTION_BRUSH = pg.mkBrush(99, 102, 241, 55)
 SELECTION_PEN = pg.mkPen(129, 140, 248, 200, width=1)
 REVIEW_SPAN_BRUSH = pg.mkBrush(228, 228, 231, 26)  # the selected Review row, unframed
 # Label positions run along the line from the bottom (0) to the top (1) of the view.
-# Rmax sits high on the curve, so its label goes low; collapses are low, so theirs go high.
-TOP_LABEL = {"position": 0.97, "color": "#a1a1aa", "anchors": [(0, 0), (0, 0)]}
-# Neighbouring collapse labels alternate between two heights so they never overlap.
-LOWER_TOP_LABEL = {**TOP_LABEL, "position": 0.88}
+# Rmax sits high on the curve, so its label goes low.
 BOTTOM_LABEL = {"position": 0.03, "color": "#c7d2fe", "anchors": [(0, 1), (0, 1)]}
 
 
@@ -83,8 +77,6 @@ class ChartOverlays:
         self.review_span.hide()
         plot_item.addItem(self.review_span, ignoreBounds=True)
 
-        self._cycle_lines: list[pg.InfiniteLine] = []
-
     # -- cursor ---------------------------------------------------------- #
 
     def set_cursor(self, frame_1based: float | None) -> None:
@@ -117,24 +109,6 @@ class ChartOverlays:
         band = tuple(self.rmax_band.getRegion()) if self.rmax_band.isVisible() else None
         return float(self.rmax_line.value()), band
 
-    # -- collapse cycles -------------------------------------------------- #
-
-    def set_cycles(self, frames_1based: Iterable[float]) -> None:
-        for line in self._cycle_lines:
-            self._plot.removeItem(line)
-        self._cycle_lines = []
-        for k, x in enumerate(frames_1based, start=1):
-            line = pg.InfiniteLine(
-                pos=float(x), angle=90, movable=False, pen=CYCLE_PEN,
-                label=f"C{k}", labelOpts=TOP_LABEL if k % 2 else LOWER_TOP_LABEL,
-            )
-            line.setZValue(-6)
-            self._plot.addItem(line, ignoreBounds=True)
-            self._cycle_lines.append(line)
-
-    def cycle_positions(self) -> list[float]:
-        return [float(line.value()) for line in self._cycle_lines]
-
     # -- range selection --------------------------------------------------- #
 
     def show_selection(self, x0: float, x1: float) -> None:
@@ -157,6 +131,5 @@ class ChartOverlays:
     def clear(self) -> None:
         self.set_cursor(None)
         self.set_rmax(None)
-        self.set_cycles(())
         self.hide_selection()
         self.set_review_span(None)

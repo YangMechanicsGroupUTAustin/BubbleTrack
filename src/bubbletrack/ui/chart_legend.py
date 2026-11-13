@@ -20,7 +20,6 @@ BUTTON_HEIGHT = 24
 _KEY_STYLE = "background: transparent; color:#a1a1aa; font-size:11px;"
 # The app's segment buttons are 30 px tall (min-height + padding); these are compact.
 _BUTTON_STYLE = "QPushButton#segmentBtn { min-height: 18px; padding: 1px 12px; }"
-COLLAPSE_KEY = "C1, C2 = collapses"
 RAMP_WIDTH = 64
 # What the marker colours mean: Auto's confidence, or (classic methods) the fit quality.
 CONFIDENCE, FIT_QUALITY = "confidence", "fit quality"
@@ -32,7 +31,7 @@ _RAMP_TIPS = {
 }
 # Which key hides first when the row is too narrow: the highest number; the
 # colour scale goes last.
-_DROP_COLLAPSES, _DROP_COMPUTED, _DROP_MANUAL, _DROP_RAMP = 4, 3, 2, 1
+_DROP_COMPUTED, _DROP_MANUAL, _DROP_RAMP = 3, 2, 1
 RAMP_KEY = "colour scale"
 
 
@@ -160,8 +159,6 @@ def _marker_keys(keys: KeyRow) -> None:
     keys.add_key(_key_label(glyph.format(manual_glyph, manual),
                             "Diamonds: results you fixed, accepted or locked"),
                  _DROP_MANUAL, f"{manual_glyph} {manual}")
-    keys.add_key(_key_label(COLLAPSE_KEY, "Dashed lines C1, C2, ...: the bubble collapses"),
-                 _DROP_COLLAPSES, COLLAPSE_KEY)
 
 
 def build_legend_row() -> LegendRow:
