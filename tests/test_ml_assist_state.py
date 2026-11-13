@@ -324,3 +324,18 @@ def test_ml_results_are_one_review_category_whatever_else_is_flagged():
 def test_ml_source_is_exported_by_name_and_drawn_as_a_computed_dot():
     assert FitSource.ML == 7 and FIT_SOURCE_NAMES[FitSource.ML] == "ML"
     assert list(marker_symbols(np.array([FitSource.ML, FitSource.MANUAL]), None, 2)) == ["o", "d"]
+
+
+def test_hint_when_auto_accepts_hardly_any_frame():
+    """lic_hard/05-like: 7 of 256 frames accepted, all bunched, no gap inside them."""
+    from bubbletrack.model.state import AppState
+
+    state = AppState().with_results_initialized(256)
+    state.radius[21:28] = 20.0
+    found = M.failures(state, range(256))
+    assert found.missing == 0 and found.accepted == 7 and found.run == 256
+    assert found.few_accepted and found.worth_a_hint()
+    state.radius[:] = 20.0  # a good run: no hint
+    assert not M.failures(state, range(256)).worth_a_hint()
+    short = AppState().with_results_initialized(30)  # short runs never count as "few accepted"
+    assert not M.failures(short, range(30)).few_accepted

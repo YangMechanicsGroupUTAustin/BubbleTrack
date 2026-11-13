@@ -255,12 +255,16 @@ class MLAssistController:
             return
         missing = failures(state, info.get("frames", ()))
         if missing.worth_a_hint():
-            pct = round(100 * missing.share)
-            self.hint.show_text(f"{missing.missing} frames ({pct}%) inside the bubble's lifetime "
-                                "have no result. ML assist can help: teach it on a few frames.")
+            if missing.few_accepted:
+                text = f"Auto accepted only {missing.accepted} of {missing.run} frames."
+                short = f"only {missing.accepted} of {missing.run} frames accepted"
+            else:
+                pct = round(100 * missing.share)
+                text = f"{missing.missing} frames ({pct}%) inside the bubble's lifetime have no result."
+                short = f"{pct}% without a result"
+            self.hint.show_text(f"{text} ML assist can help: confirm a few frames and teach it.")
             header = self.w.header
-            header.set_status(f"{header.status_text()} — {pct}% without a result: try ML assist",
-                              _WARN)
+            header.set_status(f"{header.status_text()} — {short}: try ML assist", _WARN)
 
     def _on_results_changed(self) -> None:
         self.teach.on_results_changed()

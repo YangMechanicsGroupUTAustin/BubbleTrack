@@ -22,7 +22,10 @@ from bubbletrack.model.teach.examples import BACKGROUND, BUBBLE, LABELS, MLExamp
 
 SUGGESTED_FRAMES = 2  # the study: two verified frames of different sizes teach best
 HINT_SHARE = 0.2  # suggest ML assist when this share of the bubble's frames has no result ...
-HINT_MIN_FRAMES = 10  # ... and at least this many of them
+HINT_MIN_FRAMES = 10  # ... and at least this many of them,
+HINT_FEW_ACCEPTED = 0.1  # or when Auto accepted less than this share of a run's frames
+HINT_FEW_MIN_RUN = 50  # (runs of at least this many frames).  lic_hard/05: 7 of 256 accepted,
+# all bunched together, so its "lifetime" holds no gap, yet 30 of 31 labelled bubbles failed.
 BRUSH_FRACTION = 0.12  # default brush radius, relative to the typical bubble radius
 BRUSH_RANGE = (2, 40)  # px
 DEFAULT_BUBBLE_RADIUS = 30.0  # px, before anything is fitted
@@ -197,15 +200,24 @@ class Failures:
     """Frames with no result between the first and the last frame with one."""
     span: int
     """Frames between them (user-decided ones left out)."""
+    accepted: int = 0
+    """Frames of the run with a result (user-decided ones left out)."""
+    run: int = 0
+    """Frames of the run (user-decided ones left out)."""
 
     @property
     def share(self) -> float:
         return self.missing / self.span if self.span else 0.0
 
+    @property
+    def few_accepted(self) -> bool:
+        """Auto accepted hardly any frame of a long run."""
+        return self.run >= HINT_FEW_MIN_RUN and self.accepted < HINT_FEW_ACCEPTED * self.run
+
     def worth_a_hint(self, share: float | None = None, min_frames: int | None = None) -> bool:
         share = HINT_SHARE if share is None else share
         min_frames = HINT_MIN_FRAMES if min_frames is None else min_frames
-        return self.missing >= min_frames and self.share >= share
+        return (self.missing >= min_frames and self.share >= share) or self.few_accepted
 
 
 def failures(state, frames: Iterable[int]) -> Failures:
@@ -218,12 +230,15 @@ def failures(state, frames: Iterable[int]) -> Failures:
     if state.radius is None:
         return Failures(0, 0)
     order = sorted(int(i) for i in frames)
+    skip = protected_frames(state)
+    run = [i for i in order if i not in skip]
+    accepted = sum(1 for i in run if state.radius[i] > 0)
     fitted = [i for i in order if state.radius[i] > 0]
     if not fitted:
-        return Failures(0, 0)
-    skip = protected_frames(state)
+        return Failures(0, 0, 0, len(run))
     inside = [i for i in order if fitted[0] <= i <= fitted[-1] and i not in skip]
-    return Failures(sum(1 for i in inside if not state.radius[i] > 0), len(inside))
+    return Failures(sum(1 for i in inside if not state.radius[i] > 0), len(inside),
+                    accepted, len(run))
 
 
 def run_counts(state, frames: Iterable[int]) -> dict[str, int]:
