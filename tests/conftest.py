@@ -20,6 +20,28 @@ import pytest
 from _golden_cases import SceneSpec, render_scene
 
 
+REPO = Path(__file__).resolve().parents[1]
+_DATA_DIRS = tuple(REPO / name for name in ("test_data", "example_1"))
+
+
+@pytest.fixture(autouse=True)
+def _no_autosave_into_data(tmp_path, monkeypatch):
+    """Fit All autosaves next to its source; never let a test write into the
+    repository's real data folders (redirected into the test's tmp dir)."""
+    from bubbletrack.controller.auto_controller import AutoController
+
+    original = AutoController._autosave_path
+
+    def guarded(self):
+        path = original(self)
+        if path is not None and any(Path(path).resolve().is_relative_to(d.resolve())
+                                    for d in _DATA_DIRS):
+            return tmp_path / Path(path).name
+        return path
+
+    monkeypatch.setattr(AutoController, "_autosave_path", guarded)
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PyQt6.QtWidgets import QApplication
