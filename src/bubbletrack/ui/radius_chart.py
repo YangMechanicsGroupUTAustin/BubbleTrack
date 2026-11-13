@@ -1,6 +1,7 @@
 """Interactive R(t) chart (pyqtgraph): marker SHAPE = computed or decided by
 the user, COLOUR = score (red -> green); current-frame cursor,
 Rmax window + t = 0, collapse lines, Shift+drag range selection with a menu.
+The view never leaves the data (``chart_view``).
 Frame arguments are 0-based unless named ``_1based`` (the x axis is 1-based).
 """
 
@@ -12,48 +13,42 @@ from contextlib import contextmanager
 import numpy as np
 import pyqtgraph as pg
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import (
-    QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
-)
+from PyQt6.QtWidgets import QMenu, QVBoxLayout, QWidget
 
 from bubbletrack.ui import chart_style as cs
 from bubbletrack.ui.chart_interaction import (
-    HOVER_TOLERANCE, ChartViewBox, build_point_menu, build_range_menu, hover_text,
-    nearest_point,
+    HOVER_TOLERANCE, ChartViewBox, build_point_menu, build_range_menu, build_view_menu,
+    hover_text, make_hover_label, nearest_point,
 )
+from bubbletrack.ui.chart_legend import build_legend_row
 from bubbletrack.ui.chart_overlays import ChartOverlays, frames_in_span
+from bubbletrack.ui.chart_view import ChartNavigator
 
-
-def _chart_button(text: str, tip: str) -> QPushButton:
-    btn = QPushButton(text)
-    btn.setObjectName("segmentBtn")
-    btn.setProperty("segment", "single")
-    btn.setFixedHeight(28)
-    btn.setToolTip(tip)
-    return btn
+CHART_MIN_HEIGHT = 260  # px: tall enough to read R(t) on a 1280x800 screen
 
 
 class RadiusChart(QWidget):
     """Scatter plot of bubble radius vs frame number.
 
     Signals (frame indices are 0-based):
-        point_clicked(int), delete_requested(int), refit_requested(int),
-        neighbor_refit_requested(int): single-frame actions, as before.
+        point_clicked(int): a point was clicked.
+        fix_requested(int): "Fix frame N…" from a point's menu.
         range_selected(int, int): a frame range was brushed (inclusive).
-        delete_range_requested / refit_range_requested /
-        lock_range_requested / unlock_range_requested /
-        no_bubble_range_requested(int, int): chosen
-        from the selection's menu.
+        refit_range_requested / lock_range_requested / unlock_range_requested /
+        no_bubble_range_requested(int, int): chosen from the selection's menu.
         data_changed(): emitted after :meth:`plot_all` (results changed).
+        delete_requested(int), refit_requested(int), neighbor_refit_requested(int),
+        delete_range_requested(int, int): no longer emitted by the menus
+        (kept until the controller's wiring is updated).
     """
 
     point_clicked = pyqtSignal(int)
-    delete_requested = pyqtSignal(int)
-    refit_requested = pyqtSignal(int)
-    neighbor_refit_requested = pyqtSignal(int)
+    fix_requested = pyqtSignal(int)
+    delete_requested = pyqtSignal(int)  # unused
+    refit_requested = pyqtSignal(int)  # unused
+    neighbor_refit_requested = pyqtSignal(int)  # unused
     range_selected = pyqtSignal(int, int)
-    delete_range_requested = pyqtSignal(int, int)
+    delete_range_requested = pyqtSignal(int, int)  # unused
     refit_range_requested = pyqtSignal(int, int)
     lock_range_requested = pyqtSignal(int, int)
     unlock_range_requested = pyqtSignal(int, int)
@@ -62,21 +57,14 @@ class RadiusChart(QWidget):
 
     def __init__(self, parent: QWidget | None = None):
         super().__init__(parent)
-        self.setMinimumHeight(150)
+        self.setMinimumHeight(CHART_MIN_HEIGHT)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(2)
 
         self._plot = pg.PlotWidget(viewBox=ChartViewBox(self))
-        self._plot.setBackground(cs.SURFACE_COLOUR)
-        self._plot.setLabel("left", "Radius (px)")
-        self._plot.setLabel("bottom", "Frame")
-        self._plot.showGrid(x=True, y=True, alpha=0.15)
-        for axis_name in ("left", "bottom"):
-            axis = self._plot.getAxis(axis_name)
-            axis.setPen(pg.mkPen(255, 255, 255, 15))
-            axis.setTextPen(pg.mkPen("#71717a"))
+        cs.style_plot(self._plot)
         item = self._plot.plotItem
         self._overlays = ChartOverlays(item)
 
@@ -92,15 +80,16 @@ class RadiusChart(QWidget):
         for layer in (self._raw_series, self._solved_series, self._scatter, self._highlight):
             item.addItem(layer)
 
-        self._hover_label = pg.TextItem(color="#e4e4e7", anchor=(0, 1), fill=pg.mkBrush(12, 13, 18, 220))
-        self._hover_label.setFont(QFont("Segoe UI", 9))
-        self._hover_label.setZValue(50)
-        self._hover_label.hide()
+        self._hover_label = make_hover_label()
         item.addItem(self._hover_label, ignoreBounds=True)
         self._plot.scene().sigMouseMoved.connect(self._on_mouse_moved)
         self._plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         layout.addWidget(self._plot, 1)
-        layout.addLayout(self._build_legend())
+        legend = build_legend_row()
+        self._legend_shapes, self._score_name = legend.shapes, legend.score_name
+        self._select_btn, self._reset_btn = legend.select_btn, legend.reset_btn
+        self._reset_btn.clicked.connect(self.reset_zoom)
+        layout.addLayout(legend.layout)
 
         self._total_frames = 0
         self._frame_labels: tuple[str, ...] = ()
@@ -108,48 +97,8 @@ class RadiusChart(QWidget):
         self._selection: tuple[int, int] | None = None
         self._review_span: tuple[int, int] | None = None
         self._current: int | None = None  # 1-based frame under the cursor
+        self._nav = ChartNavigator(item.vb)
         self._set_points(np.array([]), np.array([]))
-
-    def _build_legend(self) -> QHBoxLayout:
-        """Bottom row: shape key, colour ramp, then the chart's buttons."""
-        row = QHBoxLayout()
-        row.setContentsMargins(8, 0, 0, 0)
-        row.setSpacing(10)
-        self._legend_shapes = QLabel(cs.shape_legend_html())
-        self._score_name = QLabel("fit quality: poor")
-        bar = QLabel()
-        bar.setFixedSize(90, 9)
-        bar.setStyleSheet(f"background: {cs.ramp_gradient_css()}; border-radius: 4px;")
-        good = QLabel("good")
-        for lbl in (self._legend_shapes, self._score_name, good):
-            lbl.setStyleSheet("background: transparent; color:#a1a1aa; font-size:11px;")
-        # The keys may be clipped on narrow windows rather than widen them
-        # (the shape key goes first); only the buttons set a minimum width.
-        self._legend_shapes.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        keys = QWidget()
-        keys.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        keys_row = QHBoxLayout(keys)
-        keys_row.setContentsMargins(0, 0, 0, 0)
-        keys_row.setSpacing(10)
-        keys_row.addWidget(self._legend_shapes, 1)
-        keys_row.addWidget(self._score_name)
-        keys_row.addWidget(bar)
-        keys_row.addWidget(good)
-        row.addWidget(keys, 1)
-        row.addSpacing(12)
-        self._select_btn = _chart_button(
-            "Select range",
-            "Drag across the chart to select frames (Shift+drag works any time).\n"
-            "Right-click the selection to delete, refit or lock those frames.",
-        )
-        self._select_btn.setCheckable(True)
-        self._reset_btn = _chart_button(
-            "Reset Zoom", "Show all frames (double-click the chart does the same)",
-        )
-        self._reset_btn.clicked.connect(self._reset_zoom)
-        row.addWidget(self._select_btn)
-        row.addWidget(self._reset_btn)
-        return row
 
     def plot_all(self, frames: np.ndarray, radii: np.ndarray,
                  quality_scores: np.ndarray | None = None, *,
@@ -186,13 +135,14 @@ class RadiusChart(QWidget):
         if n == 0:
             self._scatter.setData([], [])
             self._highlight.setData([], [])
-            return
-        symbols = cs.marker_symbols(sources, locked, n)
-        self._scatter.setData(
-            x=self._frames, y=self._radii, symbol=symbols, size=cs.marker_sizes(symbols),
-            brush=cs.score_brushes(self._quality_scores, n),
-        )
-        self._refresh_highlight()
+        else:
+            symbols = cs.marker_symbols(sources, locked, n)
+            self._scatter.setData(
+                x=self._frames, y=self._radii, symbol=symbols, size=cs.marker_sizes(symbols),
+                brush=cs.score_brushes(self._quality_scores, n),
+            )
+            self._refresh_highlight()
+        self._update_view()
 
     def plot_series(self, frames: np.ndarray, raw: np.ndarray | None,
                     solved: np.ndarray | None) -> None:
@@ -216,6 +166,17 @@ class RadiusChart(QWidget):
             self._solved_series.setData([], [])
         else:
             self._solved_series.setData(frames, clean(solved))
+        self._update_view()
+
+    def _update_view(self) -> None:
+        """Give the view every plotted point (markers and series): its y limit."""
+        xs, ys = [self._frames], [self._radii]
+        for layer in (self._raw_series, self._solved_series):
+            x, y = layer.getData()
+            if x is not None and y is not None:
+                xs.append(np.asarray(x, dtype=float))
+                ys.append(np.asarray(y, dtype=float))
+        self._nav.set_data(np.concatenate(xs), np.concatenate(ys))
 
     def clear_series(self) -> None:
         self.plot_series(np.array([]), None, None)
@@ -229,10 +190,9 @@ class RadiusChart(QWidget):
         self._score_name.setText(f"{name}: poor")
 
     def set_total_frames(self, n: int) -> None:
-        """Fix the x-axis range to [1, n]."""
+        """Limit the x axis to frames 1..n and show them all."""
         self._total_frames = n
-        if n > 0:
-            self._plot.setXRange(0.5, n + 0.5, padding=0)
+        self._nav.set_total_frames(n)
 
     def clear(self) -> None:
         """Remove all data points and annotations from the chart."""
@@ -339,7 +299,7 @@ class RadiusChart(QWidget):
         self.range_selected.emit(*self._selection)
 
     def set_editing_enabled(self, enabled: bool) -> None:
-        """Enable/disable the delete/refit/lock menus (off while a fit runs)."""
+        """Enable/disable the fix/refit/lock menus (off while a fit runs)."""
         self._editing_enabled = enabled
 
     def _find_nearest_point(self, x: float, y: float, tol: float | None = None) -> int | None:
@@ -373,7 +333,7 @@ class RadiusChart(QWidget):
             self._selection[0] + 0.5 <= x <= self._selection[1] + 1.5
 
     def _context_menu_at(self, x: float, y: float) -> QMenu | None:
-        """The edit menu for a right-click at view (x, y); None = default menu."""
+        """The edit menu for a right-click at view (x, y); None = the view menu."""
         if not self._editing_enabled:
             return None
         if self._in_selection(x):
@@ -381,11 +341,26 @@ class RadiusChart(QWidget):
         frame_idx = self._frame_at(x, y)
         return None if frame_idx is None else build_point_menu(self, frame_idx)
 
-    def _reset_zoom(self) -> None:
-        """Reset axes to auto-range (with the fixed frame range when set)."""
-        self._plot.enableAutoRange()
-        if self._total_frames > 0:
-            self._plot.setXRange(0.5, self._total_frames + 0.5, padding=0)
+    def reset_zoom(self) -> None:
+        """The full view: every frame, radius from 0 to the largest one."""
+        self._nav.reset()
+
+    _reset_zoom = reset_zoom  # double-click and older callers
+
+    @property
+    def y_follows_data(self) -> bool:
+        """True while the radius axis follows the visible frames (not zoomed by hand)."""
+        return self._nav.y_follows
+
+    @property
+    def min_x_span(self) -> float:
+        return self._nav.limits.min_x_span
+
+    def _release_y(self) -> None:
+        self._nav.release_y()
+
+    def _view_menu(self) -> QMenu:
+        return build_view_menu(self)
 
     def _on_mouse_moved(self, pos) -> None:
         """Show frame, file number, radius, score and provenance on hover."""

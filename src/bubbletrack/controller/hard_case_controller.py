@@ -100,7 +100,7 @@ class HardCaseController:
         return CaseRequest(
             start=values.start, end=values.end, note=values.note, reporter=values.reporter,
             reference_index=self._reference_index() if edge else None,
-            tracking=edge and self.w.left_panel.pretune_tab.edge_box.tracking_enabled(),
+            tracking=edge and self.w.left_panel.measure_panel.edge_box.tracking_enabled(),
             max_radius=self._app._get_max_radius(),
         )
 

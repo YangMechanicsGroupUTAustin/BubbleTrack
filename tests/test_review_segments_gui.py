@@ -202,7 +202,8 @@ class TestMovingOn:
         state = _flag(controller, rc, low=(2, 3, 5))
         rc.panel.step(1)
         controller.file_ctrl.on_frame_changed(4)
-        rc.perform("fix")  # outside the Auto engine: edge points
+        rc.perform("fix")
+        rc.fix.strip._points_btn.click()  # "Click edge points instead"
         assert rc.fix.active and window.original_panel.mode == "point"
         _points(controller)
         rc.fix.strip._done_btn.click()

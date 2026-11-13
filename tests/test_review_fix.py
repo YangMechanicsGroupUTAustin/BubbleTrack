@@ -14,6 +14,7 @@ from bubbletrack.controller import (
     circle_controller, fix_mode, manual_controller, review_actions, review_controller,
 )
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.state import update_state
 from bubbletrack.ui.circle_tool import TOOL_POINTS
 
 N_FRAMES = 8
@@ -24,6 +25,7 @@ def app(gui, make_sequence):
     """Eight fitted frames (intensity mode: Fix clicks edge points); 2 and 5 flagged."""
     window, controller = gui
     controller.file_ctrl.on_folder_selected(str(make_sequence("A", N_FRAMES)))
+    controller._state = update_state(controller._get_state(), detection_mode="intensity")
     state = controller._get_state()
     state.radius[:] = np.linspace(30.0, 40.0, N_FRAMES)
     state.circle_fit_par[:] = [[125.0, 200.0]] * N_FRAMES
@@ -174,6 +176,11 @@ class TestStartFix:
         rc.fix.finish_points()
         assert controller._get_state().fit_source[7] == FitSource.MANUAL
         assert controller._get_state().image_no == 7  # not in the queue: no move
+
+    def test_the_charts_fix_frame_entry_starts_it(self, app):
+        window, controller, rc = app
+        window.radius_chart.fix_requested.emit(6)  # a point's "Fix frame 7..."
+        assert rc.fix.active and rc.fix.frame == 6 and controller._get_state().image_no == 6
 
     def test_it_opens_a_closed_dock(self, qapp, app):
         window, controller, rc = app

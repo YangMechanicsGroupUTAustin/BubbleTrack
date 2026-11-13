@@ -16,6 +16,7 @@ import pytest
 from bubbletrack.controller import worker as worker_module
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.session import load_session
 from bubbletrack.model.state import update_state
 
 
@@ -89,27 +90,28 @@ def _wait(qapp, predicate, timeout_s=60.0):
 
 # -- UI ---------------------------------------------------------------------------------
 
-class TestPretuneTab:
+class TestMeasurePanel:
     def test_offers_edge_method_and_round_trips(self, qapp):
-        from bubbletrack.ui.pretune_tab import PreTuneTab
+        from bubbletrack.ui.measure_panel import MeasurePanel
 
-        tab = PreTuneTab()
+        tab = MeasurePanel()
         tab.set_filter_params({"detection_mode": "edge", "edge_definition": "outer",
                                "edge_polarity": "bright"})
         params = tab.get_filter_params()
         assert params["detection_mode"] == "edge"
-        assert params["edge_definition"] == "outer"
+        assert params["edge_definition"] == "steep"  # no longer offered: always 50 %
         assert params["edge_polarity"] == "bright"
 
-    def test_threshold_controls_disabled_in_edge_mode(self, qapp):
-        from bubbletrack.ui.pretune_tab import PreTuneTab
+    def test_threshold_controls_hidden_in_edge_mode(self, qapp):
+        from bubbletrack.ui.measure_panel import MeasurePanel
 
-        tab = PreTuneTab()
+        tab = MeasurePanel()
+        tab.set_classic_methods_visible(True)
         tab.set_filter_params({"detection_mode": "edge"})
-        assert not tab._threshold.isEnabled()
-        assert not tab._removing_factor.isEnabled()
+        assert not tab.classic_section.isVisibleTo(tab)
         tab.set_filter_params({"detection_mode": "intensity"})
-        assert tab._threshold.isEnabled()
+        assert tab.classic_section.isVisibleTo(tab)
+        assert tab.classic._threshold.isEnabled()
 
 
 # -- single-frame paths -------------------------------------------------------------------
@@ -188,7 +190,7 @@ def test_fit_all_edge_mode(qapp, gui, make_sequence, fake_engine):
     _load(controller, make_sequence("A", 8))
     _edge_mode(controller)
     controller.auto_ctrl.on_auto_fit()
-    _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
     state = controller._get_state()
     assert (state.radius == 40.0).all(), _status(window)
     np.testing.assert_allclose(state.fit_confidence, 0.9)
@@ -221,9 +223,11 @@ def test_session_round_trip_edge_fields(gui, make_sequence, tmp_path):
     assert controller.save_session_file(str(path))
     _load(controller, make_sequence("B", 2))
     assert controller.load_session_file(str(path))
+    assert load_session(str(path))["edge_definition"] == "outer"  # the file keeps it
     state = controller._get_state()
     assert state.detection_mode == "edge"
-    assert (state.edge_definition, state.edge_polarity) == ("outer", "bright")
+    # The app no longer offers "outer": a restored session measures at the 50 % edge.
+    assert (state.edge_definition, state.edge_polarity) == ("steep", "bright")
     assert state.reference_frame == 1
     assert state.edge_seed == (100.0, 150.0)
     np.testing.assert_allclose(state.fit_confidence, [0.1, 0.2, np.nan, 0.4])

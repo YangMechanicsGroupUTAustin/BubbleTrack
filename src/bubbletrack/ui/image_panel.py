@@ -4,19 +4,16 @@ from __future__ import annotations
 
 import numpy as np
 from PyQt6.QtCore import Qt, pyqtSignal, QRectF
-from PyQt6.QtGui import (
-    QBrush, QColor, QImage, QMouseEvent, QPainterPath, QPen, QPixmap,
-    QResizeEvent, QWheelEvent,
-)
+from PyQt6.QtGui import QImage, QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
 from PyQt6.QtWidgets import (
-    QGraphicsPathItem, QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
+    QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
     QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
 )
 
-from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.ui.brush_stroke import BrushStroke
-from bubbletrack.ui.circle_drag import CircleDrag, dashed_pen
+from bubbletrack.ui.circle_drag import CircleDrag
 from bubbletrack.ui.contour_shape import is_ordered_contour  # noqa: F401 (public here too)
+from bubbletrack.ui.image_overlays import OverlayDrawingMixin
 
 _VIEW_STYLE = {
     "normal": "border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;",
@@ -27,20 +24,15 @@ _VIEW_STYLE = {
 }
 
 
-def _cosmetic_pen(colour: str, width: float) -> QPen:
-    """A pen whose width is in screen pixels, so overlays stay visible at any zoom."""
-    pen = QPen(QColor(colour), width)
-    pen.setCosmetic(True)
-    return pen
-
-
-class ImagePanel(QWidget):
+class ImagePanel(OverlayDrawingMixin, QWidget):
     """Image viewer with zoom controls and overlay items.
 
     The zoom and pan survive frame changes: a new image of the same size
     keeps the current view; the view is refitted only for a new image size
     or after :meth:`reset_zoom`.  Until the user zooms, the image follows
-    the panel size.
+    the panel size.  Overlays are drawn with the ``draw_*`` methods of
+    :class:`~bubbletrack.ui.image_overlays.OverlayDrawingMixin`, which also
+    keep the colour key in the top-left corner of the image up to date.
 
     Signals
     -------
@@ -80,7 +72,7 @@ class ImagePanel(QWidget):
         layout.addWidget(self._view)
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
-        self._overlay_items: list = []
+        self._init_overlays()
         self._mode = "normal"  # "normal" | "point" | "circle" | "paint" | "roi"
         self.circle_drag = CircleDrag(self._scene)
         self.brush = BrushStroke(self._scene)
@@ -165,93 +157,6 @@ class ImagePanel(QWidget):
             self._scene.setSceneRect(QRectF(0, 0, w, h))
             self._auto_fit = True
             self._fit()
-
-    def draw_circle(self, row_c: float, col_c: float, radius: float,
-                    colour: str = "#6366f1", width: float = 2.0, *, dashed: bool = False):
-        """Draw a circle overlay. Coordinates are (row, col) = (y, x)."""
-        item = self._scene.addEllipse(
-            col_c - radius, row_c - radius, 2 * radius, 2 * radius,
-            dashed_pen(colour, width) if dashed else _cosmetic_pen(colour, width),
-        )
-        self._overlay_items.append(item)
-
-    def draw_points(self, points: np.ndarray, colour: str = "#EF4444", size: float = 3.0):
-        """Draw scatter points. *points* is (N, 2) ``[row, col]``.
-
-        All points form one path item, so thousands of edge points stay cheap.
-        """
-        pts = np.asarray(points, dtype=float).reshape(-1, 2)
-        if len(pts) == 0:
-            return
-        path = QPainterPath()
-        half = size / 2
-        for r, c in pts:
-            path.addEllipse(c - half, r - half, size, size)
-        self._add_path(path, QPen(Qt.PenStyle.NoPen), QBrush(QColor(colour)))
-
-    def draw_contour(self, points: np.ndarray, colour: str = "#ef4444",
-                     width: float = 1.5, closed: bool = True, *, dashed: bool = False) -> None:
-        """Draw *points* (N, 2) ``[row, col]`` as a connected polyline."""
-        pts = np.asarray(points, dtype=float).reshape(-1, 2)
-        if len(pts) < 2:
-            return
-        path = QPainterPath()
-        path.moveTo(pts[0, 1], pts[0, 0])
-        for r, c in pts[1:]:
-            path.lineTo(c, r)
-        if closed:
-            path.closeSubpath()
-        pen = dashed_pen(colour, width) if dashed else _cosmetic_pen(colour, width)
-        self._add_path(path, pen, QBrush(Qt.BrushStyle.NoBrush))
-
-    def draw_fit_outline(self, points: np.ndarray | None, colour: str = "#ef4444") -> None:
-        """Draw a fit's boundary: a closed polyline for an ordered contour,
-        otherwise the individual edge points."""
-        if points is None or len(points) == 0:
-            return
-        if is_ordered_contour(points):
-            self.draw_contour(points, colour)
-        else:
-            self.draw_points(points, colour, 2.0)
-
-    def _add_path(self, path: QPainterPath, pen: QPen, brush: QBrush) -> None:
-        item = QGraphicsPathItem(path)
-        item.setPen(pen)
-        item.setBrush(brush)
-        self._scene.addItem(item)
-        self._overlay_items.append(item)
-
-    def draw_rgba_overlay(self, rgba: np.ndarray) -> None:
-        """Lay an (H, W, 4) uint8 image over the frame (scene pixel = array pixel)."""
-        img = np.ascontiguousarray(rgba, dtype=np.uint8)
-        h, w = img.shape[:2]
-        qimg = QImage(img.tobytes(), w, h, 4 * w, QImage.Format.Format_RGBA8888)
-        item = self._scene.addPixmap(QPixmap.fromImage(qimg))
-        item.setZValue(1)
-        self._overlay_items.append(item)
-
-    def draw_roi_rect(self, gridx: tuple[int, int], gridy: tuple[int, int],
-                      colour: str = "#10b981"):
-        """Draw an ROI rectangle (1-indexed coords)."""
-        rs, cs = roi_to_slice(gridx, gridy)
-        r0, r1 = rs.start, rs.stop
-        c0, c1 = cs.start, cs.stop
-        item = self._scene.addRect(c0, r0, c1 - c0, r1 - r0, _cosmetic_pen(colour, 1.5))
-        self._overlay_items.append(item)
-
-    def clear_overlays(self):
-        for item in self._overlay_items:
-            self._scene.removeItem(item)
-        self._overlay_items.clear()
-        self.set_overlay_tip("")
-
-    def set_overlay_tip(self, text: str) -> None:
-        """Tooltip of the image area, describing an overlay (cleared with the overlays)."""
-        if self._view.toolTip() != text:
-            self._view.setToolTip(text)
-
-    def overlay_tip(self) -> str:
-        return self._view.toolTip()
 
     @property
     def mode(self) -> str:

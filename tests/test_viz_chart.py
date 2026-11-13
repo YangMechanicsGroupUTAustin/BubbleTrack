@@ -290,29 +290,30 @@ class TestRangeSelection:
         self._ready(chart)
         chart.set_selection(4, 8)
         seen = {}
-        names = ("delete_range_requested", "refit_range_requested", "lock_range_requested",
+        names = ("refit_range_requested", "lock_range_requested",
                  "unlock_range_requested", "no_bubble_range_requested")
         for name in names:
             getattr(chart, name).connect(lambda a, b, n=name: seen.setdefault(n, (a, b)))
         menu = chart._context_menu_at(6.0, 20.0)
         actions = [a for a in menu.actions() if not a.isSeparator()]
-        assert [a.text() for a in actions] == [
-            "Delete range (frames 5–9)", "Refit range (frames 5–9)",
+        assert [a.text() for a in actions] == [  # never "Delete": a curve with holes is useless
+            "Refit range (frames 5–9)",
             "Lock range (frames 5–9)", "Unlock range (frames 5–9)",
             "Mark as no bubble (frames 5–9)", "Clear selection"]
-        for action in actions[:5]:
+        for action in actions[:4]:
             action.trigger()
         assert seen == {n: (4, 8) for n in names}
-        actions[5].trigger()
+        actions[4].trigger()
         assert chart.selected_range() is None
 
     def test_point_menu_outside_selection(self, chart):
         self._ready(chart)
         frames, radii = _series(20)
         got = []
-        chart.refit_requested.connect(got.append)
+        chart.fix_requested.connect(got.append)
         menu = chart._context_menu_at(frames[11], radii[11])
-        [a for a in menu.actions() if a.text().startswith("Refit frame")][0].trigger()
+        assert [a.text() for a in menu.actions()] == ["Fix frame 12…"]
+        menu.actions()[0].trigger()
         assert got == [11]
 
     def test_no_edit_menus_while_a_fit_runs(self, chart):

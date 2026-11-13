@@ -209,7 +209,7 @@ class TestActions:
     def test_edits_outside_the_queue_refresh_it(self, review):
         window, controller, rc = review
         _flag(controller, rc, f2=0.1)
-        window.left_panel.automatic_tab.clear_clicked.emit()  # Clear wipes all results
+        controller.auto_ctrl.on_auto_clear()  # Clear All Results wipes everything
         assert rc.count == 0
 
     def test_session_load_rebuilds_the_queue(self, review, make_sequence, tmp_path):
@@ -235,7 +235,7 @@ class TestCardAndFeedback:
         assert card.recommended() == "accept"
         assert [b.text() for b in (card.buttons["accept"], card.buttons["fix"],
                                    card.buttons["no_bubble"])] == [
-            "Accept this frame", "Fix with edge points", "No bubble here"]
+            "Accept this frame", "Fix with a circle", "No bubble here"]
         assert card.advice.text() == ("Low confidence (0.20). "
                                       "Accept it if the outline sits on the bubble wall.")
         controller.file_ctrl.on_frame_changed(5)
@@ -262,8 +262,8 @@ class TestCardAndFeedback:
         rc.panel.feedback._undo.click()
         assert rc.panel.frames() == [1, 6] and _shown(controller) == 1
 
-    def test_progress_counts_down_then_all_done_offers_export(self, review, monkeypatch):
-        _, controller, rc = review
+    def test_progress_counts_down_then_all_done_offers_export(self, review):
+        window, controller, rc = review
         _flag(controller, rc, f2=0.1, f5=0.3)
         rc.panel.reset_progress()
         assert rc.panel._summary.text() == "2 frames to check"
@@ -276,7 +276,8 @@ class TestCardAndFeedback:
         assert page.text().startswith("All done") and page.offers_export()
         assert rc.panel.feedback.text().endswith("All done.")
         exported = []
-        monkeypatch.setattr(controller.export_ctrl, "on_export_rof_t", lambda: exported.append(1))
+        window.export_requested.disconnect()  # not the real (modal) Export Results dialog
+        window.export_requested.connect(lambda: exported.append(1))
         page._export.click()
         assert exported == [1]
 
@@ -301,7 +302,7 @@ class TestRunLock:
         controller.auto_ctrl.on_auto_fit()
         assert not rc.panel.isEnabled()
         deadline = time.monotonic() + 90
-        while not window.left_panel.automatic_tab._fit_btn.isEnabled():
+        while controller.auto_ctrl.is_busy():
             assert time.monotonic() < deadline, "Fit All did not finish"
             qapp.processEvents()
             time.sleep(0.01)
@@ -357,7 +358,8 @@ class TestKeys:
         _show(qapp, window)
         state = _flag(controller, rc, f2=0.1)
         rc.panel.step(1)
-        field = next(w for w in window.left_panel.pretune_tab.findChildren(widget_type)
+        window.left_panel.measure_panel.edge_box.advanced._toggle.click()  # its Bubble combo
+        field = next(w for w in window.findChildren(widget_type)
                      if w.isVisible() and w.isEnabled())
         field.setFocus()
         qapp.processEvents()

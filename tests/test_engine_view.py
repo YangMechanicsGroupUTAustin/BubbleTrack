@@ -54,6 +54,7 @@ def test_right_panel_shows_the_engine_view_in_auto_mode(auto_app):
     panel = window.binary_panel
     assert panel._title_label.text() == ENGINE_VIEW_TITLE
     assert panel._overlay_items == []  # not fitted yet: no outline
+    assert panel.legend_texts() == []  # and no colour key
 
 
 def test_outline_is_drawn_on_the_view_once_fitted(auto_app):
@@ -64,6 +65,22 @@ def test_outline_is_drawn_on_the_view_once_fitted(auto_app):
     edge_support.store_fit(state, 3, fit, FitSource.AUTO)
     _show(window, controller, 3)
     assert len(window.binary_panel._overlay_items) == 1
+    assert window.binary_panel.legend_texts() == ["outline (measured)"]
+    assert window.original_panel.legend_texts() == ["outline (measured)", "equal-area circle", "ROI"]
+
+
+def test_fit_current_frame_names_its_circle(auto_app):
+    window, controller = auto_app
+    controller.file_ctrl.on_frame_changed(3)
+    controller.pretune_ctrl.on_pretune_fit()
+    assert "equal-area circle" in window.original_panel.legend_texts()
+
+
+def test_overlay_view_names_its_mask_tint(auto_app):
+    window, controller = auto_app
+    window.compare_toolbar.set_mode(CompareMode.OVERLAY)
+    _show(window, controller, 3)
+    assert window.original_panel.legend_texts() == ["mask", "ROI"]
 
 
 def test_other_modes_keep_the_mask_title(auto_app):

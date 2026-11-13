@@ -160,7 +160,8 @@ class ReviewController:
         "Click edge points" outside the Auto engine).  Once a fix is stored,
         Review moves on as after Accept when the frame lies in the selected
         row.  False if no fix can start (no images, a run active, out of
-        range).  Wire ``RadiusChart.fix_requested`` ("Fix frame N...") here.
+        range).  ``install_review`` connects ``RadiusChart.fix_requested``
+        ("Fix frame N...") here.
         """
         state = self._state()
         if self._running:
@@ -272,10 +273,8 @@ class ReviewController:
         self._go(frame)
 
     def _export(self) -> None:
-        """'Export R(t)...' once everything is checked (the app's export)."""
-        export = getattr(getattr(self._app, "export_ctrl", None), "on_export_rof_t", None)
-        if export is not None:
-            export()
+        """'Export R(t)...' once everything is checked: the window's Export Results."""
+        self.w.export_requested.emit()
 
     # -- helpers ----------------------------------------------------------- #
 
@@ -389,4 +388,7 @@ def install_review(window, app_controller) -> ReviewController:
     toggle = dock.toggleViewAction()
     toggle.setText("&Review Queue")
     _view_menu(window).addAction(toggle)
-    return ReviewController(window, app_controller, panel, dock, strip)
+    review = ReviewController(window, app_controller, panel, dock, strip)
+    # The chart's "Fix frame N..." (a point's right-click menu) opens the same fix.
+    window.radius_chart.fix_requested.connect(review.start_fix)
+    return review

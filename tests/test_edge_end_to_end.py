@@ -38,7 +38,7 @@ def _fit_all_edge(qapp, window, controller, folder):
     controller.file_ctrl.on_folder_selected(str(folder))
     controller._state = update_state(controller._get_state(), detection_mode="edge")
     controller.auto_ctrl.on_auto_fit()
-    _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
     return controller._get_state()
 
 

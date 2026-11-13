@@ -74,6 +74,7 @@ def test_refit_that_fails_keeps_quiet(app, monkeypatch):
 
     monkeypatch.setattr(module, "detect_bubble_with_mode",
                         lambda *a, **k: (np.zeros((2, 2), bool), np.empty((0, 2))))
+    controller._state = update_state(controller._get_state(), detection_mode="intensity")
     controller._on_refit_point(2)
     assert events == []
 
@@ -97,7 +98,8 @@ def test_a_fix_from_the_queue_advances_to_the_next_item(app):
     rc.refresh()
     assert rc.panel.frames() == [2, 4, 6]
     controller.file_ctrl.on_frame_changed(4)
-    rc.perform("fix")  # outside the Auto engine: click edge points
+    rc.perform("fix")
+    rc.fix.strip.points_requested.emit()  # "Click edge points instead"
     _circle_clicks(controller)
     rc.fix.strip.done_clicked.emit()
     assert state.fit_source[4] == FitSource.MANUAL

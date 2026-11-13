@@ -1,4 +1,4 @@
-"""Marker encoding for the R(t) chart: shape = who decided, colour = score.
+"""Look of the R(t) chart: marker shape = who decided, colour = score; the plot style.
 
 Two shapes only: a dot for results the software computed (Fit All, refits,
 tracking) and a diamond for results the user decided (manual fits and locked
@@ -25,6 +25,7 @@ RAMP_STOPS: tuple[str, ...] = (
 RAMP_BINS = 32
 UNSCORED_COLOUR = "#a1a1aa"  # no score (area mode, or a live run)
 SURFACE_COLOUR = "#0c0d12"   # plot background, used as the marker outline
+AXIS_LABEL_STYLE = {"color": "#a1a1aa", "font-size": "11px"}  # small: the plot keeps the height
 
 # Computed results are dots; a result the user decided (a manual fit, or a
 # drawn circle while it counts as confirmed) gets the diamond.
@@ -112,6 +113,26 @@ def ramp_gradient_css() -> str:
         for i, c in enumerate(reversed(RAMP_STOPS))
     )
     return f"qlineargradient(x1:0, y1:0, x2:1, y2:0, {stops})"
+
+
+def style_plot(plot: pg.PlotWidget) -> None:
+    """Dark plot with compact axes, so the plot area gets the chart's height.
+
+    pyqtgraph's own context menu and auto-range button are off: they could
+    switch on log axes or transforms, and the view is managed by ``chart_view``.
+    """
+    plot.setBackground(SURFACE_COLOUR)
+    plot.showGrid(x=True, y=True, alpha=0.15)
+    plot.setMenuEnabled(False)
+    plot.hideButtons()
+    plot.plotItem.layout.setContentsMargins(2, 6, 10, 0)
+    for axis_name, label in (("left", "Radius (px)"), ("bottom", "Frame")):
+        axis = plot.getAxis(axis_name)
+        axis.setPen(pg.mkPen(255, 255, 255, 15))
+        axis.setTextPen(pg.mkPen("#71717a"))
+        axis.setStyle(tickTextOffset=4)
+        axis.label.document().setDocumentMargin(1)  # the label's text box, not 4 px of air
+        plot.setLabel(axis_name, label, **AXIS_LABEL_STYLE)  # sizes the axis for it
 
 
 def shape_legend_html() -> str:
