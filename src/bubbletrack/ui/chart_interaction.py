@@ -70,6 +70,7 @@ class ChartViewBox(pg.ViewBox):
                 menu = self._chart._view_menu()
             ev.accept()
             menu.exec(ev.screenPos().toPoint())
+            menu.deleteLater()  # one menu per right-click: do not pile them up on the chart
             return
         super().mouseClickEvent(ev)
 

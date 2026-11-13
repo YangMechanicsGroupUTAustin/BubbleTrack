@@ -44,7 +44,8 @@ def _shown(panel: ImagePanel) -> bool:
 class TestEntries:
     def test_known_colours_name_what_they_are(self):
         assert ol.default_text(ol.OUTLINE_COLOUR, "line") == "outline (measured)"
-        assert ol.default_text(ol.CIRCLE_COLOUR, "line") == "equal-area circle"
+        # The plain circle is named for what is true in every mode.
+        assert ol.default_text(ol.CIRCLE_COLOUR, "line") == "circle (radius R)"
         assert ol.default_text(ol.GUESS_COLOUR, "dash") == "Auto's guess (not accepted)"
         assert ol.default_text(ol.ROI_COLOUR, "box") == "ROI"
         assert ol.default_text("#123456", "line") is None
@@ -62,6 +63,8 @@ class TestEntries:
         assert ol.make_entry(GUESS_GAP_COLOUR, "line", None) is None  # the line under the guess
         guess = ol.make_entry(ol.GUESS_COLOUR, "dash", None)
         assert guess.under == ol.GUESS_UNDER_COLOUR and guess.kind == "dash"
+        with pytest.raises(ValueError):
+            ol.LegendEntry("x", "#ffffff", "wiggle")
 
 
 # -- the key on a panel -------------------------------------------------------------
@@ -77,7 +80,7 @@ class TestLegendOnPanel:
         panel.draw_fit_outline(_circle(120))
         panel.draw_circle(60, 80, 30)
         panel.draw_circle(60, 80, 31)  # same kind again: no second line
-        assert panel.legend_texts() == ["outline (measured)", "equal-area circle", "ROI"]
+        assert panel.legend_texts() == ["outline (measured)", "circle (radius R)", "ROI"]
         assert _shown(panel)
 
     def test_edge_points_and_explicit_text(self, panel):

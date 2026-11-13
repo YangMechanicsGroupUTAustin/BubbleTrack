@@ -33,7 +33,8 @@ KINDS = ("line", "dash", "dots", "box", "fill")
 _DEFAULT_TEXTS: dict[tuple[str, str], str] = {
     (OUTLINE_COLOUR, "line"): "outline (measured)",
     (OUTLINE_COLOUR, "dots"): "edge points",
-    (CIRCLE_COLOUR, "line"): "equal-area circle",
+    # True in every mode; callers that know the method say "equal-area" / "fitted".
+    (CIRCLE_COLOUR, "line"): "circle (radius R)",
     (GUESS_COLOUR, "dash"): "Auto's guess (not accepted)",
     (USER_CIRCLE_COLOUR, "dash"): "your circle (not stored)",
     (FOUND_COLOUR, "line"): "Auto found (not stored)",
@@ -64,6 +65,10 @@ class LegendEntry:
     colour: str
     kind: str = "line"  # one of KINDS
     under: str | None = None  # a wider dark line drawn below the sample (Auto's guess)
+
+    def __post_init__(self) -> None:
+        if self.kind not in KINDS:
+            raise ValueError(f"legend kind must be one of {KINDS}, not {self.kind!r}")
 
 
 def default_text(colour: str, kind: str) -> str | None:

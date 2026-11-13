@@ -69,6 +69,13 @@ def test_outline_is_drawn_on_the_view_once_fitted(auto_app):
     assert window.original_panel.legend_texts() == ["outline (measured)", "equal-area circle", "ROI"]
 
 
+def test_fit_current_frame_names_its_circle(auto_app):
+    window, controller = auto_app
+    controller.file_ctrl.on_frame_changed(3)
+    controller.pretune_ctrl.on_pretune_fit()
+    assert "equal-area circle" in window.original_panel.legend_texts()
+
+
 def test_overlay_view_names_its_mask_tint(auto_app):
     window, controller = auto_app
     window.compare_toolbar.set_mode(CompareMode.OVERLAY)
