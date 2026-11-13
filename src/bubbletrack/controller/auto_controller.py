@@ -14,13 +14,14 @@ from PyQt6.QtWidgets import QMessageBox
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame, refresh_chart
-from bubbletrack.controller.live_view import LiveFit, show_live_frame
+from bubbletrack.controller.live_view import show_live_frame
 from bubbletrack.controller.run_summary import RunOutcome, summary_line
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
+from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
 from bubbletrack.ui.wording import CONFIDENCE, plural
@@ -383,9 +384,9 @@ class AutoController(BaseController):
         if (idx + 1) % AUTOSAVE_INTERVAL == 0:
             self._write_autosave()
 
-        self._update_live_view(idx, radius, edge_xy, binary_roi, rc, cc, count)
+        self._update_live_view(idx, radius, binary_roi)
 
-    def _update_live_view(self, idx, radius, edge_xy, binary_roi, rc, cc, count) -> None:
+    def _update_live_view(self, idx: int, radius: float, binary_roi) -> None:
         # Throttle display updates so the UI thread can process user events
         now = time.monotonic()
         if now - self._auto_last_display < AUTO_DISPLAY_THROTTLE_MS / 1000.0:
@@ -397,7 +398,12 @@ class AutoController(BaseController):
         self.w.frame_scrubber.set_value(idx)
         self.w.frame_scrubber.blockSignals(False)
         self._update(image_no=idx)
-        show_live_frame(self.state, self.w, idx, LiveFit(radius, edge_xy, binary_roi, rc, cc, count))
+        self.w.status_bar.update_frame(frame_to_display(idx), self.state.total_frames)
+        show_live_frame(self.state, self.w, idx, binary_roi)
+        # The chart so far, without colours for speed (they come when the run ends).
+        if radius > 0 and self.state.radius is not None:
+            frames = np.arange(1, len(self.state.radius) + 1)
+            self.w.radius_chart.plot_all(frames, self.state.radius)
 
     def _autosave_path(self) -> Path | None:
         """Next to the images, or next to the video (one file per video)."""

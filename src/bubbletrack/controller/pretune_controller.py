@@ -219,7 +219,7 @@ class PretuneController(BaseController):
         if fit.radius > 0:
             self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1",
                                               legend=EQUAL_AREA_CIRCLE)
-            self.w.original_panel.draw_points(fit.edge_xy, "#ef4444", 2.0)
+            self.w.original_panel.draw_fit_outline(fit.edge_xy, "#ef4444")
         else:  # rejected: its guess, if any, dashed
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
         refresh_chart(self.state, self.w)
