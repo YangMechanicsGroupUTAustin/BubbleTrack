@@ -28,6 +28,7 @@ from bubbletrack.model.state import AppState, clear_frame_result, update_state
 from bubbletrack.ui.edge_options import STEEP_EDGE
 from bubbletrack.ui.measure_panel import AUTO_METHOD
 from bubbletrack.ui.shortcuts import setup_shortcuts
+from bubbletrack.ui.wording import plural
 
 logger = logging.getLogger(__name__)
 
@@ -362,7 +363,7 @@ class AppController:
         flags[frames] = locked
         self._refresh_chart()
         verb = "Locked" if locked else "Unlocked"
-        self.w.header.set_status(f"{verb} {len(frames)} frame(s)", "#10b981")
+        self.w.header.set_status(f"{verb} {plural(len(frames), 'frame')}", "#10b981")
         self.bus.emit(RESULTS_CHANGED)
 
     def _on_mark_no_bubble(self, start: int, end: int) -> None:
@@ -388,7 +389,7 @@ class AppController:
             display_frame(self._state, self.w, self._state.image_no,
                           self._set_state, self._image_cache)
         kept = len(frames) - len(targets)
-        text = f"Marked {len(targets)} frame(s) as no bubble"
+        text = f"Marked {plural(len(targets), 'frame')} as no bubble"
         self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
         self.bus.emit(RESULTS_CHANGED)
 

@@ -112,7 +112,7 @@ def test_file_menu_exports_the_chart_selection(app, dialogs):
     window.radius_chart.set_selection(2, 5)
     window.export_hard_case_action.trigger()
     assert dialogs["range"] == (2, 5)
-    assert "4 frame(s) + 5 neighbours" in dialogs["summary"]  # 2 before (clipped), 3 after
+    assert "4 frames + 5 neighbours" in dialogs["summary"]  # 2 before (clipped), 3 after
     assert "No frame here is fixed yet" in dialogs["summary"]
     assert dialogs["default"].endswith(".zip") and "shot_1_hardcase_f3-6_" in dialogs["default"]
     with open_bundle(dialogs["path"]) as bundle:
