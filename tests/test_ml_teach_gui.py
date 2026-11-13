@@ -251,6 +251,21 @@ def test_opening_shows_two_different_candidates_and_step_one(app):
     assert not panel.painting_open() and window.original_panel.mode == "normal"
 
 
+def test_cards_show_the_whole_frame_full_width_one_above_the_other(app, qapp):
+    # Owner: judge the outline on the full field of view, never a zoomed crop.
+    window, controller = app
+    controller.ml.open_teaching()
+    qapp.processEvents()
+    cards = [c for c in _panel(controller)._cards if not c.isHidden()]
+    assert len(cards) == 2
+    for card in cards:
+        pix = card.thumb.pixmap()
+        assert pix is not None and not pix.isNull()
+        assert pix.width() / pix.height() == pytest.approx(S.W / S.H, rel=0.02)  # the whole frame
+        assert pix.width() >= 250
+    assert cards[1].geometry().top() > cards[0].geometry().bottom()  # stacked, each full width
+
+
 def test_looks_wrong_replaces_the_candidate_and_never_offers_it_again(app):
     window, controller = app
     controller.ml.open_teaching()

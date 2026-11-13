@@ -44,7 +44,7 @@ QUESTION = "Is the red outline on the bubble wall?"
 PAINT_TITLE = "Paint examples by hand (optional)"
 PAINT_HELP = ("Green on the bubble, red on what is not. A painted frame counts as an example "
               "once it has both. Nothing is trained until Train and apply.")
-THUMB_SIZE = (132, 96)
+THUMB_SIZE = (256, 200)  # the whole frame, as wide as the dock allows (height follows)
 _OK, _WARN, _DIM = "#10b981", "#f59e0b", "#a1a1aa"
 _CHECK, _CROSS = "✓", "✗"
 LOOKS_RIGHT = f"Looks right {_CHECK}"
@@ -103,8 +103,13 @@ class _Card(QFrame):
         self.wrong.setObjectName("secondaryBtn")
         self.wrong.setToolTip("The outline is off: show another frame instead\n"
                               "(nothing is changed on this one)")
-        for widget in (self.thumb, self.caption, self.status, self.right, self.wrong):
+        for widget in (self.thumb, self.caption, self.status):
             box.addWidget(widget)
+        buttons = QHBoxLayout()
+        buttons.setSpacing(4)
+        buttons.addWidget(self.right)
+        buttons.addWidget(self.wrong)
+        box.addLayout(buttons)
         self.frame: int | None = None
         self.confirmed = False
 
@@ -116,6 +121,7 @@ class _Card(QFrame):
         self.confirmed = view.confirmed
         if view.pixmap is not None:
             self.thumb.setPixmap(view.pixmap)
+            self.thumb.setFixedHeight(view.pixmap.height())  # no empty band above / below
         else:
             self.thumb.clear()
             self.thumb.setText("…")
@@ -179,8 +185,9 @@ class MLTeachPanel(QWidget):
             label.setStyleSheet(style)
         return label
 
-    def _build_cards(self) -> QHBoxLayout:
-        row = QHBoxLayout()
+    def _build_cards(self) -> QVBoxLayout:
+        """The two cards one above the other: each picture is the whole frame, full width."""
+        row = QVBoxLayout()
         row.setSpacing(6)
         self._cards = [_Card(), _Card()]
         for card in self._cards:

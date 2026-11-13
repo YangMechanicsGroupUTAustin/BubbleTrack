@@ -1,13 +1,11 @@
 """Pictures of ML assist's teaching mode (numpy -> Qt), no controller logic.
 
 * the strokes of a frame as a translucent overlay (green bubble, red background);
-* the cards' small pictures: the frame cropped around the outline the user
-  judges (the outline in red), or around the strokes painted on it.
+* the cards' pictures: the whole frame with the outline the user judges (in
+  red), or with the strokes painted on it.
 """
 
 from __future__ import annotations
-
-import math
 
 import numpy as np
 from PyQt6.QtCore import QPointF, Qt
@@ -18,8 +16,7 @@ BACKGROUND_COLOUR = "#ef4444"
 OUTLINE_COLOUR = "#ef4444"  # the measured outline, as for every fit
 STROKE_OVERLAY_ALPHA = 120
 PAINT_ALPHA = 0.55  # painted pixels on a card's picture
-CROP_RADII = 1.8  # a card's picture spans this many radii around the centre
-MIN_CROP_HALF = 12  # px
+OUTLINE_WIDTH = 2.0  # px on a card's (scaled-down, whole-frame) picture
 STRETCH_PERCENTILES = (1.0, 99.0)  # contrast of a card's picture
 
 
@@ -41,19 +38,6 @@ def stroke_overlay(shape: tuple[int, int], bubble, background) -> np.ndarray | N
         out[px[:, 0], px[:, 1], :3] = _rgb(colour).astype(np.uint8)
         out[px[:, 0], px[:, 1], 3] = STROKE_OVERLAY_ALPHA
     return out
-
-
-def crop_box(shape: tuple[int, int], rc: float, cc: float, radius: float
-             ) -> tuple[tuple[int, int], tuple[int, int]]:
-    """((r0, r1), (c0, c1)) 0-based slice bounds around the 1-based circle (rc, cc, R)."""
-    h, w = int(shape[0]), int(shape[1])
-    half = max(CROP_RADII * float(radius), MIN_CROP_HALF)
-
-    def span(centre: float, size: int) -> tuple[int, int]:
-        lo = int(np.clip(math.floor(centre - 1 - half), 0, size - 1))
-        return lo, int(np.clip(math.ceil(centre - 1 + half) + 1, lo + 1, size))
-
-    return span(rc, h), span(cc, w)
 
 
 def stretch(image: np.ndarray) -> np.ndarray:
@@ -101,7 +85,7 @@ def thumbnail(image: np.ndarray, outline: np.ndarray | None, size: tuple[int, in
                       for r, c in np.asarray(outline, float).reshape(-1, 2)])
     painter = QPainter(pix)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    painter.setPen(QPen(QColor(OUTLINE_COLOUR), 1.5))
+    painter.setPen(QPen(QColor(OUTLINE_COLOUR), OUTLINE_WIDTH))
     painter.drawPolygon(poly)
     painter.end()
     return pix
