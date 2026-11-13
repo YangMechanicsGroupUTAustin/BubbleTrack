@@ -1,10 +1,17 @@
-"""Stage D: robust circle fitting, covariance, arc statistics and polygon area.
+"""Stage D: circle fitting, covariance, arc statistics and polygon area.
 
-Points are ``(N, 2)`` arrays of ``[row, col]`` in any consistent frame.  The
-robust fit initialises from the better of a Taubin fit and a RANSAC circle,
-uses Tukey-weighted IRLS only to decide who is an outlier, then reports an
-unweighted geometric least-squares fit on the inliers (Tukey weights would
-bias non-circular shapes towards their mid radius).
+Points are ``(N, 2)`` arrays of ``[row, col]`` in any consistent frame.
+
+* :func:`fit_circle`, the robust fit that FINDS the bubble (candidates, ray
+  passes): it initialises from the better of a Taubin fit and a RANSAC circle,
+  uses Tukey-weighted IRLS only to decide who is an outlier, then reports an
+  unweighted geometric least-squares fit on the inliers.  Its inlier choice
+  can latch onto one flank of an elongated bubble.
+* :func:`outline_circle`, the circle the default radius definition REPORTS
+  (owner decision 2026-11-13): the conventional least-squares circle through
+  the bubble's outline, Taubin's, refitted once without its outliers
+  (:func:`trimmed_taubin`).  On a 1.7:1 ellipse of area radius 60 it is
+  R 63.0 centred within 0.5 px, where the robust fit is R 98.9, 51 px off.
 """
 
 from __future__ import annotations
@@ -17,6 +24,8 @@ from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.edge.config import FitConfig
 
 _TINY = 1e-12
+_MAD_SIGMA = 1.4826
+"""MAD -> standard deviation of a normal distribution."""
 
 
 @dataclass(frozen=True)
@@ -185,6 +194,53 @@ def fit_circle(p: np.ndarray, rng: np.random.Generator, cfg: FitConfig, *,
         if np.isfinite(r2) and r2 > 0:
             return CircleFit(rc2, cc2, r2, cov2, inl.astype(float), "ransac/taubin+tukey+lsq")
     return CircleFit(rc, cc, radius, cov, w, "ransac/taubin+tukey")
+
+
+def _taubin(p: np.ndarray) -> tuple[float, float, float] | None:
+    c = tuple(float(v) for v in circle_fit_taubin(p))
+    return c if np.isfinite(c).all() and c[2] > 0 else None
+
+
+def trimmed_taubin(p: np.ndarray, k: float) -> CircleFit | None:
+    """Taubin's circle through *p*, refitted once without the points whose radial residual is
+    more than *k* robust sigmas (1.4826 MAD) from the median residual.
+
+    ``weights`` marks the points of the final fit (1) and the dropped ones (0); ``cov`` is
+    the geometric covariance of that fit on its points.  None for fewer than 3 points or a
+    failed fit.
+    """
+    if len(p) < 3:
+        return None
+    circle = _taubin(p)
+    if circle is None:
+        return None
+    keep = np.ones(len(p), bool)
+    res = np.hypot(p[:, 0] - circle[0], p[:, 1] - circle[1]) - circle[2]
+    med = np.median(res)
+    trimmed = np.abs(res - med) <= k * _MAD_SIGMA * np.median(np.abs(res - med))
+    if 3 <= trimmed.sum() < len(p):
+        refit = _taubin(p[trimmed])
+        if refit is not None:
+            circle, keep = refit, trimmed
+    rc, cc, radius = circle
+    return CircleFit(rc, cc, radius, taubin_cov(p[keep], rc, cc, radius), keep.astype(float), "taubin+trim")
+
+
+def outline_circle(p: np.ndarray, cfg: FitConfig) -> CircleFit | None:
+    """The default radius definition's circle: :func:`trimmed_taubin` through the genuine
+    outline points *p* of the bubble (not on the ROI border, not next to excluded pixels).
+
+    None with fewer than ``cfg.outline_min_points`` points, or when the fit fails: no finite
+    circle, or one larger than the robust fit would ever propose (RANSAC's radius bound,
+    ``ransac_rmax_factor`` x the points' extent + ``ransac_rmax_pad``; a nearly straight wall).
+    """
+    if len(p) < cfg.outline_min_points:
+        return None
+    fit = trimmed_taubin(p, cfg.outline_trim_k)
+    extent = float(np.hypot(*(p.max(0) - p.min(0))))
+    if fit is None or fit.radius > cfg.ransac_rmax_factor * extent + cfg.ransac_rmax_pad:
+        return None
+    return fit
 
 
 def arc_stats(p: np.ndarray, rc: float, cc: float, nbins: int = 36) -> tuple[float, float]:

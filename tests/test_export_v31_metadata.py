@@ -17,7 +17,8 @@ from bubbletrack.model.export import (
 from bubbletrack.model.state import AppState
 
 EDGE_STEEP = "area-equivalent sqrt(A/pi) of the 50% iso-contour"  # "Bubble may be non-round"
-EDGE_CIRCLE = "circle through the bubble wall (robust fit, 50% steep edge)"  # the default
+EDGE_CIRCLE = ("least-squares circle (Taubin, one outlier pass) through the bubble outline "
+               "(50 % steep edge)")  # the default (engine edge-1.3.0)
 
 
 def _meta(**state_fields) -> dict:

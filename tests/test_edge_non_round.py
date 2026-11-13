@@ -1,10 +1,12 @@
 """The two radius definitions (owner decisions 2026-11-13, "Bubble may be non-round").
 
-Off (default, ``EdgeParams(non_round=False)``): R is the robust circle through the bubble
-wall, the centre its centre.  The area-equivalent radius is kept as an independent check:
-a bubble inside the ROI whose circle and area radii differ by more than 5 % is flagged
+Off (default, ``EdgeParams(non_round=False)``): R is the least-squares circle through the
+bubble outline (edge-1.3.0; until edge-1.2.0 the robust circle through the ray edges), the
+centre its centre.  The area-equivalent radius is kept as an independent check: a bubble
+inside the ROI whose circle and area radii differ by more than 5 % is flagged
 ``non_circular`` (Review: worth a check); a bubble cut by the ROI border is compared with its
-visible area completed by an ellipse fitted to its wall (flag ``clipped_not_round``).
+visible area completed by an ellipse fitted to its wall and with its robust ray circle (flag
+``clipped_not_round``).
 
 On (``non_round=True``): R is the area-equivalent radius of the outline, the centre its
 centroid; a bubble cut by the border is completed with its circle only when the visible wall
@@ -57,7 +59,7 @@ def test_default_is_the_circle_definition():
     assert EdgeParams().non_round is False
     res, _ = _measure(0.0, OFF, aspect=1.2)
     assert res.radius == res.r_circle and res.radius_kind == "circle"
-    centre = res.provenance["steep_centre"]
+    centre = res.provenance["circle"]["centre"]
     assert (res.rc, res.cc) == pytest.approx(centre, abs=1e-9)          # the circle's centre
     assert res.r_area == pytest.approx(np.sqrt(res.area_px / np.pi))    # the area is still measured
     assert "area_radius" not in res.flags
@@ -88,15 +90,20 @@ def test_non_circular_flags_a_circle_more_than_5_percent_off_the_area(shape):
 
 
 def test_a_misfit_lowers_the_confidence_but_keeps_the_result():
-    """The robust circle of this 1.5:1 ellipse runs along one flat side (+57 %); rotated by 90
-    degrees it runs through the middle (-3 %, within 5 %: no flag)."""
+    """No circle describes a crescent: its outline circle is ~50 % off the area radius.
+    (Until edge-1.2.0 the example was this 1.5:1 ellipse across, whose robust circle ran along
+    one flat side, +57 %; its outline circle is +2.5 %, within 5 %: no flag.)"""
     round_, _ = _measure(0.0, OFF)
-    oval, r_eq = _measure(0.0, OFF, **ELLIPSES["across"])
-    assert oval.radius > 1.3 * r_eq
-    assert "non_circular" in oval.flags and oval.accepted
-    assert oval.confidence < round_.confidence - 0.2
-    assert oval.provenance["confidence_terms"]["roundness"] < 1.0
+    crescent = next(s for s in SHAPES if s.name == "crescent")
+    img, r_eq = render_shape(crescent)
+    bad = detect_edge(img, *FULL, reference=reference())
+    assert bad.radius > 1.3 * r_eq
+    assert "non_circular" in bad.flags and bad.accepted
+    assert bad.confidence < round_.confidence - 0.2
+    assert bad.provenance["confidence_terms"]["roundness"] < 1.0
     assert round_.provenance["confidence_terms"]["roundness"] == 1.0
+    oval, r_eq = _measure(0.0, OFF, **ELLIPSES["across"])
+    assert oval.radius == pytest.approx(r_eq, rel=0.03) and "non_circular" not in oval.flags
 
 
 def test_the_circle_confidence_terms():
@@ -158,7 +165,9 @@ def test_only_the_area_mode_completes_with_the_circle():
 @pytest.mark.parametrize("cut", CUTS)
 @pytest.mark.parametrize("orientation", sorted(ELLIPSES))
 def test_clipped_ellipse_in_circle_mode_goes_to_review(orientation, cut):
-    """The circle through the visible wall is 14-58 % off on these: never silently."""
+    """The circle through the visible wall is off on these by up to 58 % (robust, edge-1.2.0)
+    or 43 % (outline circle, edge-1.3.0; 1.5:1 along, cut 10 %: +4.6 %, flagged by the robust
+    probe only): never silently."""
     res, r_eq = _measure(cut, OFF, **ELLIPSES[orientation])
     error = abs(res.radius / r_eq - 1)
     assert error <= 0.05 or not res.accepted or "clipped_not_round" in res.flags, (error, res.flags)

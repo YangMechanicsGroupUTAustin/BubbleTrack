@@ -143,7 +143,8 @@ class RayConfig:
 
 @dataclass(frozen=True)
 class FitConfig:
-    """Stage D: RANSAC / Taubin initialisation, Tukey inlier selection, geometric LSQ."""
+    """Stage D: RANSAC / Taubin initialisation, Tukey inlier selection, geometric LSQ (the robust
+    fit that finds the bubble); and the default definition's circle through its outline."""
 
     ransac_iterations: int = 150
     ransac_tol_px: float = 1.5
@@ -162,6 +163,13 @@ class FitConfig:
     inlier_weight: float = 0.1
     arc_bins: int = 36
     rng_seed: int = 12345
+    outline_min_points: int = 20
+    """The default radius definition's circle (Taubin through the genuine outline points, one
+    trimming pass: ``fit.outline_circle``) needs this many points; with fewer, or when that fit
+    fails, the robust ray fit is reported (owner decision 2026-11-13)."""
+    outline_trim_k: float = 3.0
+    """Its trimming pass drops points whose radial residual is more than this many robust sigmas
+    (1.4826 MAD) from the median residual, then refits once."""
 
 
 @dataclass(frozen=True)

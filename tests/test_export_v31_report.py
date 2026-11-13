@@ -34,7 +34,8 @@ class TestParameters:
         params = build_report_parameters(_state(detection_mode="edge"))
         assert params["Detection Mode"] == "Auto (reference frame)"  # user-facing name of "edge"
         assert params["Radius Definition"] == (
-            "circle through the bubble wall (robust fit, 50% steep edge)")
+            "least-squares circle (Taubin, one outlier pass) through the bubble outline "
+            "(50 % steep edge)")
         params = build_report_parameters(_state(detection_mode="edge", bubble_non_round=True))
         assert params["Radius Definition"] == (
             "area-equivalent sqrt(A/pi) of the 50% iso-contour")

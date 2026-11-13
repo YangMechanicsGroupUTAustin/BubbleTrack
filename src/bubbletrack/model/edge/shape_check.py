@@ -1,8 +1,9 @@
 """Stage F: is the bubble round enough for its circle?  (the circle check)
 
-The default radius is the robust circle through the bubble wall; it is the
-bubble's size only when the bubble is round.  This module estimates the
-area-equivalent radius WITHOUT the circle, so the two can be compared:
+The default radius is the least-squares circle through the bubble outline; it
+is the bubble's size only when the bubble is round.  This module estimates the
+area-equivalent radius WITHOUT the circle, so the two can be compared (a
+clipped bubble's circle is also probed with the robust ray circle, ``definition``):
 
 * a bubble inside the ROI: the area of its outline; also one whose outline only
   touches the ROI border or excluded pixels (a glare blob next to the wall), with
@@ -67,7 +68,8 @@ def circle_check(region: Region, circle_radius: float, exclude: np.ndarray,
         The measured bubble region (``completed`` regions carry the circle's hidden part,
         which is only used when it is at most *max_hidden* of the area).
     circle_radius : float
-        Radius of the circle fit (bounds the ellipse that is accepted as a model).
+        Radius of the robust ray circle (bounds the ellipse that is accepted as a model; the
+        same in both definitions, so the check never depends on the reported circle).
     exclude : ndarray of bool
         Pixels without usable data (the ROI shape).
     max_hidden : float

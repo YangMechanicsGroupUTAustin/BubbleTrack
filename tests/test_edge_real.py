@@ -141,6 +141,13 @@ def test_labelled_bubble_frames_on_lic():
     wall texture), 07/73 (a third of the bubble behind dead reference pixels) and 09/81 (low
     contrast: a third of the bubble is above its own 50 % level, so the dark body is a D) now
     off by more than the tolerance.
+
+    Measured with the least-squares circle through the outline (edge-1.3.0, the default since
+    2026-11-13; edge-1.2.0's robust ray circle: 205/235): 193/235 = 82.1 % agree, accepted or
+    not; 188 bubble frames accepted, 180 of them correct (181 of 187 before); no-bubble frames
+    rejected 83/85 (79).  13 frames lost (06: 7, 08: 4, 09: 2; 11 of them guesses below the
+    gate, where the outline takes in wall texture or misses a transparent wall), 1 gained (07);
+    on lic_hard the same change gains 10 (79 -> 89 / 182).
     """
     labels = _labels()
     crit = labels["criterion"]
@@ -160,7 +167,7 @@ def test_labelled_bubble_frames_on_lic():
             if lab["circle"] is not None and np.isfinite(res.radius):
                 ok += _agree((res.radius, res.rc, res.cc), lab["circle"], crit)
     assert n_b == 235
-    assert ok / n_b >= 0.85, f"{ok}/{n_b}"
+    assert ok / n_b >= 0.82, f"{ok}/{n_b}"
 
 
 def test_reference_frame_choice_on_real_recordings():

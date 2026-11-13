@@ -30,16 +30,19 @@ META_SIDECAR_SUFFIX = ".meta.json"
 """Suffix of the JSON file written next to an exported CSV (``run.meta.json``)."""
 
 # What the exported ``Radius`` measures, per detection mode.  In Edge (Auto)
-# mode it follows "Bubble may be non-round": by default the robust circle
-# through the 50 % wall (the area-equivalent radius is exported as the
-# ``area_px`` metric), with the option the area-equivalent radius of the
-# outline (the circle as the ``r_circle`` metric).  Per frame, the flag
-# ``area_radius`` marks a radius measured by area.
+# mode it follows "Bubble may be non-round": by default the least-squares
+# circle through the bubble outline at the 50 % wall (engine edge-1.3.0; the
+# area-equivalent radius is exported as the ``area_px`` metric), with the
+# option the area-equivalent radius of the outline (the circle as the
+# ``r_circle`` metric).  Per frame, the flag ``area_radius`` marks a radius
+# measured by area.
 _CIRCLE_FIT = "circle fit (Taubin)"
 _RADIUS_DEFINITIONS: dict[tuple[str, str | None, bool], str] = {
     ("area", None, False): "area-equivalent (dark regions)",
-    ("edge", "steep", False): "circle through the bubble wall (robust fit, 50% steep edge)",
-    ("edge", "outer", False): "circle through the outer extent of the wall (robust fit, Edge definition B)",
+    ("edge", "steep", False): "least-squares circle (Taubin, one outlier pass) through the bubble outline "
+                              "(50 % steep edge)",
+    ("edge", "outer", False): "least-squares circle (Taubin, one outlier pass) through the outer extent "
+                              "outline (Edge definition B)",
     ("edge", "steep", True): "area-equivalent sqrt(A/pi) of the 50% iso-contour",
     ("edge", "outer", True): "area-equivalent sqrt(A/pi) of the outer extent contour (Edge definition B)",
 }

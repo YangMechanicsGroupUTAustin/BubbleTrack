@@ -8,6 +8,11 @@ blob of >= 20 px next to the wall), because such a region counts as clipped.
 Repro (``centre_offset_demo.py``): a 1.7:1 bubble (area radius 60, long axis vertical) with a
 5x5 saturated blob just outside its right wall; before the fix the reported centre was 51.5 px
 off with confidence 1.00.
+
+Since edge-1.3.0 the default circle itself is the least-squares circle through the outline
+(owner decision 2026-11-13): on this bubble R 62.9 (clean) / 63.0 (glare) centred within 0.5 px,
+instead of the robust ray circle R 98.9 hugging the left flank.  It is 4.8 / 5.0 % off the
+area radius, within the 5 % tolerance, so no ``non_circular`` flag.
 """
 
 from __future__ import annotations
@@ -57,15 +62,18 @@ def test_area_mode_centre_is_the_regions_centroid(glare):
     assert res.accepted and res.radius == pytest.approx(r_eq, rel=0.01)
     assert (res.rc, res.cc) == pytest.approx((RC + 1, CC + 1), abs=1.0)       # 1-based truth
     assert (res.rc, res.cc) == pytest.approx(res.centroid, abs=1e-9)
-    assert abs(res.r_circle - r_eq) > 0.3 * r_eq                                # the circle hugs a flank
+    assert abs(res.provenance["steep_r_circle"] - r_eq) > 0.3 * r_eq           # the ray circle hugs a flank
+    assert res.r_circle == pytest.approx(r_eq, rel=0.055)                      # the outline circle does not
 
 
 @pytest.mark.parametrize("glare", [False, True], ids=["clean", "glare"])
-def test_circle_mode_keeps_the_circle_and_sends_the_frame_to_review(glare):
-    res, _ = _measure(1.7, glare, OFF)
-    assert "non_circular" in res.flags and "clipped_not_round" not in res.flags
-    assert res.radius == res.r_circle
-    assert (res.rc, res.cc) == pytest.approx(res.provenance["steep_centre"], abs=1e-9)
+def test_circle_mode_reports_the_centred_outline_circle(glare):
+    res, r_eq = _measure(1.7, glare, OFF)
+    assert res.radius == res.r_circle and 0 < res.radius - r_eq < 0.055 * r_eq
+    assert (res.rc, res.cc) == pytest.approx(res.provenance["circle"]["centre"], abs=1e-9)
+    assert (res.rc, res.cc) == pytest.approx((RC + 1, CC + 1), abs=1.0)
+    off = abs(res.radius - res.r_area) / res.r_area
+    assert ("non_circular" in res.flags) == (off > 0.05) and "clipped_not_round" not in res.flags
     state = AppState(detection_mode="edge").with_results_initialized(1)
     store_fit(state, 0, fit_from_result(res, EdgeJob(OFF, None, 400.0)), FitSource.AUTO)
     assert circle_legend(state, 0) == FITTED_CIRCLE                            # drawn as what it is

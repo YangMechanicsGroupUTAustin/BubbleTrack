@@ -51,8 +51,8 @@ class EdgeParams:
     """(rc, cc, R) expected circle (e.g. from a neighbouring frame), same coordinates."""
     confidence_gate: float = 0.3
     non_round: bool = False
-    """The radius definition.  False (default): the robust circle through the bubble wall;
-    True ("Bubble may be non-round"): the area-equivalent radius ``sqrt(A / pi)`` of the outline."""
+    """The radius definition.  False (default): the least-squares circle through the bubble
+    outline; True ("Bubble may be non-round"): the area-equivalent radius ``sqrt(A / pi)`` of it."""
 
     def __post_init__(self) -> None:
         if self.edge_definition not in _DEFINITIONS:
@@ -85,24 +85,25 @@ class EdgeResult:
     """Measurement of one frame.  Coordinates are 1-based full-image ``[row, col]``.
 
     The bubble is the region enclosed by its outer iso-contour at the edge level,
-    whatever its shape.  ``radius`` follows ``EdgeParams.non_round``: the robust circle
-    through its wall (default), or the area-equivalent radius ``sqrt(A / pi)`` of the region.
+    whatever its shape.  ``radius`` follows ``EdgeParams.non_round``: the least-squares circle
+    through its outline (default), or the area-equivalent radius ``sqrt(A / pi)`` of the region.
     """
 
     radius: float
     """The bubble's radius under the chosen definition (per ``edge_definition``); NaN if nothing
-    was found.  Circle (default): the robust circle fit through the genuine wall points
-    (``radius_kind == "circle"``).  Non-round: the region's area-equivalent radius; a region
-    clipped by the ROI border or excluded pixels is completed with the circle fit when its
-    visible wall agrees with it (``radius_kind == "area+circle_completion"``), else the frame
-    is rejected (flag ``clipped_unmeasurable``) and ``radius`` is only Auto's guess."""
+    was found.  Circle (default): the least-squares circle (Taubin, one outlier pass) through the
+    genuine outline points, ``r_circle`` (``radius_kind == "circle"``; ``provenance["circle"]``).
+    Non-round: the region's area-equivalent radius; a region clipped by the ROI border or
+    excluded pixels is completed with the robust ray circle when its visible wall agrees with it
+    (``radius_kind == "area+circle_completion"``), else the frame is rejected (flag
+    ``clipped_unmeasurable``) and ``radius`` is only Auto's guess."""
     rc: float
-    """Centre row from the same definition as ``radius``: the circle-fit centre (circle), or the
+    """Centre row from the same definition as ``radius``: the circle's centre (circle), or the
     area centroid of the (completed) region (area; ``centroid``)."""
     cc: float
     radius_sigma: float
-    """Standard error of ``radius`` (circle: its fit covariance; area: outline noise plus the
-    extrapolated part)."""
+    """Standard error of ``radius`` (circle: its fit covariance, at least the outline noise;
+    area: outline noise plus the extrapolated part)."""
     edge_xy: np.ndarray
     """(M, 2) points of the bubble outline on a genuine edge (ROI-border closure left out)."""
     confidence: float
@@ -116,15 +117,17 @@ class EdgeResult:
     shoulder_width: float
     """B - A (NaN if undefined): area radii with ``edge_definition == "outer"``, else circle fits."""
     arc_coverage: float
-    """Angular coverage of the circle fit's inlier edge points."""
+    """Angular coverage of the robust ray fit's inlier edge points."""
     inlier_fraction: float
-    """Fraction of the ray edge points that are circle-fit inliers."""
+    """Fraction of the ray edge points that are inliers of the robust ray fit."""
     mask: np.ndarray
     """The filled bubble region of the ROI (bool), for the binary display panel."""
     provenance: dict = field(default_factory=dict)
     confidence_gate: float = 0.3
     r_circle: float = _NAN
-    """Radius of the robust circle fit to the ray edge points."""
+    """Radius of the default definition's circle, the least-squares circle through the outline
+    (the reported ``radius`` with ``non_round`` off), in either mode.  The robust fit of the ray
+    edges that finds the bubble is ``provenance["steep_r_circle"]``."""
     area_px: float = _NAN
     """Region area (px^2), hidden part included."""
     perimeter_px: float = _NAN

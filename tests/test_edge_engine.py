@@ -175,7 +175,8 @@ def test_clean_bubble_has_no_shoulder():
     res = measure(BASE, non_round=True)
     assert res.accepted and "shoulder" not in res.flags
     assert 1.0 < res.shoulder_width < 3.0
-    assert res.outer_radius == pytest.approx(res.r_circle + res.shoulder_width)   # steep mode: circle fits
+    # steep mode: B - A of the robust ray circles (r_circle is the outline circle since edge-1.3.0)
+    assert res.outer_radius == pytest.approx(res.provenance["steep_r_circle"] + res.shoulder_width)
     assert res.r_area == res.radius == pytest.approx(res.r_circle, abs=0.1)
 
 
@@ -194,7 +195,9 @@ def test_outer_definition_reports_the_outer_extent():
     assert outer.radius == outer.outer_radius == pytest.approx(steep.outer_radius, abs=0.1)
     assert outer.shoulder_width == pytest.approx(steep.shoulder_width, abs=0.1)
     assert outer.provenance["steep_radius"] == pytest.approx(steep.radius, abs=1e-9)
-    assert outer.r_circle == pytest.approx(steep.outer_radius, abs=1e-9)
+    # r_circle: the outline circle of the outer region (edge-1.3.0; before, the very robust fit
+    # of the outer-extent points that steep mode reports as B)
+    assert outer.r_circle == pytest.approx(steep.outer_radius, abs=0.1)
     assert "shoulder" in outer.flags and outer.accepted
 
 

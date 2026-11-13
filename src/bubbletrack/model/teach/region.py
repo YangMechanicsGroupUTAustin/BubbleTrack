@@ -4,9 +4,10 @@ Steps: smooth P lightly, threshold at ``level``, fill holes, choose the blob
 (the one holding the prior / seed, else the nearest, else the biggest
 confident one), score it (:mod:`.confidence`), optionally move its outline to
 the half-contrast wall of the engine view (:mod:`.refine`), and measure it as
-Auto does: by default the robust circle through its outline (the points on the
-ROI border left out); with "Bubble may be non-round" its area-equivalent radius,
-a region cut by the ROI border completed with its circle fit.
+Auto does: by default the least-squares circle through its outline (Auto's
+``outline_circle``, the points on the ROI border left out); with "Bubble may be
+non-round" its area-equivalent radius, a region cut by the ROI border completed
+with its circle fit.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from skimage.measure import find_contours
 
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.edge.config import FitConfig
-from bubbletrack.model.edge.fit import fit_circle
+from bubbletrack.model.edge.fit import outline_circle
 from bubbletrack.model.teach.config import MeasureConfig
 from bubbletrack.model.teach.confidence import region_confidence, region_terms
 from bubbletrack.model.teach.refine import refine_outline
@@ -125,7 +126,6 @@ def _measure(mask: np.ndarray) -> tuple[float, float, float, bool]:
     return math.sqrt(total / math.pi), float(fit_rc), float(fit_cc), True
 
 
-_MIN_WALL_POINTS = 10
 _FIT = FitConfig()
 
 
@@ -141,13 +141,11 @@ def _wall_points(mask: np.ndarray) -> np.ndarray:
 
 
 def _measure_circle(mask: np.ndarray, area: tuple[float, float, float, bool]) -> tuple[float, float, float]:
-    """Circle definition: (radius, rc, cc) of the robust circle through the wall points, or the
-    area values *area* when there are too few of them or the fit fails."""
-    pts = _wall_points(mask)
-    if len(pts) < _MIN_WALL_POINTS:
-        return area[:3]
-    fit = fit_circle(pts, np.random.default_rng(_FIT.rng_seed), _FIT)
-    if fit is None or not (np.isfinite(fit.radius) and 0 < fit.radius < 3 * area[0] + 10):
+    """Circle definition: (radius, rc, cc) of Auto's circle (``edge.fit.outline_circle``: the
+    least-squares circle through the wall points), or the area values *area* when there are
+    too few of them or the fit fails."""
+    fit = outline_circle(_wall_points(mask), _FIT)
+    if fit is None or not fit.radius < 3 * area[0] + 10:
         return area[:3]
     return float(fit.radius), float(fit.rc), float(fit.cc)
 
