@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from bubbletrack.model.teach import suggest_frames
+from bubbletrack.model.teach.suggest import SIZE_RATIO, FrameSize, differ, find_pair, pick_candidate
 
 
 def _sizes(n=60):
@@ -59,3 +60,65 @@ def test_bad_input():
         suggest_frames([1.0, 2.0], [0.5], n=2)
     with pytest.raises(ValueError):
         suggest_frames([1.0, 2.0], [0.5, 0.5], n=0)
+
+
+# --------------------------------------------------------------------------- #
+#  Teaching: different situations and the candidate frames
+# --------------------------------------------------------------------------- #
+
+def test_two_frames_differ_by_bubble_size_or_by_time():
+    n = 100                                         # a quarter of the recording: 25 frames
+    assert differ(FrameSize(10, 40.0), FrameSize(12, 27.0), n)       # 30 % smaller or more
+    assert not differ(FrameSize(10, 40.0), FrameSize(12, 30.0), n)   # 25 % smaller, close in time
+    assert differ(FrameSize(10, 40.0), FrameSize(35, 40.0), n)       # same size, far apart
+    assert not differ(FrameSize(10, 40.0), FrameSize(10, 20.0), n)  # the same frame never differs
+    painted = FrameSize(12)                                          # size unknown: time only
+    assert not differ(painted, FrameSize(10, 80.0), n) and differ(painted, FrameSize(60, 80.0), n)
+
+
+def test_a_differing_pair_is_found_even_when_the_first_frame_is_like_all_others():
+    frames = [FrameSize(10, 25.0), FrameSize(11, 30.0), FrameSize(12, 20.0)]
+    assert {f.frame for f in find_pair(frames, 100)} == {11, 12}     # 20 / 30 = 0.67
+    assert find_pair(frames[:2], 100) is None and find_pair([], 100) is None
+    preferred = find_pair(frames + [FrameSize(90, 25.0)], 100, prefer=(12,))
+    assert 12 in {f.frame for f in preferred}
+
+
+def _outlines(n=60):
+    radius = _sizes(n)
+    return radius, np.full(n, 0.8), np.ones(n, bool)
+
+
+def test_first_candidate_is_a_big_measured_bubble_then_one_that_differs():
+    radius, conf, trusted = _outlines()
+    first = pick_candidate(radius, conf, trusted)
+    assert radius[first] >= np.percentile(radius, 85)
+    second = pick_candidate(radius, conf, trusted, exclude={first},
+                            keep_apart=[FrameSize(first, radius[first])])
+    assert radius[second] <= SIZE_RATIO * radius[first]               # a smaller bubble
+
+
+def test_measured_results_come_before_autos_guesses():
+    radius, conf, trusted = _outlines()
+    trusted[:] = False
+    trusted[[5, 50]] = True                                           # two results, many guesses
+    conf[~trusted] = 0.2
+    assert pick_candidate(radius, conf, trusted) in (5, 50)
+
+
+def test_a_rejected_frame_and_frames_like_it_are_not_offered_first():
+    radius, conf, trusted = _outlines()
+    first = pick_candidate(radius, conf, trusted)
+    again = pick_candidate(radius, conf, trusted, exclude={first},
+                           avoid=[FrameSize(first, radius[first])])
+    assert again != first and differ(FrameSize(first, radius[first]), FrameSize(again, radius[again]), 60)
+
+
+def test_no_candidate_when_nothing_with_an_outline_is_left():
+    radius = np.full(100, np.nan)
+    radius[[1, 2, 3]] = (20.0, -1.0, 30.0)
+    conf, trusted = np.full(100, 0.8), np.ones(100, bool)
+    assert pick_candidate(radius, conf, trusted, exclude={1, 3}) is None
+    assert pick_candidate(radius, conf, trusted, exclude={3},
+                          keep_apart=[FrameSize(3, 25.0)]) is None    # frame 1: too much alike
+    assert pick_candidate(radius, conf, trusted, exclude={1}) == 3

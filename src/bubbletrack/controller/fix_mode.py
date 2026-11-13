@@ -12,6 +12,11 @@ One fix at a time, on one frame, shown in the Review dock's fix strip:
 
 Starting a fix cancels a pending or running re-track (it would redraw the
 frame under the user's points); storing the fix restarts its countdown.
+
+A fix owns the image's mouse while it runs.  Whatever else wants it (ML
+assist's teaching mode) registers a start hook (``add_start_hook``): it is
+called before the fix takes the image, gives the image up and returns a
+note that the status line appends ("ML assist is closed ...").
 """
 
 from __future__ import annotations
@@ -36,6 +41,7 @@ class FixMode:
         self._app = app
         self.strip = strip
         self._on_fixed = on_fixed
+        self._start_hooks: list[Callable[[], str]] = []
         app.manual_ctrl.set_view(strip)
         app.circle_ctrl.set_view(strip)
         strip.points_requested.connect(lambda: self.use_tool(TOOL_POINTS))
@@ -66,6 +72,11 @@ class FixMode:
 
     # -- starting, switching, ending ---------------------------------------- #
 
+    def add_start_hook(self, hook: Callable[[], str]) -> None:
+        """*hook()* runs before a fix takes the image: it gives the image up and
+        returns a note for the status line ('' for none)."""
+        self._start_hooks.append(hook)
+
     def start(self, frame: int) -> bool:
         """Fix *frame*, which must be on screen; False if it cannot be fixed now."""
         state = self._app._get_state()
@@ -80,12 +91,16 @@ class FixMode:
         if self.active and self.frame == frame:
             return True
         self.end()
+        notes = [note for note in (hook() for hook in self._start_hooks) if note]
         # A re-track landing now would redraw the frame under the user's
         # points; storing the fix restarts its countdown.
         self._app.retrack.cancel()
         tool = TOOL_CIRCLE if self._app.circle_ctrl.available() else TOOL_POINTS
         self.strip.show_tool(frame, tool)
         self._apply(tool)
+        if notes:
+            header = self._app.w.header
+            self._status(" — ".join([header.status_text(), *notes]), _WARN)
         logger.info("Fix started on frame %d (%s)", frame + 1, tool)
         return True
 

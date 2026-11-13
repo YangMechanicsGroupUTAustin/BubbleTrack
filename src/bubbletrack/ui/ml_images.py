@@ -1,11 +1,13 @@
 """Pictures of ML assist's teaching mode (numpy -> Qt), no controller logic.
 
 * the strokes of a frame as a translucent overlay (green bubble, red background);
-* the probability tint of the right panel (P(bubble) in green over the Auto view);
-* the small previews of the suggested frames, with ML's outline.
+* the cards' small pictures: the frame cropped around the outline the user
+  judges (the outline in red), or around the strokes painted on it.
 """
 
 from __future__ import annotations
+
+import math
 
 import numpy as np
 from PyQt6.QtCore import QPointF, Qt
@@ -15,8 +17,10 @@ BUBBLE_COLOUR = "#22c55e"
 BACKGROUND_COLOUR = "#ef4444"
 OUTLINE_COLOUR = "#ef4444"  # the measured outline, as for every fit
 STROKE_OVERLAY_ALPHA = 120
-TINT_STRENGTH = 0.65  # tint opacity at P = 1
-VIEW_WHITE = 1.25  # Auto view value shown as white (as in the Auto view panel)
+PAINT_ALPHA = 0.55  # painted pixels on a card's picture
+CROP_RADII = 1.8  # a card's picture spans this many radii around the centre
+MIN_CROP_HALF = 12  # px
+STRETCH_PERCENTILES = (1.0, 99.0)  # contrast of a card's picture
 
 
 def _rgb(colour: str) -> np.ndarray:
@@ -39,35 +43,60 @@ def stroke_overlay(shape: tuple[int, int], bubble, background) -> np.ndarray | N
     return out
 
 
-def view_grey(view: np.ndarray) -> np.ndarray:
-    """The Auto view (background ~1, bubble ~0) as a [0, 1] display image."""
-    return np.clip(np.nan_to_num(np.asarray(view, np.float32), nan=1.0) / VIEW_WHITE, 0.0, 1.0)
+def crop_box(shape: tuple[int, int], rc: float, cc: float, radius: float
+             ) -> tuple[tuple[int, int], tuple[int, int]]:
+    """((r0, r1), (c0, c1)) 0-based slice bounds around the 1-based circle (rc, cc, R)."""
+    h, w = int(shape[0]), int(shape[1])
+    half = max(CROP_RADII * float(radius), MIN_CROP_HALF)
+
+    def span(centre: float, size: int) -> tuple[int, int]:
+        lo = int(np.clip(math.floor(centre - 1 - half), 0, size - 1))
+        return lo, int(np.clip(math.ceil(centre - 1 + half) + 1, lo + 1, size))
+
+    return span(rc, h), span(cc, w)
 
 
-def tint_image(grey: np.ndarray, probability: np.ndarray) -> np.ndarray:
-    """(H, W, 3) uint8: *grey* [0, 1] with P(bubble) shown as a green tint."""
-    g = np.clip(np.asarray(grey, np.float32), 0.0, 1.0)[..., None] * 255.0
-    a = TINT_STRENGTH * np.clip(np.asarray(probability, np.float32), 0.0, 1.0)[..., None]
-    out = (1.0 - a) * g + a * _rgb(BUBBLE_COLOUR)[None, None, :]
+def stretch(image: np.ndarray) -> np.ndarray:
+    """*image* scaled to [0, 1] between its 1st and 99th percentiles."""
+    img = np.asarray(image, dtype=np.float32)
+    lo, hi = np.percentile(img, STRETCH_PERCENTILES) if img.size else (0.0, 1.0)
+    return np.clip((img - lo) / max(float(hi - lo), 1e-6), 0.0, 1.0)
+
+
+def paint_pixels(grey: np.ndarray, bubble, background, *, origin: tuple[int, int]) -> np.ndarray:
+    """(H, W, 3) uint8: *grey* [0, 1] with the painted pixels (1-based full-image
+    (row, col) sets) tinted; *origin* is the crop's 0-based (row, col)."""
+    out = np.repeat((np.clip(grey, 0.0, 1.0) * 255.0)[..., None], 3, axis=2)
+    h, w = grey.shape
+    for pixels, colour in ((bubble, BUBBLE_COLOUR), (background, BACKGROUND_COLOUR)):
+        if not pixels:
+            continue
+        px = np.array(sorted(pixels), dtype=np.int64) - 1 - np.array(origin, dtype=np.int64)
+        px = px[(px[:, 0] >= 0) & (px[:, 0] < h) & (px[:, 1] >= 0) & (px[:, 1] < w)]
+        out[px[:, 0], px[:, 1]] = (1 - PAINT_ALPHA) * out[px[:, 0], px[:, 1]] + PAINT_ALPHA * _rgb(colour)
     return np.clip(out, 0, 255).astype(np.uint8)
 
 
-def _qimage_grey(grey: np.ndarray) -> QImage:
-    img8 = np.ascontiguousarray((np.clip(grey, 0.0, 1.0) * 255).astype(np.uint8))
-    h, w = img8.shape
-    return QImage(img8.tobytes(), w, h, w, QImage.Format.Format_Grayscale8).copy()
+def _qimage(image: np.ndarray) -> QImage:
+    """A grey [0, 1] (H, W) or an RGB uint8 (H, W, 3) array as a QImage."""
+    if image.ndim == 2:
+        img8 = np.ascontiguousarray((np.clip(image, 0.0, 1.0) * 255).astype(np.uint8))
+        h, w = img8.shape
+        return QImage(img8.tobytes(), w, h, w, QImage.Format.Format_Grayscale8).copy()
+    rgb = np.ascontiguousarray(image.astype(np.uint8))
+    h, w = rgb.shape[:2]
+    return QImage(rgb.tobytes(), w, h, 3 * w, QImage.Format.Format_RGB888).copy()
 
 
-def thumbnail(grey: np.ndarray, outline: np.ndarray | None, size: tuple[int, int]) -> QPixmap:
-    """A small preview: *grey* [0, 1] scaled into *size* (w, h), *outline* (N, 2)
-    [row, col] in the image's coordinates as the image panels draw them
-    (ROI-local, ``xy - (gridx[0] - 1, gridy[0] - 1)``) on top."""
-    image = _qimage_grey(grey)
-    pix = QPixmap.fromImage(image).scaled(size[0], size[1], Qt.AspectRatioMode.KeepAspectRatio,
-                                          Qt.TransformationMode.SmoothTransformation)
-    if outline is None or len(outline) < 3 or image.width() == 0:
+def thumbnail(image: np.ndarray, outline: np.ndarray | None, size: tuple[int, int]) -> QPixmap:
+    """A small picture: *image* (grey [0, 1] or RGB uint8) scaled into *size* (w, h),
+    with *outline* (N, 2) [row, col], in the image's pixel coordinates, in red."""
+    qimage = _qimage(image)
+    pix = QPixmap.fromImage(qimage).scaled(size[0], size[1], Qt.AspectRatioMode.KeepAspectRatio,
+                                           Qt.TransformationMode.SmoothTransformation)
+    if outline is None or len(outline) < 3 or qimage.width() == 0:
         return pix
-    scale = pix.width() / image.width()
+    scale = pix.width() / qimage.width()
     poly = QPolygonF([QPointF(c * scale, r * scale)
                       for r, c in np.asarray(outline, float).reshape(-1, 2)])
     painter = QPainter(pix)

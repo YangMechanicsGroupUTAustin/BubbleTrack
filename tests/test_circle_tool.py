@@ -198,6 +198,72 @@ def test_refused_circle_is_drawn_in_the_colour_its_key_names(app):
     assert "your circle (not stored)" in window.original_panel.legend_texts()
 
 
+def _fixed_frame_3(controller):
+    """Frame 4 holds a result (a stored circle fix); Fix starts on it again."""
+    _drag(controller.w)
+    assert controller._get_state().radius[3] > 0
+    assert controller.review.start_fix(3)
+
+
+# A default (circle-definition) Auto result: its circle is the fitted circle.
+STORED_KEYS = ["outline (measured)", "fitted circle", "ROI"]
+REFUSED_KEYS = ["your circle (not stored)", "Auto found (not stored)"]
+
+
+def test_refused_state_shows_only_the_users_circle_and_what_auto_found(app):
+    window, controller, _ = app
+    _fixed_frame_3(controller)
+    left, right = window.original_panel, window.binary_panel
+    assert left.legend_texts() == STORED_KEYS
+    _drag(window, CENTRE_X, CENTRE_Y, 90.0)                # twice too big: refused
+    assert _strip(controller).prompt_visible()
+    assert left.legend_texts() == REFUSED_KEYS             # the red / blue result is hidden
+    assert len(left._overlay_items) == 2
+    assert right.legend_texts() == REFUSED_KEYS and len(right._overlay_items) == 2
+    controller.circle_ctrl._redraw(3)                      # any redraw keeps the refused view
+    assert left.legend_texts() == REFUSED_KEYS
+    _strip(controller).prompt._cancel_btn.click()          # closed: the result is back
+    assert left.legend_texts() == STORED_KEYS
+    assert right.legend_texts() == ["outline (measured)"]
+
+
+def test_a_new_drag_or_another_frame_closes_the_refused_view(app):
+    window, controller, _ = app
+    _fixed_frame_3(controller)
+    _drag(window, CENTRE_X, CENTRE_Y, 90.0)
+    _drag(window)                                          # a good drag: stored, normal view
+    assert window.original_panel.legend_texts() == STORED_KEYS
+    assert controller.review.start_fix(3)
+    _drag(window, CENTRE_X, CENTRE_Y, 90.0)
+    controller.file_ctrl.on_frame_changed(4)
+    assert "your circle (not stored)" not in window.original_panel.legend_texts()
+
+
+def test_refusal_names_the_rule_that_failed(app):
+    window, controller, _ = app
+    strip = _strip(controller)
+    _drag(window, CENTRE_X, CENTRE_Y, 90.0)                # radius rule
+    text = strip.prompt_text()
+    assert text.startswith("Frame 4: Auto found a wall (grey) that does not match your circle:")
+    assert "its radius is 40 px, yours is 90 px" in text and "more than half" in text
+    _drag(window, CENTRE_X + 26.0, CENTRE_Y, 30.0)         # centre rule
+    text = strip.prompt_text()
+    assert "its centre is" in text and "more than half your circle's radius" in text
+    assert controller.review.start_fix(1)                   # a frame without a bubble
+    _drag(window, CENTRE_X, CENTRE_Y, 40.0)
+    text = strip.prompt_text()
+    assert "Auto found no wall near your circle" in text or "is too faint: confidence" in text
+    assert text.endswith("Nothing was stored. Keep your circle as this frame's result, or drag again.")
+    assert strip.prompt._use_btn.text() == "Keep my circle"
+
+
+def test_keeping_a_circle_says_it_replaces_the_frames_result(app):
+    window, controller, _ = app
+    _fixed_frame_3(controller)
+    _drag(window, CENTRE_X, CENTRE_Y, 90.0)
+    assert "Keeping it replaces this frame's result (R = 40" in _strip(controller).prompt_text()
+
+
 def test_use_my_circle_stores_a_manual_fit_and_undo_restores(app):
     window, controller, events = app
     _drag(window, 60.0, 60.0, 25.0)
@@ -396,3 +462,17 @@ def test_review_fix_opens_the_tool_and_moves_on_after_a_fix(app):
     assert controller._get_state().fit_source[3] == FitSource.GUIDED
     assert rc.panel.frames() == [5] and controller._get_state().image_no == 5
     assert rc.panel.feedback.text().startswith("✓ Frame 4 fixed: R = 40")
+
+
+def test_refusal_says_when_the_area_cannot_be_measured():
+    # "Bubble may be non-round" on a bubble cut by the image edge whose visible
+    # wall is not round: Auto found the wall, it cannot complete the hidden part.
+    from bubbletrack.controller.circle_controller import refusal_text
+    from bubbletrack.model.edge_pipeline import UNMEASURABLE_REASON, EdgeFrameFit
+
+    fit = EdgeFrameFit(-1.0, np.nan, np.nan, np.empty((0, 2)), None, 0.9,
+                       frozenset({"clipped_unmeasurable"}), UNMEASURABLE_REASON)
+    text = refusal_text(4, guided_fit.UserCircle(50.0, 60.0, 30.0), fit, float("nan"))
+    assert "no wall" not in text
+    assert "cut by the image edge" in text and "can't be measured" in text
+    assert "Keep your circle" in text
