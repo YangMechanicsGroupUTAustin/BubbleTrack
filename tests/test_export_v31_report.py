@@ -95,6 +95,6 @@ def test_report_prints_the_new_sections(tmp_path, plain_pdf):
     # PDF string literals escape parentheses.
     text = out.read_bytes().replace(rb"\(", b"(").replace(rb"\)", b")")
     for needle in (b"Detection Mode", b"Radius Definition", b"50% iso-contour",
-                   b"Fit Quality", b"Confidence (median)", b"Locked Frames",
+                   b"Confidence", b"Confidence (median)", b"Locked Frames",
                    b"AUTO 7, MANUAL 1, NONE 2"):
         assert needle in text, needle

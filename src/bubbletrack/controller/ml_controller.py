@@ -59,6 +59,13 @@ def switch_text(on: bool, n_examples: int) -> str:
     return head if on else f"{head} · not taught yet"
 
 
+def hint_text(missing) -> str:
+    """The Review dock's short hint after a run where many frames failed (two lines)."""
+    if missing.few_accepted:
+        return f"Only {missing.accepted} of {missing.run} frames measured."
+    return f"{round(100 * missing.share)}% of the bubble's frames have no result."
+
+
 @contextmanager
 def _wait_cursor():
     QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -274,16 +281,10 @@ class MLAssistController:
             return
         missing = failures(state, info.get("frames", ()))
         if missing.worth_a_hint():
-            if missing.few_accepted:
-                text = f"Auto accepted only {missing.accepted} of {missing.run} frames."
-                short = f"only {missing.accepted} of {missing.run} frames accepted"
-            else:
-                pct = round(100 * missing.share)
-                text = f"{missing.missing} frames ({pct}%) inside the bubble's lifetime have no result."
-                short = f"{pct}% without a result"
-            self.hint.show_text(f"{text} ML assist can help: confirm a few frames and teach it.")
+            self.hint.show_text(hint_text(missing))
             header = self.w.header
-            header.set_status(f"{header.status_text()} — {short}: try ML assist", _WARN)
+            header.set_status(f"{header.status_text()} · ML assist can help", _WARN,
+                              header.status_details())
 
     def _on_results_changed(self) -> None:
         self.teach.on_results_changed()

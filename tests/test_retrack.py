@@ -1,6 +1,6 @@
-"""Automatic re-tracking after result edits (Auto mode): debounced, locked like
-a run, cancelled by a new edit or Stop, limited to frames that do not look
-good, and undone in one Ctrl+Z."""
+"""Automatic re-tracking after result edits (Auto mode): debounced, quiet (locked
+like a run only when it runs long), cancelled by a new edit, a Fit or Stop,
+limited to frames that do not look good, and undone in one Ctrl+Z."""
 
 from __future__ import annotations
 
@@ -143,20 +143,58 @@ def _started(qapp):
     return FakeWorker.made[-1]
 
 
-def test_edit_starts_a_retrack_after_the_debounce_and_locks_editing(qapp, app):
+def test_edit_starts_a_quiet_retrack_after_the_debounce(qapp, app):
+    """A short re-track only says "Updating…": Fit stays usable, no red Stop."""
     window, controller = app
+    controller.retrack.escalate_timer.setInterval(60_000)
     _edit(controller)
+    header = window.header.status_text()  # what the edit said
     assert not FakeWorker.made  # debounced
     worker = _started(qapp)
     lp = window.left_panel
     assert controller.retrack.is_running()
-    assert not lp.measure_panel.isEnabled()
+    assert window.status_bar.activity_text() == "Updating…"
+    assert lp.measure_panel.isEnabled() and lp.fit_controls.fit_button.isEnabled()
+    assert lp.fit_controls.progress_row.isHidden()
+    assert window.header.status_text() == header  # nothing to report yet
+    worker.finish()
+    assert not controller.retrack.is_running() and window.status_bar.activity_text() == ""
+
+
+def test_a_long_retrack_locks_editing_and_offers_stop(qapp, app):
+    window, controller = app
+    controller.retrack.escalate_timer.setInterval(20)
+    _edit(controller)
+    worker = _started(qapp)
+    lp = window.left_panel
+    _wait(qapp, lambda: not lp.measure_panel.isEnabled())
     assert controller.review.panel.isEnabled()  # Review goes on: an edit restarts it
     assert lp.fit_controls.stop_button.isVisibleTo(lp) and lp.fit_controls.stop_button.isEnabled()
     assert "Re-tracking" in lp.fit_controls.progress_text()
     worker.finish()
     assert not controller.retrack.is_running() and lp.measure_panel.isEnabled()
     assert lp.fit_controls.progress_row.isHidden()
+
+
+def test_fit_during_a_quiet_retrack_cancels_it(qapp, app):
+    window, controller = app
+    controller.retrack.escalate_timer.setInterval(60_000)
+    _edit(controller)
+    worker = _started(qapp)
+    controller.bus.emit("run_state_changed", True)  # what Fit announces when it starts
+    assert worker.stop_requested and not controller.retrack.is_running()
+    controller.bus.emit("run_state_changed", False)
+
+
+def test_a_retrack_that_changes_nothing_keeps_the_header(qapp, app):
+    window, controller = app
+    controller.retrack.escalate_timer.setInterval(60_000)
+    window.header.set_status("Frame 2 fixed", "#10b981")
+    controller.retrack._on_results_changed()
+    worker = _started(qapp)
+    controller.retrack._allowed = frozenset()  # the solve may change no frame
+    worker.finish()
+    assert window.header.status_text() == "Frame 2 fixed"
 
 
 def test_only_unfitted_and_queued_frames_change(qapp, app):
@@ -170,7 +208,7 @@ def test_only_unfitted_and_queued_frames_change(qapp, app):
     assert state.fit_locked[1] and state.radius[1] == before[1].radius
     assert state.fit_source[4] == state.fit_source[5] == FitSource.TRACKED
     text = window.header._status_label.text()
-    assert "Re-tracked: 2 frame(s) updated" in text and "Ctrl+Z" in text
+    assert "Tracking updated 2 nearby frames" in text and "Ctrl+Z" in text
 
 
 def test_ctrl_z_undoes_the_whole_retrack(qapp, app):
@@ -243,7 +281,9 @@ def test_stop_cancels_the_retrack(qapp, app):
     window, controller = app
     state = controller._get_state()
     _edit(controller)
+    controller.retrack.escalate_timer.setInterval(20)
     worker = _started(qapp)
+    _wait(qapp, lambda: window.left_panel.fit_controls.stop_button.isEnabled())
     window.left_panel.fit_controls.stop_button.click()
     assert worker.stop_requested and not controller.retrack.is_running()
     assert "Re-track stopped" in window.header._status_label.text()
@@ -346,5 +386,4 @@ def test_real_retrack_after_an_edit_leaves_good_frames_alone(qapp, gui, drift_se
     controller._on_lock_range(0, 0, locked=True)  # the edit
     _wait(qapp, controller.retrack.is_running, 10.0)
     _wait(qapp, lambda: not controller.retrack.is_running(), 240.0)
-    assert "Re-tracked" in window.header._status_label.text()
     assert all(same_result(capture(state, i), before[i]) for i in good)

@@ -187,7 +187,8 @@ def test_tracking_repairs_frames_a_click_cannot(qapp, gui, drift_sequence):
     tracked, events = _fit_all(qapp, gui, folder, truth, track=True)
     assert _correct(tracked, truth) >= single_ok + 4
     assert (tracked.fit_source == FitSource.TRACKED).any()
-    assert "tracking re-measured" in window.header._status_label.text()
+    assert window.header.status_text().startswith("Done: ")
+    assert "tracking re-measured" in window.header.status_details()  # a routine note
     assert events  # autosave and views were told
 
 

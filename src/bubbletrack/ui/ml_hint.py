@@ -1,4 +1,7 @@
-"""The short, non-blocking hint 'many frames failed: try ML assist' (Review dock)."""
+"""The short, non-blocking hint 'many frames failed: try ML assist' (Review dock).
+
+The text says what failed in a few words; the button says what to do.
+"""
 
 from __future__ import annotations
 
@@ -22,9 +25,10 @@ class MLHint(QFrame):
         self._text.setWordWrap(True)
         self._text.setStyleSheet("color:#fcd34d; border:none;")
         self._text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._open = QPushButton("ML assist…")
+        self._open = QPushButton("Try ML assist…")
         self._open.setObjectName("secondaryBtn")
-        self._open.setToolTip("Teach ML assist on a few frames, then apply it to the recording")
+        self._open.setToolTip("ML assist can help on hard recordings: confirm a few frames\n"
+                              "or paint a few strokes to teach it, then apply it")
         self._open.clicked.connect(self.open_clicked)
         close = QToolButton()
         close.setText("×")

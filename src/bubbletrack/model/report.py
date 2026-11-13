@@ -85,7 +85,7 @@ def _source_counts(state) -> str:
 
 
 def build_report_quality(state) -> dict[str, str]:
-    """Return the "Fit Quality" section of the report as label -> text.
+    """Return the "Confidence" section of the report as label -> text.
 
     Confidence statistics use the fitted frames that were scored (the
     Edge engine scores them; other modes leave them unscored).  Flagged
@@ -168,7 +168,7 @@ def generate_report(
     pdf.ln(5)
     _print_section(pdf, "Results Summary", stats)
     pdf.ln(5)
-    _print_section(pdf, "Fit Quality", build_report_quality(state))
+    _print_section(pdf, "Confidence", build_report_quality(state))
 
     # Chart image
     if chart_image_path and Path(chart_image_path).exists():

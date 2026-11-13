@@ -104,9 +104,11 @@ class TestDefaultWindow:
         assert not hasattr(lp, "manual_tab") and not hasattr(lp, "tab_bar")
         assert not any("Pre-tune" in t for t in _texts(lp, QLabel))
 
-    def test_status_bar_mode_names_no_removed_tab(self, gui):
+    def test_status_bar_shows_no_mode(self, gui):
         window, _ = gui
-        assert window.status_bar._mode_label.text() == "Mode: Measure"
+        texts = [lbl.text() for lbl in window.status_bar.findChildren(QLabel)]
+        assert not any(t.startswith("Mode:") for t in texts)
+        assert window.status_bar.scale_text() == "Scale: not set"
 
     def _start(self):
         from bubbletrack.controller.controller import AppController

@@ -250,7 +250,8 @@ def test_preview_line_names_the_source_and_warnings():
 
     assert line(FitSource.AUTO, "auto_ml", {"ml_guided"}) == (
         "Frame 5: Auto (ML-guided), R = 22.0 px (confidence 0.81)", False)
-    assert line(FitSource.ML, "ml", {"ml_outline"})[0].endswith("— goes to Review")
+    assert line(FitSource.ML, "ml", {"ml_outline"})[0].endswith(
+        "— will be listed in Review for you to check")
     assert "elsewhere" in line(FitSource.AUTO, "auto", {"ml_disagrees"})[0]
     text, warn = line(FitSource.AUTO, "auto", {"ml_unfamiliar"}, protected=frozenset({4}))
     assert warn and "your result here is kept" in text and "unlike the taught ones" in text

@@ -5,8 +5,8 @@
     Paint a few strokes: green on the bubble, red on what is not ...
     Look at these frames
     [preview]      [preview]
-    Frame 12 ✓     Frame 40
-    [Correct]      [Correct]
+    Frame 12 ✓        Frame 40
+    [Looks right ✓]  [Looks right ✓]
     [Bubble (B)] [Background (G)] [Eraser (E)]   Size [ 5 ] px
     [Undo stroke] [Clear frame]
     2 verified frames, 3 strokes — ready
@@ -38,6 +38,11 @@ HELP_TEXT = ("Paint a few strokes on a frame: green on the bubble, red on what i
 THUMB_SIZE = (132, 88)
 _OK, _WARN, _DIM = "#10b981", "#f59e0b", "#a1a1aa"
 _CHECK = "✓"
+LOOKS_RIGHT = f"Looks right {_CHECK}"
+IN_REVIEW = "will be listed in Review for you to check"
+# The active brush stands out (the shared button style has no checked look).
+_TOOL_STYLE = ("QPushButton:checked { background:#6366f1; color:#ffffff;"
+               " border:1px solid #818cf8; font-weight:bold; }")
 
 
 class _Thumb(QLabel):
@@ -50,7 +55,7 @@ class _Thumb(QLabel):
 
 
 class _Card(QFrame):
-    """One suggested frame: preview, caption and 'Correct'."""
+    """One suggested frame: preview, caption and 'Looks right ✓'."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -67,7 +72,7 @@ class _Card(QFrame):
         self.thumb.setToolTip("Show this frame")
         self.caption = QLabel()
         self.caption.setStyleSheet(f"color:{_DIM}; font-size:11px; border:none;")
-        self.correct = QPushButton("Correct")
+        self.correct = QPushButton(LOOKS_RIGHT)
         self.correct.setObjectName("secondaryBtn")
         self.correct.setToolTip("The result on this frame is right: accept (lock) it,\n"
                                 "and ML assist learns from it")
@@ -152,6 +157,7 @@ class MLTeachPanel(QWidget):
             btn = QPushButton(f"{TOOL_LABELS[tool]} ({TOOL_KEYS[tool]})")
             btn.setCheckable(True)
             btn.setObjectName("secondaryBtn")
+            btn.setStyleSheet(_TOOL_STYLE)
             btn.setToolTip(TOOL_TIPS[tool])
             btn.clicked.connect(lambda _checked, t=tool: self.tool_changed.emit(t))
             self._tool_group.addButton(btn)
@@ -201,7 +207,7 @@ class MLTeachPanel(QWidget):
         self._apply_btn = QPushButton("Apply to all frames")
         self._apply_btn.setToolTip("Measure every frame you have not confirmed with ML assist\n"
                                    "(manual, circle-fixed and locked frames are kept).\n"
-                                   "ML's own outlines go to the Review queue.")
+                                   f"ML's own outlines {IN_REVIEW}.")
         self._apply_btn.clicked.connect(self.apply_clicked)
         self._close_btn = QPushButton("Close")
         self._close_btn.setObjectName("secondaryBtn")

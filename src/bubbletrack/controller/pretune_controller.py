@@ -398,7 +398,7 @@ class PretuneController(BaseController):
         # Overwrite per-frame status with autotune summary
         self.w.header.set_status(
             f"Auto-tuned: thr={result.threshold:.2f}, RF={result.removing_factor}"
-            f" \u2014 confidence {int(q.score * 100)}%"
+            f" \u2014 confidence {q.score:.2f}"
             f" ({result.candidates_evaluated} tested)",
             "#10b981",
         )
