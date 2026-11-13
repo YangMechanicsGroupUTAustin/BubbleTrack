@@ -12,12 +12,12 @@ The colours follow the dark theme (style.qss); everything else about a row
 from __future__ import annotations
 
 import html
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import NamedTuple
 
 from PyQt6.QtCore import QModelIndex, QRectF, QSize, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
-from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
+from PyQt6.QtWidgets import QMenu, QStyle, QStyledItemDelegate, QStyleOptionViewItem, QWidget
 
 from bubbletrack.controller.review_segments import ReviewSegment
 from bubbletrack.ui.review_text import SEP, file_tag, problem_text, segment_title, tooltip_lines
@@ -58,6 +58,24 @@ def tooltip_html(segment: ReviewSegment, images: Sequence[str]) -> str:
     lines.insert(1, f"<span style='color:{TIER_COLOURS[segment.tier]}'>●</span> "
                     f"{TIER_NAMES[segment.tier]}")
     return "<br>".join(lines)
+
+
+def row_menu(parent: QWidget, export_case: Callable[[], None]) -> QMenu:
+    """A row's right-click menu (it acts on that row without selecting it)."""
+    menu = QMenu(parent)
+    menu.setToolTipsVisible(True)
+    action = menu.addAction("Export as hard case...")
+    action.setToolTip("Save these frames, the settings and your fixes as one .zip "
+                      "to send to the maintainer")
+    action.triggered.connect(export_case)
+    return menu
+
+
+def tier_key_html() -> str:
+    """One line under the list: what the row dots mean."""
+    parts = [f"<span style='color:{TIER_COLOURS[t]}'>●</span>&nbsp;{TIER_NAMES[t]}"
+             for t in ("high", "medium", "low")]
+    return f"<span style='color:{_FAINT}'>" + "&nbsp;&nbsp; ".join(parts) + "</span>"
 
 
 def _font(base: QFont, px: int, weight: QFont.Weight) -> QFont:

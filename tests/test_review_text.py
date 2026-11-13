@@ -3,20 +3,22 @@
 from __future__ import annotations
 
 from bubbletrack.controller.review_queue import ReviewItem
-from bubbletrack.controller.review_segments import ReviewSegment
+from bubbletrack.controller.review_segments import CATEGORIES, OTHER, ReviewSegment
 from bubbletrack.ui.review_text import (
     accept_all_question,
     detail_text,
+    done_text,
     file_number,
     file_tag,
     item_text,
     position_text,
+    problem_sentence,
     problem_text,
-    progress_text,
     reason_text,
     segment_text,
     segment_title,
     span_text,
+    summary_text,
     tooltip_lines,
 )
 
@@ -42,6 +44,13 @@ class TestFileNumbers:
         assert file_tag(("C:/d/bubble.tif",), 0) == ""  # would just repeat the index
         assert file_tag(("video:0",), 0) == ""
         assert file_tag((), 3) == ""
+
+    def test_file_tag_only_when_it_differs_from_the_frame_number(self):
+        """Not 'Frame 112 · _112': the tag would only repeat the number."""
+        images = tuple(f"C:/d/run_{i + 1:03d}.tif" for i in range(120))
+        assert file_tag(images, 111) == "" and file_tag(images, 0) == ""
+        assert segment_title(_segment("jump", 111), images) == "Frame 112"
+        assert file_tag(("C:/d/run_0007.tif",), 0) == "_0007"
 
 
 class TestReasons:
@@ -86,11 +95,22 @@ class TestRows:
         assert problem_text(plain) == "No result"
         assert problem_text(guessed) == "No result \u2014 Auto has a guess"
 
-    def test_progress(self):
-        assert progress_text(48, 48) == "48 frames to check"
-        assert progress_text(12, 48) == "12 of 48 frames to check"
-        assert progress_text(0, 48) == "All 48 checked"
-        assert progress_text(0, 0) == "Nothing to check"
+    def test_progress_counts_checks_and_information_apart(self):
+        assert summary_text(48, 48, 0) == "48 frames to check"
+        assert summary_text(1, 1, 0) == "1 frame to check"
+        assert summary_text(4, 4, 11) == "4 frames to check · 11 for information"
+        assert summary_text(12, 48, 0) == "12 of 48 frames to check"
+        assert summary_text(0, 0, 11) == "Nothing to check · 11 for information"
+        assert summary_text(0, 0, 0) == "Nothing to check"
+
+    def test_progress_never_counts_skipped_frames_as_checked(self):
+        assert summary_text(0, 48, 0) == "All 48 checked"
+        assert summary_text(0, 15, 0, skipped=2) == "13 checked · 2 skipped"
+        assert summary_text(0, 15, 3, skipped=15) == "0 checked · 15 skipped · 3 for information"
+
+    def test_done_page_uses_the_queue_words(self):
+        assert done_text(0) == "All frames to check are done.\nNext: export R(t)."
+        assert done_text(2) == "All frames to check are done (2 skipped).\nNext: export R(t)."
 
     def test_position_and_span(self):
         segment = _segment("lost", 10, 12, 13)
@@ -104,6 +124,24 @@ class TestRows:
             "Accept 229 frames? 213 of them are Auto's guesses you have not looked at."
         assert accept_all_question(5, 1) == \
             "Accept 5 frames? 1 of them is Auto's guess you have not looked at."
+
+
+class TestProblemSentences:
+    """The card's first sentence says the row's problem in the row's words."""
+
+    def test_every_category_repeats_its_row_label(self):
+        for category in (*CATEGORIES, OTHER):
+            sentence = problem_sentence(category.key)
+            words = category.label.replace(":", "").split()
+            assert all(w in sentence for w in words), (category.key, sentence)
+
+    def test_examples(self):
+        assert problem_sentence("lost") == "Auto lost the bubble here."
+        assert problem_sentence("no_result") == "No result here."
+        assert problem_sentence("tracking") == "Tracking changed it here."
+        assert problem_sentence("low_confidence", 0.454) == \
+            "Not sure here: low confidence (0.45)."
+        assert problem_sentence("before") == "Before the bubble."
 
 
 class TestDetails:

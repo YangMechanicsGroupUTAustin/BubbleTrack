@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QAction
 from PyQt6.QtWidgets import QDockWidget, QMainWindow, QMenu, QVBoxLayout, QWidget
 
 from bubbletrack.ui.fix_strip import FixStrip
@@ -41,13 +42,15 @@ def install_review(window: QMainWindow, app_controller):
     dock = QDockWidget("Review", window)
     dock.setObjectName("ReviewDock")
     # Not floatable: the review keys are window shortcuts of the main window.
-    dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetClosable
-                     | QDockWidget.DockWidgetFeature.DockWidgetMovable)
+    # Not closable: the most-used panel must not vanish by a stray click.
+    dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable)
     dock.setWidget(body)
     window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
-    toggle = dock.toggleViewAction()
-    toggle.setText("&Review Queue")
-    _view_menu(window).addAction(toggle)
+    # View > Review brings it to the front (e.g. behind ML assist's tab).
+    show = QAction("&Review", window)
+    show.setToolTip("Show the Review panel")
+    show.triggered.connect(lambda: (dock.show(), dock.raise_()))
+    _view_menu(window).addAction(show)
     review = ReviewController(window, app_controller, panel, dock, strip)
     # The chart's "Fix frame N..." (a point's right-click menu) opens the same fix.
     window.radius_chart.fix_requested.connect(review.start_fix)

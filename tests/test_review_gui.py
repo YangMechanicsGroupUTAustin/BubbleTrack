@@ -11,7 +11,9 @@ from PyQt6.QtGui import QAction, QShortcut
 from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QComboBox, QDockWidget, QSpinBox
 
-from bubbletrack.controller.review_controller import build_review_items, install_review
+from bubbletrack.controller.review_controller import (
+    REVIEW_HIDDEN, build_review_items, install_review,
+)
 from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import update_state
@@ -66,11 +68,13 @@ class TestInstall:
         assert docks == [rc.dock]
         view = [a for a in window.menuBar().actions() if a.text().replace("&", "") == "View"]
         assert len(view) == 1
-        toggle = next(a for a in view[0].menu().actions() if a.text() == "&Review Queue")
-        assert toggle.isCheckable() and toggle.isChecked()
-        toggle.trigger()
-        assert rc.dock.isHidden()
-        toggle.trigger()
+        # m7: no close button (a stray click hid the most-used panel); still movable
+        assert not rc.dock.features() & QDockWidget.DockWidgetFeature.DockWidgetClosable
+        assert rc.dock.features() & QDockWidget.DockWidgetFeature.DockWidgetMovable
+        show = next(a for a in view[0].menu().actions() if a.text() == "&Review")
+        assert not show.isCheckable()  # it shows the panel; nothing hides it
+        rc.dock.hide()
+        show.trigger()
         assert not rc.dock.isHidden()
 
     def test_installed_once_at_startup(self, gui):
@@ -78,7 +82,7 @@ class TestInstall:
         assert install_review(window, controller) is controller.review
         view = [a for a in window.menuBar().actions() if a.text().replace("&", "") == "View"]
         assert len(view) == 1
-        assert [a.text() for a in view[0].menu().actions()].count("&Review Queue") == 1
+        assert [a.text() for a in view[0].menu().actions()].count("&Review") == 1
 
     def test_empty_until_something_is_suspicious(self, review):
         _, controller, rc = review
@@ -96,8 +100,8 @@ class TestInstall:
         state.fit_flags[5] = frozenset({"non_circular"})
         rc.refresh()
         assert rc.panel.frames() == [2, 5]
-        assert rc.panel.texts() == ["Frame 3 · _003 · Not sure: low confidence",
-                                    "Frame 6 · _006 · Outline not round"]
+        assert rc.panel.texts() == ["Frame 3 · Not sure: low confidence",
+                                    "Frame 6 · Outline not round"]
         assert counts == [2]
 
     def test_locked_frames_are_excluded(self, review):
@@ -113,7 +117,7 @@ class TestInstall:
         state = _fitted(controller, conf=np.nan)
         state.radius[3] = 60.0
         rc.refresh()
-        assert rc.panel.texts() == ["Frame 4 · _004 · Radius jumps"]
+        assert rc.panel.texts() == ["Frame 4 · Radius jumps"]
 
     def test_set_extra_merges_and_new_source_resets(self, review, make_sequence):
         from bubbletrack.controller.review_controller import ReviewItem
@@ -148,8 +152,10 @@ class TestActions:
         state = _flag(controller, rc, f2=0.1, f5=0.3)
         rc.panel.step(1)
         rc.perform("accept")
+        assert _shown(controller) == 5
         controller._on_undo()
         assert not state.fit_locked[2] and 2 in rc.panel.frames()
+        assert _shown(controller) == 2  # back to the frame undone, like the feedback's Undo
 
     def test_no_bubble_clears_and_locks_the_frame_and_undo_restores(self, review):
         _, controller, rc = review
@@ -193,8 +199,9 @@ class TestActions:
         state = _flag(controller, rc, f2=0.1)
         controller.file_ctrl.on_frame_changed(7)  # not flagged, in no row
         assert rc.panel.card.isVisibleTo(rc.panel)
-        assert rc.panel.card.title.text() == "Frame 8 · _008"
-        assert rc.panel.card.advice.text().startswith("Not flagged.")
+        assert rc.panel.card.title.text() == "Frame 8"  # its file _008 adds nothing
+        assert rc.panel.card.advice.text() == "Not flagged — nothing to do here."
+        assert rc.panel.card.recommended() is None  # nothing filled
         assert rc.panel.card.buttons["accept_all"].isHidden()
         rc.perform("no_bubble")
         assert state.radius[7] == -1.0 and state.fit_locked[7]
@@ -237,7 +244,7 @@ class TestCardAndFeedback:
         assert [b.text() for b in (card.buttons["accept"], card.buttons["fix"],
                                    card.buttons["no_bubble"])] == [
             "Accept this frame", "Fix with a circle", "No bubble here"]
-        assert card.advice.text() == ("Low confidence (0.20). "
+        assert card.advice.text() == ("Not sure here: low confidence (0.20). "
                                       "Accept it if the outline sits on the bubble wall.")
         controller.file_ctrl.on_frame_changed(5)
         assert card.recommended() == "fix"
@@ -274,7 +281,7 @@ class TestCardAndFeedback:
         rc.perform("accept")
         assert rc.panel._summary.text() == "All 2 checked"
         page = rc.panel.done_page
-        assert page.text().startswith("All done") and page.offers_export()
+        assert page.text().startswith("All frames to check are done.") and page.offers_export()
         assert rc.panel.feedback.text().endswith("All done.")
         exported = []
         window.export_requested.disconnect()  # not the real (modal) Export Results dialog
@@ -303,17 +310,27 @@ class TestReviewFindings:
         rc.perform("accept")
         assert new.fit_locked[0]
 
-    def test_the_feedback_undo_undoes_exactly_its_own_action(self, review):
+    def test_a_fix_hides_the_last_actions_feedback_and_undo(self, review):
+        """Polish 5: the strip is the one place to act while fixing."""
         _, controller, rc = review
         state = _flag(controller, rc, f2=0.1, f5=0.3)
         rc.panel.step(1)
         rc.perform("accept")  # frame 2, then on to 5
+        assert rc.panel.feedback.offers_undo()
         rc.perform("fix")
-        rc.fix.strip.points_requested.emit()
-        controller.manual_ctrl.on_point_clicked(200.0, 100.0)  # a clicked point
+        assert rc.panel.feedback.isHidden()
+        rc.fix.cancel()
+        assert rc.panel.feedback.isHidden() and state.fit_locked[2]
+        controller._on_undo()  # Ctrl+Z still undoes the accept, and shows its frame
+        assert not state.fit_locked[2] and controller._get_state().image_no == 2
+
+    def test_the_feedback_undo_shows_the_frame_it_restored(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        rc.perform("accept")  # frame 2, then on to 5
         rc.panel.feedback._undo.click()
-        assert not state.fit_locked[2]  # the accept, not the point
-        assert controller._get_state().image_no == 2
+        assert not state.fit_locked[2] and controller._get_state().image_no == 2
 
     def test_ctrl_z_elsewhere_retires_the_feedback(self, review):
         _, controller, rc = review
@@ -339,7 +356,8 @@ class TestReviewFindings:
         rc.perform("accept")
         controller.file_ctrl.on_frame_changed(2)  # back to the accepted frame
         assert rc.panel.card.recommended() is None
-        assert rc.panel.card.advice.text().startswith("Accepted (locked).")
+        assert rc.panel.card.advice.text() == "Accepted (locked): nothing to do here."
+        assert rc.panel.card.buttons["accept"].isHidden()  # polish 3: nothing to accept
 
     def test_all_done_is_only_said_when_nothing_is_hidden(self, review):
         _, controller, rc = review
@@ -471,13 +489,18 @@ class TestKeys:
             QTest.keyClick(field, key)
         assert not state.fit_locked[2] and state.radius[2] > 0
 
-    def test_keys_are_off_while_the_dock_is_hidden(self, qapp, review):
+    def test_keys_say_where_the_hidden_dock_is_and_do_nothing(self, qapp, review):
+        """m7: A/F/N used to do nothing at all once the dock was closed."""
         window, controller, rc = review
         _show(qapp, window)
         state = _flag(controller, rc, f2=0.1)
         rc.panel.step(1)
-        rc.dock.hide()
+        rc.dock.hide()  # View > Review
         qapp.processEvents()
-        assert not any(sc.isEnabled() for sc in rc.shortcuts.shortcuts.values())
         QTest.keyClick(window, Qt.Key.Key_A)
         assert not state.fit_locked[2]
+        assert window.header.status_text() == REVIEW_HIDDEN
+        rc.dock.show()
+        qapp.processEvents()
+        QTest.keyClick(window, Qt.Key.Key_A)
+        assert state.fit_locked[2]

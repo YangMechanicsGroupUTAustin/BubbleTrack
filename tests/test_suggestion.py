@@ -17,7 +17,8 @@ from bubbletrack.model.result_history import capture, record_edit, restore, same
 from bubbletrack.model.session import load_session, save_session
 from bubbletrack.model.state import AppState, clear_frame_result
 from bubbletrack.model.suggestion import (
-    Suggestion, from_json, make_suggestion, same_suggestion, shown_suggestion, to_json,
+    PRE_BUBBLE_MIN_CONFIDENCE, Suggestion, first_result, from_json, make_suggestion,
+    same_suggestion, shown_suggestion, suggested_mask, to_json,
 )
 
 OUTLINE = np.array([[85.0, 200.0], [125.0, 240.0], [165.0, 200.0], [125.0, 160.0]])
@@ -117,6 +118,50 @@ def test_shown_only_while_the_frame_has_no_result_and_is_unlocked():
     state.fit_locked[1] = True
     assert shown_suggestion(state, 1) is None
     assert shown_suggestion(AppState(), 0) is None  # nothing loaded
+
+
+class TestBeforeTheBubble:
+    """A weak guess before the bubble's first result is debris, not a bubble."""
+
+    def _recording(self, guesses: dict[int, float]) -> AppState:
+        state = _state(8)
+        state.radius[5:] = 30.0  # the bubble's first result is frame 6
+        for frame, confidence in guesses.items():
+            state.fit_suggestion[frame] = _suggestion(confidence=confidence)
+        return state
+
+    def test_weak_guesses_before_the_first_result_are_not_offered(self):
+        state = self._recording({0: 0.0, 1: 0.13, 2: 0.06})
+        assert all(shown_suggestion(state, f) is None for f in (0, 1, 2))
+        assert not suggested_mask(state, 8)[:3].any()
+
+    def test_a_solid_guess_before_the_first_result_is_offered(self):
+        state = self._recording({3: PRE_BUBBLE_MIN_CONFIDENCE, 4: 0.3})
+        assert shown_suggestion(state, 3) is state.fit_suggestion[3]
+        assert suggested_mask(state, 8)[[3, 4]].all()
+
+    def test_weak_guesses_after_the_first_result_are_offered(self):
+        state = self._recording({})
+        state.radius[6] = -1.0
+        state.fit_suggestion[6] = _suggestion(confidence=0.01)
+        assert shown_suggestion(state, 6) is state.fit_suggestion[6]
+        assert suggested_mask(state, 8)[6]
+
+    def test_without_any_result_every_guess_is_offered(self):
+        state = _state(3)
+        state.fit_suggestion[0] = _suggestion(confidence=0.0)
+        assert shown_suggestion(state, 0) is state.fit_suggestion[0]
+        assert suggested_mask(state, 3)[0]
+
+    def test_an_unscored_guess_is_offered(self):
+        state = self._recording({0: float("nan")})
+        assert shown_suggestion(state, 0) is state.fit_suggestion[0]
+        assert suggested_mask(state, 8)[0]
+
+    def test_first_result(self):
+        assert first_result(self._recording({})) == 5
+        assert first_result(_state(3)) is None
+        assert first_result(AppState()) is None
 
 
 def test_clear_frame_result_clears_the_suggestion():

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtWidgets import QMessageBox, QWidget
+from PyQt6.QtWidgets import QMessageBox, QPushButton, QWidget
 
 ACCEPT_ALL_TEXT = "Accept all"
 DETAIL = ("Each guess becomes a locked result, like Accept on that frame. "
@@ -18,16 +18,23 @@ def accept_all_detail(empty: int) -> str:
 
 
 def accept_all_box(parent: QWidget | None, question: str, empty: int = 0) -> QMessageBox:
-    """The question as a message box (not shown): Accept all / Cancel."""
+    """The question as a message box (not shown): Accept all / Cancel.
+
+    Cancel is the default (Enter) and the escape: storing unseen guesses
+    takes a deliberate click.  It is created with the stylesheet's quiet
+    look (a name set after polishing would not restyle it).
+    """
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle("Accept all")
     box.setText(question)
     box.setInformativeText(accept_all_detail(empty))
-    accept = box.addButton(ACCEPT_ALL_TEXT, QMessageBox.ButtonRole.AcceptRole)
-    cancel = box.addButton(QMessageBox.StandardButton.Cancel)
+    box.addButton(ACCEPT_ALL_TEXT, QMessageBox.ButtonRole.AcceptRole)
+    cancel = QPushButton("Cancel")
     cancel.setObjectName("secondaryBtn")  # the app stylesheet's quiet button
-    box.setDefaultButton(accept)
+    box.addButton(cancel, QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(cancel)
+    box.setEscapeButton(cancel)
     return box
 
 

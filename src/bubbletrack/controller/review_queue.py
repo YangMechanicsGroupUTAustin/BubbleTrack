@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 
 import numpy as np
@@ -40,9 +40,14 @@ REASON_WEIGHTS: dict[str, int] = {
     "cloud": 30,
     "shoulder": 25,
     "ml_unfamiliar": 20,  # unlike the frames ML assist was taught on (context only)
+    "before": 10,  # before the bubble: no result, looks like the reference (information)
 }
 UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
-REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
+BEFORE = "before"
+"""A frame before the bubble's first result that looks like the reference
+frame (``review_background``): listed for information only, with "No bubble"
+as its action.  It replaces every other reason of the frame."""
+REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected", BEFORE}
 # Routine engine flags: they describe a listed frame and add to its rank, but
 # never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
 CONTEXT_REASONS = CONTEXT_FLAGS | {"ml_unfamiliar"}
@@ -76,11 +81,13 @@ class ReviewItem:
 
 
 def build_review_items(state: AppState, extra: Iterable[ReviewItem] | None = None,
-                       ) -> list[ReviewItem]:
+                       *, before: Collection[int] = ()) -> list[ReviewItem]:
     """Frames worth a second look, most likely wrong first, then by frame.
 
     *extra* (e.g. the sequence solver's list) is merged per frame.  Locked
-    frames (accepted in review) are never listed.
+    frames (accepted in review) are never listed.  Listed frames without a
+    result in *before* (before the bubble, like the reference frame) are
+    listed for that reason alone.
     """
     if state.radius is None:
         return []
@@ -90,6 +97,10 @@ def build_review_items(state: AppState, extra: Iterable[ReviewItem] | None = Non
     locked = _per_frame(state.fit_locked, n, False, bool)
     own = _frame_reasons(state, radius, conf)
     added = _merge_extra(extra, n)
+    for f in before:
+        if 0 <= f < n and (f in own or f in added) and not radius[f] > 0:
+            own[f] = [BEFORE]
+            added.pop(f, None)
     items = [_make_item(f, own.get(f, ()), added.get(f), float(conf[f]))
              for f in sorted(set(own) | set(added)) if not locked[f]]
     items = [item for item in items if not CONTEXT_REASONS.issuperset(item.reasons)]
@@ -111,6 +122,18 @@ def jump_frames(radius: np.ndarray, threshold: float = JUMP_FRACTION) -> np.ndar
     up = (mid > prev * (1 + threshold)) & (mid > nxt * (1 + threshold))
     down = (mid < prev * (1 - threshold)) & (mid < nxt * (1 - threshold))
     return valid[1:-1][up | down]
+
+
+def in_lifetime(state: AppState, frames: Collection[int]) -> tuple[int, int]:
+    """(how many of *frames* lie in the bubble's frames, how many those are):
+    the bubble's frames run from its first to its last result."""
+    if state.radius is None:
+        return 0, 0
+    fitted = np.flatnonzero(np.asarray(state.radius, dtype=float) > 0)
+    if len(fitted) == 0:
+        return 0, 0
+    first, last = int(fitted[0]), int(fitted[-1])
+    return sum(1 for f in frames if first <= f <= last), last - first + 1
 
 
 def next_after_action(old: list[int], frame: int, new: list[int]) -> int | None:

@@ -257,19 +257,30 @@ class AutoController(BaseController):
         return locked | frozenset(manual)
 
     def _ask_manual_policy(self, n_manual: int) -> str:
-        """Ask whether a fit may overwrite manual fixes: keep/overwrite/cancel."""
+        """Ask whether a fit may overwrite manual fixes: keep/overwrite/cancel.
+
+        Fixes made in Review are locked (always kept), so this only asks
+        about unlocked ones (older sessions, or frames unlocked on the chart).
+        Keep is the filled default, Replace red, Cancel quiet (Esc).
+        """
+        from PyQt6.QtWidgets import QPushButton
+
         box = QMessageBox(self.w)
         box.setIcon(QMessageBox.Icon.Question)
-        box.setWindowTitle("Manual fixes in range")
-        box.setText(
-            f"{n_manual} frame(s) in this range were fixed by hand "
-            "(manual fits or drawn circles).\n"
-            "Fit can keep them or replace them with automatic fits."
-        )
-        keep = box.addButton("Keep manual fits", QMessageBox.ButtonRole.AcceptRole)
-        overwrite = box.addButton("Overwrite", QMessageBox.ButtonRole.DestructiveRole)
-        box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setWindowTitle("Frames fixed by hand")
+        what = "1 frame was" if n_manual == 1 else f"{n_manual} frames were"
+        box.setText(f"{what} fixed by hand (a manual fit or a drawn circle) "
+                    "and not locked.")
+        box.setInformativeText("Fit can keep your fixes, or replace them with automatic fits.")
+        keep = box.addButton("Keep my fixes", QMessageBox.ButtonRole.AcceptRole)
+        overwrite = QPushButton("Replace with Auto")
+        overwrite.setObjectName("dangerBtn")
+        box.addButton(overwrite, QMessageBox.ButtonRole.DestructiveRole)
+        cancel = QPushButton("Cancel")
+        cancel.setObjectName("secondaryBtn")
+        box.addButton(cancel, QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(keep)
+        box.setEscapeButton(cancel)
         box.exec()
         clicked = box.clickedButton()
         if clicked is keep:

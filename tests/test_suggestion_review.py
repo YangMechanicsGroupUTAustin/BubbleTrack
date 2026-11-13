@@ -29,7 +29,9 @@ SHAPE, CENTRE, R = (60, 90), (30.0, 45.0), 15.0
 
 def _app(gui, tmp_path, n: int):
     window, controller = gui
-    folder = write_sequence(tmp_path / f"seq{n}", [R] * n, shape=SHAPE, center=CENTRE)
+    # frame 1 is the bubble-free reference; the others show the bubble
+    folder = write_sequence(tmp_path / f"seq{n}", [0.0] + [R] * (n - 1), shape=SHAPE,
+                            center=CENTRE)
     controller.file_ctrl.on_folder_selected(str(folder))
     controller._state = update_state(controller._get_state(), detection_mode="edge",
                                      reference_frame=0)
@@ -236,12 +238,14 @@ def test_the_real_question_box(app, qapp):
             return
         seen["text"], seen["detail"] = box.text(), box.informativeText()
         seen["buttons"] = sorted(b.text() for b in box.buttons())
-        box.button(QMessageBox.StandardButton.Cancel).click()
+        seen["default"] = box.defaultButton().text()  # Enter must not store them
+        next(b for b in box.buttons() if b.text() == "Cancel").click()
     QTimer.singleShot(0, answer)
     controller.review.perform("accept_all")
     assert seen["text"] == "Accept 3 frames? 2 of them are Auto's guesses you have not looked at."
     assert "Ctrl+Z" in seen["detail"] and "empty" not in seen["detail"]
     assert "Accept all" in seen["buttons"] and len(seen["buttons"]) == 2
+    assert seen["default"] == "Cancel"
     assert _promoted(state) == []
 
 
@@ -259,7 +263,15 @@ def test_row_tooltip_and_card_say_what_accept_does(app):
             "Accept all (Shift+A) every one") in tip
     assert "Not a bubble? No bubble (N); Shift+N for the whole row" in tip
     assert panel.texts()[0].endswith("No result — Auto has a guess · 3 frames")
-    assert panel.card.advice.text().startswith("No result, but Auto has a guess")
+    # M3: an uncertain guess (0.20) is not the filled button; the card says why
+    assert panel.card.advice.text() == ("No result here. Auto's guess (dashed) is uncertain "
+                                        "(0.20). Accept it only if it sits on the wall.")
+    assert panel.card.recommended() == "fix"
+    assert panel.card.buttons["accept"].text() == "Accept the guess"
+    state.fit_suggestion[3] = make_suggestion(R, *CENTRE, circle_outline(*CENTRE, R), 0.45)
+    controller.review.refresh()
+    assert panel.card.advice.text() == ("No result here. Auto's guess is dashed: "
+                                        "accept it if it sits on the wall.")
     assert panel.card.recommended() == "accept"
 
 

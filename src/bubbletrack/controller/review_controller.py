@@ -8,26 +8,31 @@ the R(t) chart showing the selected row, performs the actions
 (``review_flow``).  Nothing in Review deletes a result.
 
 Actions wait while Fit All runs.  A background re-track does not block
-them: an edit abandons it and restarts its countdown.
+them: an edit abandons it and restarts its countdown.  Ctrl+Z and the
+feedback line's Undo both show the frame they restored.
 """
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 import numpy as np
 from PyQt6.QtCore import pyqtBoundSignal
 from PyQt6.QtWidgets import QDockWidget
 
 from bubbletrack.controller import review_actions, suggestion_actions
+from bubbletrack.controller.circle_controller import RESULT_UNDONE
 from bubbletrack.controller.fix_mode import FixMode
 from bubbletrack.controller.review_advice import advise
+from bubbletrack.controller.review_background import BackgroundCheck, before_bubble
 from bubbletrack.controller.review_flow import ALL_DONE, ReviewFlow
 from bubbletrack.controller.review_memory import ReviewMemory
-from bubbletrack.controller.review_queue import ReviewItem, build_review_items
+from bubbletrack.controller.review_queue import ReviewItem, build_review_items, in_lifetime
 from bubbletrack.controller.review_segments import ReviewSegment, build_segments
 from bubbletrack.event_bus import RESULTS_CHANGED
+from bubbletrack.model import ml_assist
+from bubbletrack.model.result_history import ResultEdit
 from bubbletrack.model.state import AppState
 from bubbletrack.ui import review_confirm
 from bubbletrack.ui.fix_strip import FixStrip
@@ -45,6 +50,9 @@ _FRAME_ACTIONS = frozenset({"accept", "fix", "no_bubble"})
 NOTHING_TO_ACCEPT = "Nothing to accept here — F to fix, N if there is no bubble"
 NOTHING_TO_ACCEPT_IN_ROW = ("Nothing to accept in this row — F to fix a frame, "
                             "Shift+N if there is no bubble")
+REVIEW_HIDDEN = "The Review panel is hidden: View ▸ Review shows it (its keys act there)"
+REVIEW_BEHIND = "Review is behind another panel: click its Review tab (its keys act there)"
+ML_LEAD_SHARE = 0.4  # above this share of the bubble's frames to check, suggest ML assist
 
 
 class ReviewController:
@@ -57,6 +65,7 @@ class ReviewController:
         self.panel = panel
         self.dock = dock
         self.memory = ReviewMemory()  # extra items, skips, guesses seen
+        self.background = BackgroundCheck()  # which empty frames look like the reference
         self._running = False  # a run (Fit All or a re-track) writes results
         self._fit_run = False  # ... and it is Fit All: Review waits
         # (row, queue order) when a fix started inside the selected row
@@ -76,17 +85,20 @@ class ReviewController:
         app.bus.subscribe("frame_changed", self._on_frame_changed)
         app.bus.subscribe("run_finished", self._on_run_finished)
         app.bus.subscribe(RESULTS_CHANGED, lambda *_: self.refresh())
+        app.bus.subscribe(RESULT_UNDONE, self._on_undone)
 
         self.shortcuts = ReviewShortcuts(window, {
-            **{name: (lambda n=name: self.perform(n)) for name in ReviewPanel.ACTIONS},
-            "next": lambda: panel.step(1),
-            "prev": lambda: panel.step(-1),
+            **{name: (lambda n=name: self._key(lambda: self.perform(n)))
+               for name in ReviewPanel.ACTIONS},
+            "next": lambda: self._key(lambda: panel.step(1)),
+            "prev": lambda: self._key(lambda: panel.step(-1)),
         }, is_active=self._shortcuts_active)
         self.fix_keys = ReviewShortcuts(window, {
             "fix_cancel": self.fix.cancel, "fix_done": self.fix.finish_points,
         }, is_active=self._fix_keys_active, bindings=FIX_BINDINGS)
         strip.active_changed.connect(lambda _on: self.fix_keys.sync())
         strip.active_changed.connect(panel.card.set_fixing)
+        strip.active_changed.connect(self._on_fix_active)
         dock.visibilityChanged.connect(self._on_dock_visibility)
         self.refresh()
 
@@ -113,8 +125,8 @@ class ReviewController:
     def refresh(self) -> None:
         """Rebuild the queue from the current results (cheap; no-op if unchanged)."""
         state = self._state()
-        self.panel.set_segments(build_segments(self.memory.items(state)), state.images,
-                                fitted=_has_results(state))
+        self.panel.set_segments(build_segments(self._items(state)), state.images,
+                                fitted=_has_results(state), skipped=self.memory.skipped(state))
         self.panel.set_fix_label("Fix with a circle" if self._app.circle_ctrl.available()
                                  else "Fix with edge points")
         self.panel.refresh_card()
@@ -122,7 +134,14 @@ class ReviewController:
 
     def queued_frames(self) -> frozenset[int]:
         """Every frame the queue lists now (all types; skipped ones left out)."""
-        return frozenset(item.frame for item in self.memory.items(self._state()))
+        return frozenset(item.frame for item in self._items(self._state()))
+
+    def looks_empty(self, frame: int) -> bool | None:
+        """Frame *frame* looks like the reference frame (None: cannot tell)."""
+        return self.background.for_state(self._state(), frame)
+
+    def _items(self, state: AppState) -> list[ReviewItem]:
+        return self.memory.items(state, before_bubble(state, self.looks_empty))
 
     def perform(self, action: str) -> None:
         """Apply *action* (see ``ReviewPanel.ACTIONS``), then move on by itself.
@@ -264,8 +283,16 @@ class ReviewController:
         self._app.file_ctrl.on_frame_changed(frame)
 
     def _advice(self, frame: int, item: ReviewItem | None) -> CardAdvice:
-        advice = advise(self._state(), frame, item)
+        advice = advise(self._state(), frame, item, self.looks_empty)
         return CardAdvice(advice.text, advice.action, advice.guess, advice.can_accept)
+
+    def _key(self, act: Callable[[], None]) -> None:
+        """A review key: act while the dock shows, else say where it is."""
+        if self.dock.isVisible():
+            act()
+        elif not self.w.isMinimized():
+            self.w.header.set_status(REVIEW_HIDDEN if self.dock.isHidden() else REVIEW_BEHIND,
+                                     _WARN)
 
     def _show_range(self, segment: ReviewSegment | None) -> None:
         """Shade the selected run on the R(t) chart while the dock is open.
@@ -277,7 +304,7 @@ class ReviewController:
         self.w.radius_chart.set_review_span((segment.start, segment.end) if shown else None)
 
     def _shortcuts_active(self) -> bool:
-        return self.dock.isVisible() and not self._fit_run
+        return not self._fit_run  # a hidden dock answers with a hint (``_key``)
 
     def _fix_keys_active(self) -> bool:
         return self.fix.active and self.dock.isVisible() and not self._fit_run
@@ -300,15 +327,45 @@ class ReviewController:
         self.fix_keys.sync()
 
     def _on_run_finished(self, info: dict) -> None:
-        """After a Fit of every frame, start at the top of the list."""
+        """After a Fit of every frame, start at the top of the list; when
+        much of the bubble needs a check, lead with ML assist."""
         state = self._state()
         if len(info.get("frames", ())) != len(state.images or ()):
             return  # a range refit: stay where the user was
         rows = self.panel.segments()
-        if rows and self.panel.select_frame(rows[0].frames[0], keep_row=False):
+        if rows and self.panel.select_frame(rows[0].entry, keep_row=False):
             summary = self.w.header.status()  # the run's "Done — ..." stays in view
-            self._go(rows[0].frames[0])
+            self._go(rows[0].entry)
             self.w.header.set_status(*summary)
+        if info.get("edge") and not info.get("ml") and not info.get("stopped"):
+            self._lead_with_ml(state)
+
+    def _lead_with_ml(self, state: AppState) -> None:
+        """Show ML assist's hint (above the rows) when more than
+        ``ML_LEAD_SHARE`` of the bubble's frames wait for a check (and at
+        least as many frames as ML assist's own hint needs)."""
+        ml = getattr(self._app, "ml", None)
+        if ml is None or not getattr(ml, "available", False) or state.ml_assist \
+                or not ml.hint.isHidden():
+            return
+        inside, lifetime = in_lifetime(state, self.panel.check_frames())
+        if inside >= ml_assist.HINT_MIN_FRAMES and inside > ML_LEAD_SHARE * lifetime:
+            ml.hint.show_text(f"{round(100 * inside / lifetime)}% of the bubble's frames need "
+                              "a check. ML assist can help: confirm a few frames and teach it.")
+
+    def _on_undone(self, edit: ResultEdit) -> None:
+        """Ctrl+Z (or the feedback's Undo) restored *edit*: show its frame."""
+        self.flow.clear()
+        frames, shown = edit.frames, self._frame_on_screen()
+        if not frames or shown in frames:
+            self.panel.select_frame(shown)
+            return
+        self.panel.select_frame(frames[0], keep_row=False)
+        self._go(frames[0])
+
+    def _on_fix_active(self, on: bool) -> None:
+        if on:
+            self.flow.clear()  # the last action's line (and its Undo) steps aside
 
     def _on_dock_visibility(self, _visible: bool) -> None:
         self.shortcuts.sync()

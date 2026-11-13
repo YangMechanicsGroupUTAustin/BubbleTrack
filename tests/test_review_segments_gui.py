@@ -110,10 +110,9 @@ class TestSelection:
         qapp.processEvents()
         _flag(controller, rc, low=(2, 3, 5))
         rc.panel.step(1)
-        toggle = rc.dock.toggleViewAction()  # View > Review Queue
-        toggle.trigger()
-        assert rc.dock.isHidden() and window.radius_chart.review_span() is None
-        toggle.trigger()
+        rc.dock.hide()
+        assert window.radius_chart.review_span() is None
+        rc.dock.show()
         assert window.radius_chart.review_span() == (2, 5)
 
     def test_stepping_through_the_span_keeps_the_row(self, review):
@@ -123,20 +122,25 @@ class TestSelection:
         segment = rc.panel.current_segment()
         controller.file_ctrl.on_frame_changed(4)  # the unflagged frame inside
         assert rc.panel.current_segment() == segment and rc.panel.current_frame() == 4
-        assert rc.panel.card.advice.text().startswith("Not flagged.")
+        assert rc.panel.card.advice.text() == "Not flagged — nothing to do here."
+        assert rc.panel.card.recommended() is None
         assert rc.panel.card.position.text() == "3 left in this row"
         controller.file_ctrl.on_frame_changed(6)  # past the end
         assert rc.panel.current_segment() is None
 
-    def test_a_frame_of_another_type_inside_the_span_shows_its_own_reasons(self, review):
+    def test_a_frame_of_another_kind_joins_the_row_and_says_its_own_problem(self, review):
+        """M4: one row per span (no 'Frame 5' inside 'Frames 4-6'); the card
+        names the frame's problem in the rows' words."""
         _, controller, rc = review
         state = _flag(controller, rc, low=(4,), conf=0.3)
         rc.set_extra([ReviewItem(f, ("lost",), 0) for f in (3, 5)])
-        rc.panel.step(1)  # Frames 4-6, lost track
-        assert rc.panel.current_segment().frames == (3, 5)
+        assert rc.panel.texts() == ["Frames 4–6 · Auto lost the bubble · 3 frames"]
+        rc.panel.step(1)
+        assert _shown(controller) == 3  # the row's first frame is one of its kind
+        assert rc.panel.card.advice.text().startswith("Auto lost the bubble here.")
         controller.file_ctrl.on_frame_changed(4)
-        assert rc.panel.current_segment().frames == (3, 5)  # the row is kept
-        assert rc.panel.card.advice.text().startswith("Low confidence (0.30).")
+        assert rc.panel.current_segment().frames == (3, 4, 5)  # the row is kept
+        assert rc.panel.card.advice.text().startswith("Not sure here: low confidence (0.30).")
         assert state.fit_confidence[4] == pytest.approx(0.3)
 
     def test_scrubbing_onto_a_flagged_frame_selects_its_row(self, review):
@@ -153,16 +157,16 @@ class TestSelection:
         rc.panel.step(1)  # lost track 3-5
         controller.file_ctrl.on_frame_changed(4)  # a low-confidence frame inside
         rc.panel.set_hidden_categories({"shape"})  # an unrelated change rebuilds the list
-        assert rc.panel.current_segment().frames == (3, 5)
+        assert rc.panel.current_segment().frames == (3, 4, 5)
 
     def test_after_a_row_is_skipped_the_next_row_is_selected(self, review):
         _, controller, rc = review
-        _flag(controller, rc, low=(4, 6, 8), conf=0.2)
-        rc.set_extra([ReviewItem(5, ("lost",), 0), ReviewItem(7, ("jump",), 0)])
+        _flag(controller, rc, low=(8,), conf=0.2)
+        rc.set_extra([ReviewItem(2, ("lost",), 0), ReviewItem(5, ("jump",), 0)])
         assert [s.category for s in rc.panel.segments()] == ["lost", "jump", "low_confidence"]
         rc.panel.step(1)
-        rc.perform("skip")  # lost 5 goes: the jump at 7 is next
-        assert _shown(controller) == 7
+        rc.perform("skip")  # lost 2 goes: the jump at 5 is next
+        assert _shown(controller) == 5
         assert rc.panel.current_segment().category == "jump"
 
     def test_j_after_leaving_a_row_continues_from_it(self, review):
@@ -262,16 +266,22 @@ class TestRowActions:
         controller._on_undo()
         assert (state.radius[2:6] > 0).all() and not state.fit_locked.any()
 
-    def test_row_actions_leave_another_rows_frame_inside_the_span_alone(self, review):
+    def test_the_worst_frame_names_and_colours_a_mixed_row(self, review):
         _, controller, rc = review
-        state = _flag(controller, rc, low=(2, 4), conf=0.4)  # an amber row 2-4 ...
+        state = _flag(controller, rc, low=(2, 4), conf=0.4)  # amber frames 2 and 4 ...
         state.fit_flags[3] = frozenset({"jump"})  # ... around a red "Radius jumps" frame
         rc.refresh()
+        (segment,) = rc.panel.segments()
+        assert (segment.frames, segment.label, segment.tier) == ((2, 3, 4), "Radius jumps",
+                                                                  "high")
+        rc.panel.step(1)  # M2: the row opens on its jump, so the card says the row's words
+        assert _shown(controller) == 3
+        assert rc.panel.card.advice.text().startswith("Radius jumps here.")
+        rc.panel._list.clicked.emit(rc.panel._list.model().index(0, 0))
+        assert _shown(controller) == 3
         controller.file_ctrl.on_frame_changed(2)
-        assert rc.panel.current_segment().frames == (2, 4)
         rc.perform("accept_all")
-        assert state.fit_locked[[2, 4]].all() and not state.fit_locked[3]
-        assert 3 in rc.panel.frames()  # still waiting for its own look
+        assert state.fit_locked[[2, 3, 4]].all() and rc.count == 0
 
     def test_skip_drops_the_row_until_a_result_changes(self, review):
         _, controller, rc = review

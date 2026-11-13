@@ -7,9 +7,10 @@ next to the result arrays:
 
 * it is display-only: never charted, exported, tracked or labelled, and the
   frame still counts as "no result";
-* it shows only while its frame has no result and is not locked
-  (:func:`shown_suggestion`); every path that stores an Auto fit or erases a
-  frame replaces or clears it;
+* it shows only while its frame has no result and is not locked, and a weak
+  guess before the bubble's first result (debris on a pre-laser frame) is
+  not shown at all (:func:`shown_suggestion`); every path that stores an
+  Auto fit or erases a frame replaces or clears it;
 * Accept in Review turns it into the frame's result (``edge_support``).
 
 Qt-free; sessions store suggestions with :func:`to_json` / :func:`from_json`.
@@ -25,6 +26,14 @@ from dataclasses import dataclass
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+PRE_BUBBLE_MIN_CONFIDENCE = 0.15
+"""Before the bubble's first result a guess needs this confidence to be shown.
+
+Below it, a guess on a frame before the bubble is debris or the laser flash
+(the real recordings' pre-bubble guesses score 0.00-0.13, a bubble's first
+frames 0.15-0.3).  After the first result every guess is shown: there a weak
+guess may still sit on the bubble."""
 
 
 @dataclass(frozen=True, eq=False)
@@ -93,9 +102,22 @@ def set_suggestion(state, idx: int, suggestion: Suggestion | None) -> None:
         values[idx] = suggestion
 
 
+def first_result(state) -> int | None:
+    """The first frame with a result (0-based), None while there is none."""
+    if state.radius is None or len(state.radius) == 0:
+        return None
+    fitted = np.asarray(state.radius, dtype=float) > 0
+    return int(np.argmax(fitted)) if fitted.any() else None
+
+
+def _weak(suggestion: Suggestion) -> bool:
+    return suggestion.confidence < PRE_BUBBLE_MIN_CONFIDENCE  # NaN (unscored) is not weak
+
+
 def shown_suggestion(state, idx: int) -> Suggestion | None:
     """The suggestion that applies to frame *idx*: none once the frame has a
-    result, or is locked (an accepted "no bubble here")."""
+    result, or is locked (an accepted "no bubble here"), nor for a weak guess
+    before the bubble's first result (``PRE_BUBBLE_MIN_CONFIDENCE``)."""
     suggestion = stored_suggestion(state, idx)
     if suggestion is None or state.radius is None or idx >= len(state.radius):
         return None
@@ -104,6 +126,10 @@ def shown_suggestion(state, idx: int) -> Suggestion | None:
     locked = state.fit_locked
     if locked is not None and idx < len(locked) and locked[idx]:
         return None
+    if _weak(suggestion):
+        first = first_result(state)
+        if first is not None and idx < first:
+            return None
     return suggestion
 
 
@@ -119,6 +145,11 @@ def suggested_mask(state, n: int) -> np.ndarray:
         locked = state.fit_locked
         if locked is not None and len(locked) == n:
             mask &= ~np.asarray(locked, dtype=bool)
+        first = first_result(state)
+        if first is not None:
+            weak = np.fromiter((s is not None and _weak(s) for s in values[:first]),
+                               dtype=bool, count=first)
+            mask[:first] &= ~weak
     return mask
 
 

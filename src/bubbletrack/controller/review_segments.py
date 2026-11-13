@@ -1,10 +1,13 @@
-"""Review segments (pure): runs of frames that share one problem.
+"""Review segments (pure): the rows of the Review dock.
 
 A hard recording can flag almost every frame; listing them one by one
 buries the few decisions the user has to make.  Each flagged frame gets one
-user-facing *category* (its most severe reason), and frames of the same
-category that follow each other (a gap of at most ``MAX_GAP`` frames) form a
-``ReviewSegment``: one row in the Review dock, one action for all of it.
+user-facing *category* (its most severe reason).  Flagged frames that follow
+each other (a gap of at most ``MAX_GAP`` frames) form one ``ReviewSegment``,
+whatever their categories: one row, one action for all of it, named and
+coloured by its worst frame, so rows do not overlap.  ML assist's results
+keep runs of their own (amber, never repainted red by a neighbour), and the
+frames before the bubble (``BEFORE``) form one row, for information.
 """
 
 from __future__ import annotations
@@ -13,7 +16,7 @@ from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
 
-from bubbletrack.controller.review_queue import CONTEXT_REASONS, ReviewItem
+from bubbletrack.controller.review_queue import BEFORE, CONTEXT_REASONS, ReviewItem
 
 MAX_GAP = 1  # frames that may be missing inside a segment
 SEVERITY_HIGH = 80  # likely wrong (red)
@@ -41,6 +44,7 @@ CATEGORIES: tuple[Category, ...] = (
         "non_circular", "multiple_edges", "fragmented", "clipped_completed", "shoulder"})),
     Category("collapse", "Near collapse: tiny bubble", frozenset({"collapse"})),
     Category("ml", "Outline from ML assist", frozenset({"ml_outline", "ml_disagrees"})),
+    Category(BEFORE, "Before the bubble", frozenset({BEFORE})),
 )
 # A result's source decides its row whatever else is flagged: every ML assist
 # result to check (its own outline, or Auto's where ML saw the bubble elsewhere)
@@ -49,13 +53,15 @@ SOURCE_CATEGORIES: tuple[tuple[str, str], ...] = (("ml_outline", "ml"), ("ml_dis
 OTHER = Category("other", "Worth a look", frozenset())
 _BY_REASON = {reason: c.key for c in CATEGORIES for reason in c.reasons}
 _LABELS = {c.key: c.label for c in (*CATEGORIES, OTHER)}
+# ML assist's results are always checked, but they are not likely wrong: amber.
+_CAPPED = {"ml": SEVERITY_HIGH - 1}  # category -> the highest severity it shows
 
 
 @dataclass(frozen=True)
 class ReviewSegment:
-    """Flagged frames of one category, in frame order (gaps allowed)."""
+    """Flagged frames of one span, in frame order (gaps allowed)."""
 
-    category: str  # a Category key
+    category: str  # the Category key of its worst frame (names the row)
     items: tuple[ReviewItem, ...]
 
     @property
@@ -71,6 +77,12 @@ class ReviewSegment:
         return self.items[-1].frame
 
     @property
+    def entry(self) -> int:
+        """The frame a selected row opens on: its first frame of the kind
+        that names it, so the card says the row's problem."""
+        return next(i.frame for i in self.items if category_of(i) == self.category)
+
+    @property
     def count(self) -> int:
         return len(self.items)
 
@@ -80,7 +92,7 @@ class ReviewSegment:
 
     @property
     def severity(self) -> int:
-        return max(item.severity for item in self.items)
+        return max(item_severity(item) for item in self.items)
 
     @property
     def tier(self) -> Tier:
@@ -89,6 +101,12 @@ class ReviewSegment:
     @property
     def label(self) -> str:
         return category_label(self.category)
+
+    @property
+    def categories(self) -> tuple[str, ...]:
+        """Every category in the row, the worst first."""
+        ranked = sorted(self.items, key=lambda i: -item_severity(i))
+        return tuple(dict.fromkeys(category_of(i) for i in ranked))
 
     def contains(self, frame: int) -> bool:
         """True if *frame* lies in start..end (a member or a gap frame)."""
@@ -106,6 +124,12 @@ def category_of(item: ReviewItem) -> str:
     return _BY_REASON.get(deciding, OTHER.key)
 
 
+def item_severity(item: ReviewItem) -> int:
+    """The severity a frame shows with (an ML assist result is never red)."""
+    cap = _CAPPED.get(category_of(item))
+    return item.severity if cap is None else min(item.severity, cap)
+
+
 def category_label(key: str) -> str:
     return _LABELS.get(key, OTHER.label)
 
@@ -119,6 +143,7 @@ def tier(severity: int) -> Tier:
 
 
 _TIER_RANK = {"high": 0, "medium": 1, "low": 2}
+_GROUPS = {"ml": "ml", BEFORE: BEFORE}  # categories that keep rows of their own
 
 
 def build_segments(items: Iterable[ReviewItem], max_gap: int = MAX_GAP,
@@ -127,20 +152,28 @@ def build_segments(items: Iterable[ReviewItem], max_gap: int = MAX_GAP,
     then the rest (the row's dot colour), each in frame order, so working
     down the list moves forward through the recording.
 
-    Frames of one category join a segment while at most *max_gap* frames
-    are missing in between; a frame of another category in that gap does
-    not split it (it is listed in its own segment).
+    Flagged frames join a segment while at most *max_gap* frames are
+    missing in between, whatever their categories.  Two sources keep rows
+    of their own (other frames inside their span neither split nor join
+    them): ML assist's results, so one red frame next to them does not
+    repaint a long amber run, and the frames before the bubble (one row).
     """
     runs: dict[str, list[list[ReviewItem]]] = {}
     for item in sorted(items, key=lambda i: i.frame):
-        groups = runs.setdefault(category_of(item), [])
-        if groups and item.frame - groups[-1][-1].frame - 1 <= max_gap:
+        group = _GROUPS.get(category_of(item), "")
+        groups = runs.setdefault(group, [])
+        if groups and (group == BEFORE or item.frame - groups[-1][-1].frame - 1 <= max_gap):
             groups[-1].append(item)
         else:
             groups.append([item])
-    segments = [ReviewSegment(key, tuple(group))
-                for key, groups in runs.items() for group in groups]
+    segments = [ReviewSegment(_worst_category(run), tuple(run))
+                for groups in runs.values() for run in groups]
     return sorted(segments, key=lambda s: (_TIER_RANK[s.tier], s.start, -s.severity))
+
+
+def _worst_category(items: Sequence[ReviewItem]) -> str:
+    """The category of the most severe item (the earliest one on a tie)."""
+    return category_of(max(items, key=lambda i: (item_severity(i), -i.frame)))
 
 
 def queue_frames(segments: Iterable[ReviewSegment]) -> list[int]:
