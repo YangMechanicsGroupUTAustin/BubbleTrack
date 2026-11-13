@@ -12,6 +12,8 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSlider, QSpinBox,
 VIDEO_PREFIX = "video:"
 _TRAILING_NUMBER = re.compile(r"([_\-. ]?)(\d+)$")
 _MAX_STEM_CHARS = 14
+PLAY_SPEED_TIP = ("How fast ▶ plays the frames on screen (frames per second).\n"
+                  "Not the recording's frame rate: that is set in Export.")
 
 
 def frame_file_label(name: str) -> str:
@@ -83,12 +85,13 @@ class FrameScrubber(QWidget):
         self._next.clicked.connect(self._step_forward)
         layout.addWidget(self._next)
 
-        # FPS control
+        # Playback speed of the ▶ button (not the recording's frame rate)
         self._fps_spin = QSpinBox()
         self._fps_spin.setRange(1, 60)
         self._fps_spin.setValue(10)
+        self._fps_spin.setPrefix("Play ")
         self._fps_spin.setSuffix(" fps")
-        self._fps_spin.setFixedWidth(72)
+        self._fps_spin.setToolTip(PLAY_SPEED_TIP)
         self._fps_spin.valueChanged.connect(self._on_fps_changed)
         layout.addWidget(self._fps_spin)
 

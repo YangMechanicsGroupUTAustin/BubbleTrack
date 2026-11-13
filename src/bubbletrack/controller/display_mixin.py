@@ -23,6 +23,7 @@ from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.sequence import detect_cycles
 from bubbletrack.model.state import AppState, update_state
+from bubbletrack.ui.chart_legend import CONFIDENCE, FIT_QUALITY
 from bubbletrack.ui.image_compare import CompareMode, create_overlay, create_wipe
 from bubbletrack.ui.overlay_legend import (
     CIRCLE_COLOUR, OUTLINE_COLOUR, PAINT_BUBBLE_COLOUR, LegendEntry,
@@ -210,6 +211,7 @@ def display_frame(
         window.original_panel.draw_roi_rect(state.gridx, state.gridy)
         draw_fit_overlay(state, window.original_panel, idx)
         window.radius_chart.set_current_frame(idx)
+        window.radius_chart.set_score_name(score_name(state))  # also before any fit
 
         window.status_bar.update_frame(
             frame_to_display(idx), state.total_frames,
@@ -237,7 +239,10 @@ def run_display_hooks(window, state: AppState, idx: int) -> None:
 
 
 MASK_TITLE = "Binary Mask"
-ENGINE_VIEW_TITLE = "Auto view: frame \u00f7 reference"
+ENGINE_VIEW_TITLE = "Auto view"  # short: it shares the row with the image at 1280 px
+ENGINE_VIEW_TIP = ("What Auto measures: this frame \u00f7 the reference frame (no bubble).\n"
+                   "An even grey background means the reference matches this frame;\n"
+                   "blotches or texture mean it does not (moved sample, changed lighting).")
 _VIEW_WHITE = 1.25  # view value shown as white: background (1.0) is light grey
 MASK_TINT_KEY = LegendEntry("mask", PAINT_BUBBLE_COLOUR, "fill")  # the overlay view's green tint
 EQUAL_AREA_CIRCLE = "equal-area circle"  # Auto: R = sqrt(area / pi) of the outline
@@ -262,7 +267,7 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
     blotches or texture mean it does not (moved sample, changed lighting).
     """
     panel = window.binary_panel
-    panel.set_title(ENGINE_VIEW_TITLE)
+    panel.set_title(ENGINE_VIEW_TITLE, ENGINE_VIEW_TIP)
     if view is None:
         view = engine_view_or_none(state, idx)
     if view is None:
@@ -303,6 +308,12 @@ def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
         panel.draw_fit_outline(state.circle_xy[idx], OUTLINE_COLOUR)
 
 
+def score_name(state: AppState) -> str:
+    """What the chart's marker colours mean in *state*'s method, results or not:
+    Auto's confidence, or the classic methods' geometric fit quality."""
+    return CONFIDENCE if state.detection_mode == "edge" else FIT_QUALITY
+
+
 def chart_scores(state: AppState) -> tuple[np.ndarray, str] | None:
     """Per-frame marker scores for the R(t) chart and the ramp's name.
 
@@ -314,14 +325,14 @@ def chart_scores(state: AppState) -> tuple[np.ndarray, str] | None:
     if state.radius is None:
         return None
     if state.detection_mode == "edge" and state.fit_confidence is not None:
-        return np.where(state.radius > 0, state.fit_confidence, 0.0), "confidence"
+        return np.where(state.radius > 0, state.fit_confidence, 0.0), CONFIDENCE
     scores = compute_all_quality_scores(
         state.radius, state.circle_fit_par, state.circle_xy,
         state.gridx, state.gridy,
     )
     if state.region_count is not None:
         scores[(state.region_count > 0) & (state.radius > 0)] = np.nan
-    return scores, "fit quality"
+    return scores, FIT_QUALITY
 
 
 def rmax_window(state: AppState) -> tuple[float, int, int] | None:

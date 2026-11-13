@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import numpy as np
-from PyQt6.QtCore import Qt, pyqtSignal, QRectF
-from PyQt6.QtGui import QImage, QMouseEvent, QPixmap, QResizeEvent, QWheelEvent
+from PyQt6.QtCore import QRectF, QSize, Qt, pyqtSignal
+from PyQt6.QtGui import QImage, QMouseEvent, QPainter, QPixmap, QResizeEvent, QWheelEvent
 from PyQt6.QtWidgets import (
     QGraphicsPixmapItem, QGraphicsScene, QGraphicsView,
     QHBoxLayout, QLabel, QPushButton, QSizePolicy, QVBoxLayout, QWidget,
@@ -22,6 +22,7 @@ _VIEW_STYLE = {
     "paint": "border:2px solid #22c55e; border-radius:8px; background:#0c0d12;",
     "roi": "border:2px solid #f59e0b; border-radius:8px; background:#0c0d12;",
 }
+PANEL_SIZE_HINT = (480, 360)  # px; above any toolbar's own width, so it never decides
 
 
 class ImagePanel(OverlayDrawingMixin, QWidget):
@@ -82,12 +83,12 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
     def _build_toolbar(self, title: str) -> QHBoxLayout:
         top = QHBoxLayout()
         top.setContentsMargins(8, 4, 8, 0)
-        self._title_label = QLabel(title)
+        self._title_label = ElidedLabel(title)
         self._title_label.setObjectName("sectionTitle")
         top.addWidget(self._title_label)
         top.addStretch()
 
-        self._roi_label = QLabel("")
+        self._roi_label = ElidedLabel("")  # like the title: never widens the panel
         self._roi_label.setObjectName("dimText")
         self._roi_label.setStyleSheet("font-size: 11px;")
         top.addWidget(self._roi_label)
@@ -113,10 +114,19 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
         btn.setToolTip(tip)
         return btn
 
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt override)
+        """The same for every panel, whatever its title or ROI text: panels side
+        by side split the row evenly."""
+        least = self.minimumSizeHint()
+        return QSize(max(PANEL_SIZE_HINT[0], least.width()),
+                     max(PANEL_SIZE_HINT[1], least.height()))
+
     # -- Public API --
 
-    def set_title(self, title: str) -> None:
+    def set_title(self, title: str, tooltip: str = "") -> None:
+        """The panel's title (cut with "…" when narrow) and what it shows, on hover."""
         self._title_label.setText(title)
+        self._title_label.setToolTip(tooltip)
 
     def set_image(self, img: np.ndarray):
         """Display a greyscale or binary image (float [0,1] or bool)."""
@@ -228,6 +238,34 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
     _zoom_in = zoom_in
     _zoom_out = zoom_out
     _zoom_reset = reset_zoom
+
+
+class ElidedLabel(QLabel):
+    """One-line label that ends in "…" when it is too narrow.
+
+    ``text()`` stays whole; only the drawing is cut, and the label never asks
+    for more than a few characters of width (its sizeHint is the whole text).
+    """
+
+    MIN_TEXT = "Image…"  # the narrowest it gets: about one short word
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802 (Qt override)
+        hint = super().minimumSizeHint()
+        width = min(hint.width(), self.fontMetrics().horizontalAdvance(self.MIN_TEXT))
+        return QSize(width, hint.height())
+
+    def shown_text(self) -> str:
+        """The text as drawn at the current width."""
+        return self.fontMetrics().elidedText(self.text(), Qt.TextElideMode.ElideRight,
+                                             self.contentsRect().width())
+
+    def paintEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        painter = QPainter(self)
+        self.style().drawItemText(painter, self.contentsRect(),
+                                  int(self.alignment() | Qt.AlignmentFlag.AlignVCenter),
+                                  self.palette(), self.isEnabled(), self.shown_text(),
+                                  self.foregroundRole())
+        painter.end()
 
 
 class _PanZoomView(QGraphicsView):

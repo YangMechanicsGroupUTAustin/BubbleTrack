@@ -7,10 +7,17 @@ import time
 import numpy as np
 import pytest
 
+from PyQt6.QtCore import QSize
+from PyQt6.QtGui import QPixmap
+
 from bubbletrack.controller.filmstrip_controller import (
-    _spread, choose_key_frames, find_collapses, install_filmstrip, make_thumb_base,
-    render_thumbnail,
+    install_filmstrip, make_thumb_base, render_thumbnail,
 )
+from bubbletrack.controller.key_frames import (
+    MAX_TO_CHECK, choose_key_frames, find_collapses, key_frame_tooltip, to_check_frames,
+)
+from bubbletrack.controller.review_queue import ReviewItem
+from bubbletrack.controller.review_segments import ReviewSegment
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import update_state
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail
@@ -50,27 +57,54 @@ class TestKeyFrameChoice:
     def test_nothing_fitted(self):
         assert choose_key_frames(np.full(10, -1.0)) == []
 
-    def test_up_to_four_flagged_frames_spread_out(self):
+    def test_frames_to_check_come_from_review_most_likely_wrong_first(self):
         r = _two_cycles()
-        flags = [frozenset({"x"}) if i % 5 == 2 else frozenset() for i in range(len(r))]
-        keys = choose_key_frames(r, flags)
-        flagged = [k.frame for k in keys if "flagged" in k.kinds]
-        assert len(flagged) == 4
-        assert flagged[0] == 2 and flagged[-1] == 57  # first and last flagged kept
+        keys = choose_key_frames(r, to_check=[40, 2, 57, 33, 10])
+        checked = [k.frame for k in keys if "to check" in k.kinds]
+        assert MAX_TO_CHECK == 4
+        assert checked == [2, 33, 40, 57]  # the first four Review rows, shown in frame order
+        assert 10 not in [k.frame for k in keys]
         assert len(keys) <= 12
 
-    def test_low_scores_stand_in_when_nothing_is_flagged(self):
-        r = _two_cycles()
-        scores = np.full(len(r), 0.9)
-        scores[[7, 33, 40]] = [0.2, 0.1, 0.3]
-        keys = choose_key_frames(r, [frozenset()] * len(r), scores)
-        low = [k.frame for k in keys if "low score" in k.kinds]
-        assert low == [7, 33, 40]
+    def test_without_review_rows_nothing_is_to_check(self):
+        keys = choose_key_frames(_two_cycles())
+        kinds = {kind for k in keys for kind in k.kinds}
+        assert kinds <= {"first", "Rmax", "collapse", "last"}  # no "flagged", no "low score"
 
-    def test_spread(self):
-        assert _spread([1, 2, 3], 4) == [1, 2, 3]
-        assert _spread(list(range(10)), 3) == [0, 4, 9]  # linspace(0, 9, 3) rounds 4.5 to 4
-        assert _spread([5], 0) == []
+    def test_a_key_frame_in_review_is_also_to_check(self):
+        r = _two_cycles()
+        peak = int(np.argmax(r))
+        kinds = {k.frame: k.kinds for k in choose_key_frames(r, to_check=[peak])}
+        assert kinds[peak] == ("Rmax", "to check")
+
+    def test_one_frame_per_review_row_in_queue_order(self):
+        def row(category, *frames):
+            return ReviewSegment(category, tuple(ReviewItem(f, ("x",), 50) for f in frames))
+        rows = [row("no_result", 0, 1, 2), row("jump", 111), row("collapse", 65, 66, 67)]
+        assert to_check_frames(rows) == [0, 111, 65]
+        assert to_check_frames([]) == []
+
+
+class TestTooltips:
+    def test_plain_words_and_no_engine_flags(self):
+        item = ReviewItem(0, ("rejected", "guess", "low_confidence"), 99, 0.13)
+        text = key_frame_tooltip(0, "_001", ("to check",), -1.0, 0.13, item)
+        assert text.splitlines() == [
+            "Frame 1 · _001 — to check",
+            "No result · confidence 0.13",
+            "To check: no result, Auto has a guess, low confidence 0.13",
+        ]
+
+    def test_a_fitted_key_frame(self):
+        text = key_frame_tooltip(11, "_012", ("Rmax",), 51.62, float("nan"), None)
+        assert text.splitlines() == ["Frame 12 · _012 — largest radius (Rmax)", "R = 51.6 px"]
+        text = key_frame_tooltip(3, "", ("first", "to check"), 33.3, 0.82,
+                                 ReviewItem(3, ("non_circular",), 55, 0.82))
+        assert text.splitlines() == ["Frame 4 — first fit + to check",
+                                     "R = 33.3 px · confidence 0.82",
+                                     "To check: outline not round"]
+        for internal in ("flags", "non_circular", "R = -1"):
+            assert internal not in text
 
 
 class TestThumbnails:
@@ -96,7 +130,6 @@ class TestThumbnails:
 
 class TestFilmstripWidget:
     def test_buttons_jump_and_mark_current(self, qapp):
-        from PyQt6.QtGui import QPixmap
         strip = Filmstrip()
         pix = QPixmap(40, 30)
         strip.set_thumbnails([Thumbnail(3, pix, "first · 4"), Thumbnail(9, pix, "Rmax · 10")])
@@ -117,6 +150,33 @@ class TestFilmstripWidget:
         strip.set_expanded(False)
         assert not strip.is_expanded() and strip._scroll.isHidden() and seen == [False]
 
+    def test_hint_says_to_check(self, qapp):
+        strip = Filmstrip()
+        hint = strip._hint.text()
+        assert "to check" in hint and "flagged" not in hint
+
+    def test_thumbnails_shrink_to_fit_the_width(self, qapp):
+        strip = Filmstrip()
+        pix = QPixmap(THUMB_MAX_WIDTH, THUMB_HEIGHT)
+        # Short captions: the offscreen test font is much wider than the app's.
+        strip.set_thumbnails([Thumbnail(i, pix, f"c{i}") for i in range(7)])
+        strip.resize(720, strip.sizeHint().height())
+        strip.show()
+        qapp.processEvents()
+        assert not strip._scroll.horizontalScrollBar().isVisible()
+        used = sum(b.sizeHint().width() for b in strip.buttons()) + 6 * 6
+        assert used <= strip._scroll.viewport().width()
+        assert all(b.iconSize().width() < THUMB_MAX_WIDTH for b in strip.buttons())
+
+        strip.resize(1600, strip.height())  # room to spare: full size
+        qapp.processEvents()
+        assert all(b.iconSize() == QSize(THUMB_MAX_WIDTH, THUMB_HEIGHT) for b in strip.buttons())
+
+        strip.resize(200, strip.height())  # far too narrow: half size, then it scrolls
+        qapp.processEvents()
+        assert all(b.iconSize().width() == THUMB_MAX_WIDTH // 2 for b in strip.buttons())
+        strip.close()
+
 
 def _fill_results(controller, radii) -> None:
     state = controller._get_state()
@@ -129,6 +189,7 @@ def _fill_results(controller, radii) -> None:
         state.circle_xy[i] = np.column_stack([125 + r * np.sin(t), 200 + r * np.cos(t)])
     state.fit_source[:] = FitSource.AUTO
     controller._state = update_state(state)
+    controller.review.refresh()  # as after a run: Review lists the new results
 
 
 def _wait(qapp, predicate, timeout_s=5.0):
@@ -161,7 +222,8 @@ class TestInstalledFilmstrip:
         controller.bus.emit("run_state_changed", True)
         controller.bus.emit("run_state_changed", False)
         strip = window.filmstrip
-        expected = [k.frame for k in choose_key_frames(controller._get_state().radius)]
+        rows = to_check_frames(controller.review.panel.segments())
+        expected = [k.frame for k in choose_key_frames(controller._get_state().radius, rows)]
         assert strip.frames() == expected
         assert ctrl.cache.loads == len(expected)
 
@@ -236,3 +298,43 @@ class TestInstalledFilmstrip:
         assert ctrl.cache.loads == 0
         window.filmstrip.set_expanded(True)
         assert window.filmstrip.frames() and ctrl.cache.loads > 0
+
+
+class TestToCheckFollowsReview:
+    """The strip's "to check" frames are the Review queue's, in plain words."""
+
+    def _fitted(self, gui, make_sequence):
+        window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("seq", 30, r_min=15, r_max=60)))
+        _fill_results(controller, _two_cycles(30) + 10)
+        state = controller._get_state()
+        state.fit_confidence[:] = 0.95
+        state.fit_flags[7] = frozenset({"saturation"})  # an engine note only: not in Review
+        state.radius[20] = -1.0  # no result: Review lists it
+        state.circle_fit_par[20] = [np.nan, np.nan]
+        controller.review.refresh()
+        controller.filmstrip.refresh()
+        return window, controller
+
+    @staticmethod
+    def _to_check(window) -> list[int]:
+        return [int(b.property("frame")) for b in window.filmstrip.buttons()
+                if b.text().startswith("to check")]
+
+    def test_only_frames_in_the_review_queue(self, gui, make_sequence):
+        window, controller = self._fitted(gui, make_sequence)
+        assert controller.review.queued_frames() == {20}
+        assert self._to_check(window) == [20]
+        assert 7 not in window.filmstrip.frames()
+        button = window.filmstrip.buttons()[window.filmstrip.frames().index(20)]
+        assert button.text() == "to check · 21"
+        assert button.toolTip().splitlines()[1:] == [
+            "No result · confidence 0.95", "To check: no result"]
+        for b in window.filmstrip.buttons():
+            assert "flags" not in b.toolTip() and "saturation" not in b.toolTip()
+
+    def test_a_settled_frame_leaves_the_strip(self, gui, make_sequence, qapp):
+        window, controller = self._fitted(gui, make_sequence)
+        controller._get_state().fit_locked[20] = True  # e.g. "No bubble here" in Review
+        controller.review.refresh()  # the queue shrinks: the strip follows by itself
+        assert _wait(qapp, lambda: self._to_check(window) == [])

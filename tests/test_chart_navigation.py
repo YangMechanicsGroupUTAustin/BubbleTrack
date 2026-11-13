@@ -273,7 +273,7 @@ class TestHeight:
             c.resize(900, CHART_MIN_HEIGHT)
             c.show()
             qapp.processEvents()
-            assert c.minimumHeight() == CHART_MIN_HEIGHT >= 260
+            assert c.minimumHeight() == CHART_MIN_HEIGHT >= 220
             assert _vb(c).height() >= 0.7 * c.height()  # the plot, not margins
             assert c._select_btn.height() <= 26  # a compact legend row
             c.close()

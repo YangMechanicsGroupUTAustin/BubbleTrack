@@ -1,6 +1,6 @@
-"""Key-frame filmstrip: which frames to show, cached thumbnails, wiring.
+"""Key-frame filmstrip: cached thumbnails and wiring (which frames: ``key_frames``).
 
-Install with one call after the AppController exists::
+Install with one call after the AppController (and its Review) exists::
 
     install_filmstrip(window, app_controller)
 """
@@ -14,12 +14,14 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from PyQt6.QtCore import QPointF, QTimer
+from PyQt6.QtCore import QObject, QPointF, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
-from scipy.signal import find_peaks
 
-from bubbletrack.controller.display_mixin import chart_scores, current_source
-from bubbletrack.model.constants import QUALITY_WARN_THRESHOLD
+from bubbletrack.controller.display_mixin import current_source
+from bubbletrack.controller.key_frames import (  # noqa: F401 (re-exported)
+    KeyFrame, choose_key_frames, find_collapses, key_frame_tooltip, to_check_frames,
+)
+from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode, to_grayscale
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail
@@ -28,94 +30,11 @@ from bubbletrack.ui.image_panel import is_ordered_contour
 
 logger = logging.getLogger(__name__)
 
-COLLAPSE_PROMINENCE = 0.15  # a collapse dips by at least this fraction of Rmax
-MAX_COLLAPSES = 4
-MAX_FLAGGED = 4
-MAX_KEY_FRAMES = 12
 REFRESH_DEBOUNCE_MS = 250
 THUMB_CACHE_SIZE = 64
 CIRCLE_COLOUR = "#818cf8"
 OUTLINE_COLOUR = "#ef4444"
-
-
-@dataclass(frozen=True)
-class KeyFrame:
-    frame: int               # 0-based frame index
-    kinds: tuple[str, ...]   # why it was chosen: "first", "Rmax", "collapse", ...
-
-
-# --------------------------------------------------------------------- #
-#  Choosing key frames (pure)
-# --------------------------------------------------------------------- #
-
-def find_collapses(radius: np.ndarray, max_count: int = MAX_COLLAPSES) -> list[int]:
-    """Frames of the deepest local minima of R (bubble collapses), ascending.
-
-    Only minima that dip by ``COLLAPSE_PROMINENCE * Rmax`` count, so fit
-    noise is not mistaken for a collapse.  Invalid frames are skipped.
-    """
-    r = np.asarray(radius, dtype=float)
-    idx = np.flatnonzero(np.isfinite(r) & (r > 0))
-    if len(idx) < 3:
-        return []
-    values = r[idx]
-    peaks, props = find_peaks(-values, prominence=COLLAPSE_PROMINENCE * values.max())
-    deepest = peaks[np.argsort(props["prominences"])[::-1][:max_count]]
-    return sorted(int(idx[p]) for p in deepest)
-
-
-def _spread(frames: Sequence[int], k: int) -> list[int]:
-    """At most *k* items, evenly spaced through *frames* (which is sorted)."""
-    if k <= 0:
-        return []
-    if len(frames) <= k:
-        return list(frames)
-    picks = np.unique(np.rint(np.linspace(0, len(frames) - 1, k)).astype(int))
-    return [frames[i] for i in picks]
-
-
-def choose_key_frames(
-    radius: np.ndarray,
-    flags: Sequence | None = None,
-    scores: np.ndarray | None = None,
-    *,
-    max_flagged: int = MAX_FLAGGED,
-    max_total: int = MAX_KEY_FRAMES,
-) -> list[KeyFrame]:
-    """First fitted frame, Rmax, collapses, last fitted frame, plus up to
-    *max_flagged* flagged frames; ordered by frame.
-
-    Without flags (legacy detection modes), the lowest-scoring fits below
-    the quality warning threshold fill the flagged slots instead.
-    """
-    r = np.asarray(radius, dtype=float)
-    valid = np.isfinite(r) & (r > 0)
-    if not valid.any():
-        return []
-    idx = np.flatnonzero(valid)
-    kinds: dict[int, list[str]] = {}
-
-    def add(frame: int, kind: str) -> None:
-        kinds.setdefault(int(frame), []).append(kind)
-
-    add(idx[0], "first")
-    add(idx[np.argmax(r[idx])], "Rmax")
-    for frame in find_collapses(r):
-        add(frame, "collapse")
-    add(idx[-1], "last")
-
-    room = max(0, min(max_flagged, max_total - len(kinds)))
-    flagged = [i for i, f in enumerate(flags if flags is not None else ()) if f]
-    for frame in _spread(flagged, room):
-        add(frame, "flagged")
-    room -= min(room, len(flagged))
-    if room and scores is not None:
-        s = np.asarray(scores, dtype=float)
-        low = np.flatnonzero(valid & np.isfinite(s) & (s < QUALITY_WARN_THRESHOLD))
-        worst = sorted(low[np.argsort(s[low], kind="stable")][:room].tolist())
-        for frame in worst:
-            add(frame, "low score")
-    return [KeyFrame(f, tuple(kinds[f])) for f in sorted(kinds)][:max_total]
+ReviewRows = Callable[[], Sequence]  # the Review rows (ReviewSegment), in queue order
 
 
 # --------------------------------------------------------------------- #
@@ -225,17 +144,22 @@ def results_signature(state) -> int:
     ))
 
 
-class FilmstripController:
-    """Keeps the strip in step with the results; debounced and cached."""
+class FilmstripController(QObject):
+    """Keeps the strip in step with the results and the Review queue;
+    debounced and cached.  *review_rows* returns the Review rows (none: the
+    strip shows no frame "to check").  A child of the strip: its Qt
+    connections end with it."""
 
     def __init__(self, strip: Filmstrip, get_state: Callable, jump_to: Callable[[int], None],
-                 bus, chart=None) -> None:
+                 bus, chart=None, review_rows: ReviewRows | None = None) -> None:
+        super().__init__(strip)
         self._strip = strip
         self._get_state = get_state
+        self._review_rows = review_rows
         self._cache = ThumbnailCache()
         self._running = False
-        self._built_for: int | None = None  # results_signature of the shown strip
-        self._timer = QTimer(strip)
+        self._built_for: int | None = None  # signature of the shown strip
+        self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(REFRESH_DEBOUNCE_MS)
         self._timer.timeout.connect(self.refresh)
@@ -252,13 +176,13 @@ class FilmstripController:
     def cache(self) -> ThumbnailCache:
         return self._cache
 
-    def schedule_refresh(self) -> None:
+    def schedule_refresh(self, *_args) -> None:
         """Refresh after a short pause (never while a fit is writing results)."""
         if not self._running:
             self._timer.start()
 
     def refresh(self, force: bool = False) -> None:
-        """Rebuild the strip now (skipped when the results did not change)."""
+        """Rebuild the strip now (skipped when results and queue did not change)."""
         self._timer.stop()
         if not self._strip.is_expanded():
             return
@@ -268,18 +192,20 @@ class FilmstripController:
             self._built_for = None
             self._strip.set_thumbnails([])
             return
-        signature = results_signature(state)
+        rows = list(self._review_rows()) if self._review_rows is not None else []
+        items = {item.frame: item for row in rows for item in row.items}
+        candidates = to_check_frames(rows)
+        signature = hash((results_signature(state), tuple(candidates), frozenset(items)))
         if signature == self._built_for and not force:
             return
         self._built_for = signature
-        scored = chart_scores(state) if not any(state.fit_flags or ()) else None
-        keys = choose_key_frames(state.radius, state.fit_flags,
-                                 None if scored is None else scored[0])
-        thumbs = [t for t in (self._thumbnail(state, k) for k in keys) if t is not None]
+        keys = choose_key_frames(state.radius, candidates)
+        thumbs = [t for t in (self._thumbnail(state, k, items.get(k.frame)) for k in keys)
+                  if t is not None]
         self._strip.set_thumbnails(thumbs)
         self._strip.set_current(state.image_no)
 
-    def _thumbnail(self, state, key: KeyFrame) -> Thumbnail | None:
+    def _thumbnail(self, state, key: KeyFrame, item: ReviewItem | None) -> Thumbnail | None:
         idx = key.frame
         try:
             base = self._cache.get(state, idx)
@@ -293,12 +219,9 @@ class FilmstripController:
             rc, cc = state.circle_fit_par[idx]
             circle = (float(rc), float(cc), radius)
         outline = state.circle_xy[idx] if state.circle_xy is not None else None
-        label = " + ".join(key.kinds)
-        tag = frame_file_label(state.images[idx])
-        flags = state.fit_flags[idx] if state.fit_flags is not None else ()
-        tooltip = f"Frame {idx + 1} · {tag} — {label}, R = {radius:.1f} px"
-        if flags:
-            tooltip += "\nflags: " + ", ".join(sorted(flags))
+        conf = float(state.fit_confidence[idx]) if state.fit_confidence is not None else np.nan
+        tooltip = key_frame_tooltip(idx, frame_file_label(state.images[idx]), key.kinds,
+                                    radius, conf, item)
         return Thumbnail(idx, render_thumbnail(base, circle, outline),
                          f"{key.kinds[0]} · {idx + 1}", tooltip)
 
@@ -319,18 +242,24 @@ class FilmstripController:
 def install_filmstrip(window, app_controller) -> FilmstripController:
     """Add the key-frame strip above the R(t) chart and wire it up.
 
-    Clicking a thumbnail jumps to that frame.  The controller is kept alive
+    Clicking a thumbnail jumps to that frame.  Frames "to check" are the
+    first frames of the Review rows (``app_controller.review``, if installed);
+    the strip follows the queue as it shrinks.  The controller is kept alive
     by the strip widget and also returned.
     """
     strip = Filmstrip()
     window.set_filmstrip(strip)
+    review = getattr(app_controller, "review", None)
     controller = FilmstripController(
         strip,
         app_controller._get_state,
         app_controller.file_ctrl.on_frame_changed,
         app_controller.bus,
         chart=window.radius_chart,
+        review_rows=review.panel.segments if review is not None else None,
     )
-    strip.controller = controller  # lifetime tied to the widget
+    if review is not None:
+        review.count_changed.connect(controller.schedule_refresh)  # skips, accepts, fixes
+    strip.controller = controller  # a child of the strip: lives as long as it
     controller.refresh()
     return controller

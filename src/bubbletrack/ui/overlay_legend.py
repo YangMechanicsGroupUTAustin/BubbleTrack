@@ -2,7 +2,8 @@
 
 Each colour means one thing everywhere: red = the measured outline, indigo =
 the circle with the result's radius, yellow dashes = Auto's guess (not a
-result), green box = the ROI.  An image panel adds one key entry per kind of
+result), cyan dashes = a circle you drew (not stored), green box = the ROI.
+An image panel adds one key entry per kind of
 overlay it draws (:func:`default_text` names the known colours) and shows the
 key in a small, mouse-transparent box fixed to the viewport: it does not move
 or scale with zoom and pan, and hides when nothing is drawn or when the panel
@@ -22,7 +23,7 @@ CIRCLE_COLOUR = "#6366f1"  # the circle with the result's radius (indigo)
 GUESS_COLOUR = "#fde047"  # Auto's guess: yellow dashes ...
 GUESS_UNDER_COLOUR = "#18181b"  # ... over a thin dark line (visible on the light Auto view)
 ROI_COLOUR = "#10b981"  # the ROI rectangle (green)
-USER_CIRCLE_COLOUR = "#f59e0b"  # a drawn circle that was not stored (amber, dashed)
+USER_CIRCLE_COLOUR = "#22d3ee"  # your drawn circle, not stored (cyan dashes: never the guess)
 FOUND_COLOUR = "#a1a1aa"  # what Auto found instead of a drawn circle (grey)
 PAINT_BUBBLE_COLOUR = "#22c55e"  # ML assist: painted bubble / P(bubble) tint
 PAINT_BACKGROUND_COLOUR = "#ef4444"  # ML assist: painted background

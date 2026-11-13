@@ -108,6 +108,16 @@ class TestSmallScreens:
         assert window.radius_chart.height() >= window.radius_chart.minimumHeight()
         assert window.original_panel.height() > 120
 
+    def test_both_images_get_the_same_width_whatever_their_titles(self, gui, qapp):
+        window, _ = gui
+        window.show()
+        window.resize(1280, 800)
+        window.binary_panel.set_title("Auto view: frame ÷ reference, a very long title indeed")
+        window.original_panel.set_roi_text((1, 250), (1, 400))
+        qapp.processEvents()
+        assert window.width() == 1280  # a long title must not widen the window either
+        assert abs(window.original_panel.width() - window.binary_panel.width()) <= 8
+
     def test_left_panel_scrolls_and_fit_and_export_stay_pinned(self, gui, qapp):
         window, _ = gui
         window.show()
@@ -169,6 +179,22 @@ class TestStyling:
         host.close()
         assert enabled.red() > 200 and enabled.green() < 100  # still red when active
         assert not (disabled.red() > 150 and disabled.green() < 100)
+
+    def test_combo_boxes_show_a_drop_down_arrow(self, styled):
+        from PyQt6.QtWidgets import QComboBox
+        host = QWidget()
+        combo = QComboBox(host)
+        combo.addItems(["Intensity mask", "Gradient"])
+        combo.setGeometry(10, 10, 180, 30)
+        host.resize(200, 50)
+        host.show()
+        QApplication.processEvents()
+        image = host.grab().toImage()
+        host.close()
+        # The drop-down part (right 22 px inside the border): some light arrow pixels.
+        light = [image.pixelColor(x, y).lightness()
+                 for x in range(10 + 180 - 22, 10 + 180 - 4) for y in range(14, 36)]
+        assert max(light) > 120, max(light)
 
     def test_idle_app_shows_no_stop_button(self, gui):
         window, _ = gui

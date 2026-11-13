@@ -43,6 +43,18 @@ def test_scrubber_label_follows_the_slider(qapp):
     assert scrubber.label_text() == "Frame 10/10 \u00b7 _020"
 
 
+def test_play_speed_is_not_mistaken_for_the_recording_frame_rate(qapp):
+    scrubber = FrameScrubber()
+    scrubber.resize(900, 40)
+    scrubber.show()
+    qapp.processEvents()
+    spin = scrubber._fps_spin
+    assert spin.text() == "Play 10 fps"
+    assert "recording" in spin.toolTip() and "▶" in spin.toolTip()
+    assert spin.width() >= spin.sizeHint().width()  # the prefix is not cut
+    scrubber.close()
+
+
 def test_status_bar_label(qapp):
     bar = StatusBar()
     bar.set_frame_labels(["_011", "_012"])
