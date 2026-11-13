@@ -221,15 +221,31 @@ class TestRunSafety:
 # -- provenance: manual fixes are protected ---------------------------------------------
 
 class TestManualProtection:
-    def _manual_fix_frame3(self, controller):
+    def _manual_fix_frame3(self, controller, *, locked: bool = False):
+        """A manual fit on frame 3; unlocked unless *locked* (as an older
+        session, or a frame unlocked on the chart, leaves it)."""
         _use_owner_params(controller)
         controller.file_ctrl.on_frame_changed(3)
         controller.manual_ctrl.on_manual_select()
         _click_circle(controller, r=33.0)
         controller.manual_ctrl.on_manual_done()
         state = controller._get_state()
-        assert state.fit_source[3] == FitSource.MANUAL
+        assert state.fit_source[3] == FitSource.MANUAL and state.fit_locked[3]
+        state.fit_locked[3] = locked
         return float(state.radius[3])
+
+    def test_a_fix_is_locked_so_fit_all_keeps_it_without_asking(self, qapp, gui,
+                                                                make_sequence, monkeypatch):
+        window, controller = gui
+        _load(controller, make_sequence("A", 8))
+        manual_r = self._manual_fix_frame3(controller, locked=True)
+        asked: list[int] = []
+        monkeypatch.setattr(controller.auto_ctrl, "_ask_manual_policy",
+                            lambda n: asked.append(n) or "overwrite")
+        _run_fit_all(qapp, window, controller)
+        state = controller._get_state()
+        assert asked == [] and state.radius[3] == manual_r
+        assert state.fit_source[3] == FitSource.MANUAL
 
     def test_fit_all_keeps_manual_fixes_by_default(self, qapp, gui, make_sequence,
                                                    monkeypatch):
@@ -262,6 +278,26 @@ class TestManualProtection:
         monkeypatch.setattr(controller.auto_ctrl, "_ask_manual_policy", lambda n: "cancel")
         controller.auto_ctrl.on_auto_fit()
         assert controller.auto_ctrl._worker is None
+
+    def test_the_question_names_the_frames_and_has_three_distinct_buttons(self, gui,
+                                                                          monkeypatch):
+        from PyQt6.QtWidgets import QMessageBox
+
+        _, controller = gui
+        seen = {}
+
+        def fake_exec(box):
+            seen["text"] = box.text()
+            seen["names"] = {b.text(): b.objectName() for b in box.buttons()}
+            seen["default"] = box.defaultButton().text()
+            seen["escape"] = box.escapeButton().text()
+            return 0
+        monkeypatch.setattr(QMessageBox, "exec", fake_exec)
+        assert controller.auto_ctrl._ask_manual_policy(1) == "cancel"
+        assert seen["text"].startswith("1 frame was fixed by hand")
+        assert "in this range" not in seen["text"]
+        assert len(set(seen["names"].values())) == 3  # filled, red, quiet
+        assert (seen["default"], seen["escape"]) == ("Keep my fixes", "Cancel")
 
 
 

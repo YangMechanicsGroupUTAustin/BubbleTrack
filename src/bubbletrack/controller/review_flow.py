@@ -58,7 +58,7 @@ class ReviewFlow:
             moved = NEXT_ROW
             rows = panel.segments()
             if rows[0].tier != segment_of(rows, target).tier:
-                target = rows[0].frames[0]  # worse rows wait above
+                target = rows[0].entry  # worse rows wait above
         if panel.select_frame(target, keep_row=False):
             self._go(target)
         return moved
@@ -89,16 +89,18 @@ class ReviewFlow:
         self._panel.clear_feedback()
 
     def undo(self) -> None:
-        """The line's Undo: exactly the action it describes, then show its frame."""
+        """The line's Undo: exactly the action it describes, then show its frame.
+
+        An edit is undone like Ctrl+Z (the shared history), which shows the
+        restored frame itself (``RESULT_UNDONE``); a skip comes back here.
+        """
         frame, skip, edit = self._frame, self._skip, self._edit
         self.clear()
         if skip:
             self._unskip(skip)
             self._app.w.header.set_status("Skip undone", _OK)
+            if frame is not None:
+                self._panel.select_frame(frame, keep_row=False)
+                self._go(frame)
         elif edit is not None and self._app.history.peek() is edit:
             self._app.circle_ctrl.undo()  # the shared history's Ctrl+Z
-        else:
-            return
-        if frame is not None:
-            self._panel.select_frame(frame, keep_row=False)
-            self._go(frame)

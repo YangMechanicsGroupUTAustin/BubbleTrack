@@ -2,12 +2,26 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QMenu, QToolButton, QWidget
 
-from bubbletrack.controller.review_segments import category_label
+from bubbletrack.controller.review_queue import ReviewItem
+from bubbletrack.controller.review_segments import CATEGORIES, OTHER, category_label, category_of
+
+_WIDEST = "8 of 10 kinds ▾"  # the longest text the button shows
+_ORDER = [c.key for c in CATEGORIES] + [OTHER.key]
+
+
+def kinds_present(items: Iterable[ReviewItem]) -> list[tuple[str, int]]:
+    """(category, frames) of every kind among *items*, in menu order (a row
+    can hold frames of several kinds: the filter counts frames)."""
+    totals: dict[str, int] = {}
+    for item in items:
+        key = category_of(item)
+        totals[key] = totals.get(key, 0) + 1
+    return [(k, totals[k]) for k in _ORDER if k in totals]
 
 
 class KindFilter(QToolButton):
@@ -25,6 +39,9 @@ class KindFilter(QToolButton):
         self.setMenu(self.menu_)
         self._present: list[tuple[str, int]] = []
         self._hidden: frozenset[str] = frozenset()
+        # One width for every text, so the summary beside it never shifts.
+        self.setText(_WIDEST)
+        self.setMinimumWidth(self.sizeHint().width())
 
     def update_kinds(self, present: Sequence[tuple[str, int]], hidden: frozenset[str]) -> None:
         """*present*: (category, frames) of every kind listed, in menu order."""

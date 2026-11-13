@@ -3,8 +3,11 @@
 Press on the bubble centre, drag to the wall, release: the Auto engine
 measures the wall near the drawn circle (``model.guided_fit``) and the
 result is stored at once as GUIDED, or, when it does not match the circle,
-the user may keep the circle itself as a manual fit.  Every stored fix can
-be undone with Ctrl+Z (``model.result_history``, shared with re-tracking).
+the user may keep the circle itself as a manual fit.  A stored fix is the
+user's decision: it is locked like an accepted frame, so Fit All keeps it
+without asking.  Every stored fix can be undone with Ctrl+Z
+(``model.result_history``, shared with re-tracking); after an undo the bus
+gets ``RESULT_UNDONE`` with the edit, and Review shows its frame.
 
 The tool is on while ``set_active(True)`` holds (``FixMode``), the Auto
 engine is in use and no fit runs; its prompt shows in the attached view.
@@ -37,6 +40,7 @@ from bubbletrack.ui.overlay_legend import FOUND_COLOUR, USER_CIRCLE_COLOUR
 logger = logging.getLogger(__name__)
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
+RESULT_UNDONE = "result_undone"  # bus event (ResultEdit) after Ctrl+Z restored an edit
 _MANUAL_OUTLINE_POINTS = 72  # a stored circle's outline, for both panels
 
 
@@ -196,6 +200,8 @@ class CircleController(BaseController):
                                      f"(R = {circle.radius:.1f} px)")
 
     def _committed(self, idx: int, before: dict, text: str) -> None:
+        if self.state.fit_locked is not None:
+            self.state.fit_locked[idx] = True  # the user's decision: Fit All keeps it
         self.history.push(record_edit(self.state, f"circle fix on frame {idx + 1}", before))
         self._redraw(idx)
         self.w.header.set_status(text + " — Ctrl+Z undoes", _OK)
@@ -257,6 +263,7 @@ class CircleController(BaseController):
         self.w.header.set_status(f"{outcome.message} ({where} restored)", _OK)
         with self._retrack.muted():  # an undo never triggers a new re-track
             self._results_changed()
+        self.bus.emit(RESULT_UNDONE, outcome.edit)
 
     # -- bus events ------------------------------------------------------------ #
 

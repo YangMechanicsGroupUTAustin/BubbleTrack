@@ -2,16 +2,18 @@
 
 ::
 
-    Frame 125 · _135                      6 of 61
-    No result, but Auto has a guess (dashed outline).
-    Accept it if it sits on the bubble wall.
+    Frame 125 · _135                      61 left in this row
+    Auto lost the bubble here. Auto's guess is dashed:
+    accept it if it sits on the wall.
     [ Accept the guess                          A ]   <- recommended: filled
     [ Fix with a circle                         F ]
     [ No bubble here                            N ]
     [ Accept all 61       ⇧A ] [ Skip   S ] [ ⋯ ]
     ✓ Frame 124 accepted. Ctrl+Z undoes     [Undo]
 
-The card shows; ReviewController decides (``Advice`` picks the filled button).
+The card shows; ReviewController decides (``Advice`` picks the filled
+button, or none when there is nothing to do).  A row before the bubble
+shows "No bubble on all N" in Accept all's place, filled.
 """
 
 from __future__ import annotations
@@ -31,12 +33,13 @@ class CardAdvice(NamedTuple):
     """What the card says about the frame on screen (from ``review_advice``)."""
 
     text: str  # what is wrong and what to do
-    action: str  # the recommended (filled) action
+    action: str  # the recommended (filled) action; "" for none
     guess: bool = False  # the frame shows Auto's guess: Accept stores it
-    can_accept: bool = True  # False on an empty frame: nothing to accept
+    can_accept: bool = True  # False on an empty or settled frame: nothing to accept
 
 
-_KEYS = {"accept": "A", "fix": "F", "no_bubble": "N", "accept_all": "⇧A", "skip": "S"}
+_KEYS = {"accept": "A", "fix": "F", "no_bubble": "N", "accept_all": "⇧A",
+         "no_bubble_all": "⇧N", "skip": "S"}
 _TIPS = {
     "accept": "Keep this frame's result (or store Auto's dashed guess) and lock it, so Fit All "
               "keeps it. Ctrl+Z undoes.",
@@ -46,9 +49,12 @@ _TIPS = {
                  "bubble). Ctrl+Z undoes.",
     "accept_all": "Accept every frame of this row that has a result or Auto's guess, and "
                   "lock them. Empty frames stay for you to fix or mark. Ctrl+Z undoes.",
+    "no_bubble_all": "There is no bubble on any frame of this row: they stay empty and "
+                     "locked (exported as no bubble). Ctrl+Z undoes.",
     "skip": "Leave this row as it is (nothing is stored) and go to the next one.",
 }
 _DIM, _FAINT, _OK = "#a1a1aa", "#71717a", "#34d399"
+_TEXT_PAD, _KEY_GAP = 20, 16  # px: the button's left padding; text-to-key gap + right margin
 
 
 class ActionButton(QPushButton):
@@ -82,6 +88,24 @@ class ActionButton(QPushButton):
     def is_primary(self) -> bool:
         return bool(self._primary)
 
+    def setText(self, text: str) -> None:  # noqa: N802  (Qt's name)
+        super().setText(text)
+        self._fit_key()
+
+    def resizeEvent(self, event) -> None:  # noqa: N802  (Qt's name)
+        super().resizeEvent(event)
+        self._fit_key()
+
+    def _fit_key(self) -> None:
+        """The key hint steps aside when the text needs its room (narrow
+        dock); the key stays in the tooltip."""
+        needed = (self.fontMetrics().horizontalAdvance(self.text()) + _TEXT_PAD
+                  + self._key.sizeHint().width() + _KEY_GAP)
+        self._key.setVisible(needed <= self.width())
+
+    def key_shown(self) -> bool:
+        return not self._key.isHidden()
+
 
 class ReviewCard(QWidget):
     """Where the shown frame is, what is wrong, and the actions (see module doc)."""
@@ -95,6 +119,7 @@ class ReviewCard(QWidget):
         self._accept_count = 0  # of them, frames with something to accept
         self._fixing = False
         self._can_accept = True
+        self._mark_row = False  # "No bubble on all N" recommended (a row before the bubble)
         box = QVBoxLayout(self)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(5)
@@ -132,7 +157,9 @@ class ReviewCard(QWidget):
     def _build_row_actions(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(4)
-        row.addWidget(self._add_button("accept_all"), 3)
+        # "Accept 228 of 252" / "No bubble on all 3" need room beside their key
+        row.addWidget(self._add_button("accept_all"), 5)
+        row.addWidget(self._add_button("no_bubble_all"), 5)  # only when recommended
         row.addWidget(self._add_button("skip"), 2)
         self.more = QToolButton()
         self.more.setText("⋯")
@@ -174,12 +201,16 @@ class ReviewCard(QWidget):
         self._can_accept = advice.can_accept
         self._row_count, self._accept_count = row_count, accept_count
         recommended = advice.action
+        if recommended == "no_bubble_all" and row_count <= 1:
+            recommended = "no_bubble"  # a row of one frame
+        self._mark_row = recommended == "no_bubble_all"
         self.buttons["accept_all"].setText(
             f"Accept all {row_count}" if accept_count == row_count
             else f"Accept {accept_count} of {row_count}")
+        self.buttons["no_bubble_all"].setText(f"No bubble on all {row_count}")
         self.buttons["skip"].setText("Skip row" if row_count > 1 else "Skip")
         self._no_bubble_all.setText(f"No bubble on all {row_count} frames\tShift+N")
-        self._no_bubble_all.setVisible(row_count > 1)
+        self._no_bubble_all.setVisible(row_count > 1 and not self._mark_row)
         for action, btn in self.buttons.items():
             btn.set_primary(action == recommended)
         self._show_actions()
@@ -193,9 +224,12 @@ class ReviewCard(QWidget):
         on, rows = not self._fixing, self._row_count
         for action in FRAME_ACTIONS:
             self.buttons[action].setVisible(on)
-        # Nothing to accept on an empty frame (A only says so: Fix or No bubble decide).
+        # Nothing to accept on an empty frame (A only says so: Fix or No bubble
+        # decide), nor on a settled one.
         self.buttons["accept"].setVisible(on and self._can_accept)
-        self.buttons["accept_all"].setVisible(on and rows > 1 and self._accept_count > 0)
+        self.buttons["accept_all"].setVisible(on and rows > 1 and self._accept_count > 0
+                                              and not self._mark_row)
+        self.buttons["no_bubble_all"].setVisible(on and self._mark_row)
         self.buttons["skip"].setVisible(on and rows > 0)
         self.more.setVisible(on and rows > 0)
 

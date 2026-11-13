@@ -6,8 +6,10 @@ import numpy as np
 import pytest
 
 from bubbletrack.controller.review_queue import (
+    BEFORE,
     ReviewItem,
     build_review_items,
+    in_lifetime,
     jump_frames,
     next_after_action,
 )
@@ -75,6 +77,28 @@ class TestRules:
         for i, flag in enumerate(("disagree", "lost", "reacquired", "cloud")):
             state.fit_flags[i] = frozenset({flag})
         assert _frames(build_review_items(state)) == [1, 0, 2, 3]
+
+    def test_frames_before_the_bubble_are_listed_only_as_before(self):
+        """Pre-laser frames that look like the reference: one quiet reason."""
+        state = _state([-1.0, -1.0, -1.0, 40.0, 41.0], conf=[0.0, 0.1, 0.0, 0.9, 0.9])
+        state.fit_flags[0] = frozenset({"fragmented", "non_circular"})
+        items = _by_frame(build_review_items(state, before=(0, 1)))
+        assert items[0].reasons == items[1].reasons == (BEFORE,)
+        assert items[0].severity < 55  # for information, never "likely wrong"
+        assert items[2].reasons[0] == "rejected"  # unlike the reference: maybe a bubble
+
+    def test_before_never_overrides_a_result_a_lock_or_extra_items(self):
+        state = _state([40.0, -1.0, -1.0, 40.0], conf=[0.9, 0.0, 0.0, 0.9])
+        state.fit_locked[2] = True
+        items = _by_frame(build_review_items(state, before=(0, 2)))
+        assert 0 not in items and 2 not in items  # a result; a decision
+        extra = [ReviewItem(1, ("lost",), 100)]
+        assert _by_frame(build_review_items(state, extra, before=(1,)))[1].reasons == (BEFORE,)
+
+    def test_frames_inside_the_bubbles_lifetime(self):
+        state = _state([-1.0, 40.0, -1.0, 41.0, -1.0])  # results on 1..3
+        assert in_lifetime(state, {0, 1, 2, 4}) == (2, 3)
+        assert in_lifetime(_state([-1.0, -1.0]), {0}) == (0, 0)
 
     def test_locked_frames_are_excluded(self):
         state = _state([40.0, -1.0, 40.0], conf=[0.1, 0.1, 0.9])

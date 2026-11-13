@@ -1,7 +1,8 @@
 """ManualController — "Click edge points": a circle through points the user clicks.
 
 The fallback tool of the Review dock's Fix (``FixMode``); the point count is
-shown by the view attached with ``set_view`` (the fix strip).
+shown by the view attached with ``set_view`` (the fix strip).  A stored fit
+is the user's decision: it is locked like an accepted frame (Fit All keeps it).
 """
 
 from __future__ import annotations
@@ -11,7 +12,9 @@ import logging
 import numpy as np
 
 from bubbletrack.controller.base import BaseController
-from bubbletrack.controller.display_mixin import redraw_original, refresh_chart
+from bubbletrack.controller.display_mixin import (
+    FITTED_CIRCLE, redraw_original, refresh_chart,
+)
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
@@ -160,12 +163,14 @@ class ManualController(BaseController):
                 self.state.region_count[idx] = 0
             if self.state.fit_source is not None:
                 self.state.fit_source[idx] = FitSource.MANUAL
+            if self.state.fit_locked is not None:
+                self.state.fit_locked[idx] = True  # the user's decision: Fit All keeps it
             set_suggestion(self.state, idx, None)  # the user's fit replaces Auto's guess
             self._history.push(record_edit(self.state, f"manual fit on frame {idx + 1}", before))
 
             # Clear old overlays before drawing new results
             redraw_original(self.state, self.w)
-            self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
+            self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1", legend=FITTED_CIRCLE)
             self.w.original_panel.draw_points(xy, "#ef4444", 2.0)
             refresh_chart(self.state, self.w)
             self.w.header.set_status(f"R = {radius:.1f} px", "#10b981")

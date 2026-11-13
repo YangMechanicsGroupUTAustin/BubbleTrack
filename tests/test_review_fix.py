@@ -72,6 +72,16 @@ class TestPointsTool:
         assert state.radius[2] == pytest.approx(30.0, abs=0.5)
         assert not rc.fix.active and controller._get_state().image_no == 5
         assert rc.panel.feedback.text().startswith("✓ Frame 3 fixed: R = 30.0 px")
+        assert state.fit_locked[2]  # the user's decision: Fit All keeps it, no question
+
+    def test_the_fitted_circle_is_named_in_the_image_key(self, app):
+        window, controller, rc = app
+        rc.panel.step(1)
+        rc.perform("fix")
+        _points(controller)
+        controller.manual_ctrl.on_manual_done()
+        assert "fitted circle" in window.original_panel.legend_texts()
+        assert "circle (radius R)" not in window.original_panel.legend_texts()
 
     def test_too_few_points_keep_the_fix_going(self, app):
         window, controller, rc = app

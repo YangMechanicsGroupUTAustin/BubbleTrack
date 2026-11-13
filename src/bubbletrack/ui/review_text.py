@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from bubbletrack.controller.review_queue import GUESS, ReviewItem
+from bubbletrack.controller.review_queue import BEFORE, GUESS, ReviewItem
 from bubbletrack.controller.review_segments import ReviewSegment
 
 _TRAILING_DIGITS = re.compile(r"(\d+)$")
@@ -21,7 +21,7 @@ _VIDEO_PREFIX = "video:"
 SEP = " · "  # middle dot
 DASH = "–"  # en dash, for spans
 STEP_HINT = ("←/→ step through these frames, a click on the row goes back to "
-             "its first one; J/K move between rows.")
+             "the one it opened on; J/K move between rows.")
 DETAIL_REASONS = 3  # the detail line names this many; the tooltip has them all
 NOT_A_BUBBLE_HINT = "Not a bubble? Press N in Review"  # the image's guess tip
 REVIEW_NO_BUBBLE_HINT = "Not a bubble? No bubble (N); Shift+N for the whole row"
@@ -44,8 +44,24 @@ REASON_LABELS: dict[str, str] = {  # plain words; the flag names stay internal
     "ml_outline": "outline from ML assist",
     "ml_disagrees": "ML assist sees it elsewhere",
     "ml_unfamiliar": "unlike the frames ML was taught",
+    BEFORE: "before the bubble",
 }
 GUESS_SUFFIX = " — Auto has a guess"
+# The card's first sentence: the row's problem in the row's words (category labels).
+PROBLEM_SENTENCES: dict[str, str] = {
+    "lost": "Auto lost the bubble here.",
+    "no_result": "No result here.",
+    "tracking": "Tracking changed it here.",
+    "jump": "Radius jumps here.",
+    "low_confidence": "Not sure here: low confidence{score}.",
+    "shape": "Outline not round here.",
+    "collapse": "Near collapse here: tiny bubble.",
+    "ml": "Outline from ML assist here.",
+    BEFORE: "Before the bubble.",
+    "other": "Worth a look here.",
+}
+DONE_TEXT = "All frames to check are done"
+NEXT_EXPORT = "Next: export R(t)."
 
 
 def file_number(path: str, index: int) -> str:
@@ -58,11 +74,15 @@ def file_number(path: str, index: int) -> str:
 
 
 def file_tag(images: Sequence[str], frame: int) -> str:
-    """'_054' for a numbered image file; '' when it would only repeat the index."""
+    """'_054' for a numbered image file; '' when it would only repeat the
+    frame number (frame 112 of '_112', or a file without a number)."""
     if not 0 <= frame < len(images) or images[frame].startswith(_VIDEO_PREFIX):
         return ""
     stem = os.path.splitext(os.path.basename(images[frame]))[0]
-    return f"_{file_number(images[frame], frame)}" if _TRAILING_DIGITS.search(stem) else ""
+    match = _TRAILING_DIGITS.search(stem)
+    if match is None or int(match.group(1)) == frame + 1:
+        return ""
+    return f"_{match.group(1)}"
 
 
 def reason_text(reason: str, confidence: float) -> str:
@@ -119,14 +139,37 @@ def segment_text(segment: ReviewSegment, images: Sequence[str]) -> str:
     return SEP.join(parts)
 
 
-def progress_text(left: int, total: int) -> str:
-    """'12 of 48 frames to check'; '48 frames to check' before any is done."""
-    if total <= 0:
-        return "Nothing to check"
-    if left <= 0:
-        return f"All {total} checked" if total > 1 else "Checked"
+def summary_text(left: int, total: int, info: int, *, skipped: int = 0) -> str:
+    """The Review header: frames to check apart from those for information.
+
+    *left* of *total* frames to check (red and amber rows) are still listed;
+    *info* frames are listed for information (grey rows); *skipped* of the
+    *total* were skipped, not checked.  '12 of 48 frames to check · 11 for
+    information'; 'All 48 checked'; '13 checked · 2 skipped'.
+    """
     noun = "frame" if total == 1 else "frames"
-    return f"{left} {noun} to check" if left == total else f"{left} of {total} {noun} to check"
+    if left > 0:
+        head = f"{left} {noun} to check" if left == total else f"{left} of {total} {noun} to check"
+    elif total <= 0:
+        head = "Nothing to check"
+    elif skipped:
+        head = f"{max(total - skipped, 0)} checked{SEP}{skipped} skipped"
+    else:
+        head = f"All {total} checked" if total > 1 else "Checked"
+    return head + (f"{SEP}{info} for information" if info else "")
+
+
+def done_text(skipped: int) -> str:
+    """The list's place once nothing is left: 'All frames to check are done.'"""
+    note = f" ({skipped} skipped)" if skipped else ""
+    return f"{DONE_TEXT}{note}.\n{NEXT_EXPORT}"
+
+
+def problem_sentence(category: str, confidence: float = float("nan")) -> str:
+    """The card's first sentence: the row's problem in the row's words."""
+    text = PROBLEM_SENTENCES.get(category, PROBLEM_SENTENCES["other"])
+    score = f" ({confidence:.2f})" if np.isfinite(confidence) else ""
+    return text.format(score=score)
 
 
 def position_text(segment: ReviewSegment) -> str:

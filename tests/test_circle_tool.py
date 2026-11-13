@@ -283,6 +283,7 @@ def test_ctrl_z_restores_the_previous_result_exactly(app):
 def test_ctrl_z_refuses_when_the_frame_changed_since(app):
     window, controller, _ = app
     _drag(window)
+    controller._on_lock_range(3, 3, locked=False)  # a fix is locked: unlock it first
     controller._on_mark_no_bubble(3, 3)  # changed since (chart: Mark as no bubble)
     _ctrl_z(window)
     assert controller._get_state().radius[3] == -1.0
@@ -344,13 +345,26 @@ def test_fit_all_ends_the_fix(app):
     controller.bus.emit("run_state_changed", False)
 
 
-def test_fit_all_asks_before_overwriting_drawn_circles(app):
+def test_a_drawn_circle_is_locked_so_fit_all_keeps_it_without_asking(app):
+    """m6: every later Fit asked "1 frame(s) in this range were fixed by hand"."""
     window, controller, _ = app
     _drag(window)
+    assert controller._get_state().fit_locked[3]
     asked = []
     controller.auto_ctrl._ask_manual_policy = lambda n: asked.append(n) or "keep"
     assert controller.auto_ctrl._choose_protected_frames(0, 6) == frozenset({3})
+    assert asked == []
+    controller._get_state().fit_locked[3] = False  # unlocked on the chart: asked again
+    assert controller.auto_ctrl._choose_protected_frames(0, 6) == frozenset({3})
     assert asked == [1]
+
+
+def test_undoing_a_circle_fix_unlocks_the_frame(app):
+    window, controller, _ = app
+    _drag(window)
+    controller._on_undo()
+    state = controller._get_state()
+    assert not state.fit_locked[3] and state.radius[3] == -1.0
 
 
 def test_review_fix_key_is_bound():

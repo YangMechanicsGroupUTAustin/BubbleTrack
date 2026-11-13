@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 
 import numpy as np
 
@@ -48,13 +48,18 @@ class ReviewMemory:
         self._extra = tuple(item for item in items if 0 <= item.frame < n)
         self._extra_keys = {item.frame: result_key(state, item.frame) for item in self._extra}
 
-    def items(self, state: AppState) -> list[ReviewItem]:
-        """The queue for the current results: extra items still valid, no skips."""
+    def items(self, state: AppState, before: Collection[int] = ()) -> list[ReviewItem]:
+        """The queue for the current results: extra items still valid, no
+        skips; *before*: frames before the bubble (see ``build_review_items``)."""
         n = 0 if state.radius is None else len(state.radius)
         extra = [item for item in self._extra if item.frame < n
                  and self._extra_keys.get(item.frame) == result_key(state, item.frame)]
-        return [item for item in build_review_items(state, extra)
+        return [item for item in build_review_items(state, extra, before=before)
                 if not self.is_dismissed(state, item.frame)]
+
+    def skipped(self, state: AppState) -> frozenset[int]:
+        """Frames skipped and not changed since (they are not checked)."""
+        return frozenset(f for f in self._dismissed if self.is_dismissed(state, f))
 
     # -- skips ------------------------------------------------------------- #
 
