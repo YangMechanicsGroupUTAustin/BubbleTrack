@@ -16,6 +16,8 @@ The card shows; ReviewController decides (``Advice`` picks the filled button).
 
 from __future__ import annotations
 
+from typing import NamedTuple
+
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QToolButton, QVBoxLayout,
@@ -23,6 +25,15 @@ from PyQt6.QtWidgets import (
 )
 
 FRAME_ACTIONS = ("accept", "fix", "no_bubble")
+
+
+class CardAdvice(NamedTuple):
+    """What the card says about the frame on screen (from ``review_advice``)."""
+
+    text: str  # what is wrong and what to do
+    action: str  # the recommended (filled) action
+    guess: bool = False  # the frame shows Auto's guess: Accept stores it
+    can_accept: bool = True  # False on an empty frame: nothing to accept
 _KEYS = {"accept": "A", "fix": "F", "no_bubble": "N", "accept_all": "⇧A", "skip": "S"}
 _TIPS = {
     "accept": "Keep this frame's result (or store Auto's dashed guess) and lock it, so Fit All "
@@ -80,6 +91,7 @@ class ReviewCard(QWidget):
         super().__init__(parent)
         self._row_count = 0  # frames of the selected row (0: none)
         self._fixing = False
+        self._can_accept = True
         box = QVBoxLayout(self)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(5)
@@ -141,20 +153,23 @@ class ReviewCard(QWidget):
 
     # -- content ----------------------------------------------------------- #
 
-    def show_frame(self, title: str, position: str, advice_text: str, recommended: str,
-                   *, row_count: int, guess: bool, fix_label: str, why: str = "") -> None:
-        """Fill the card for the frame on screen (*recommended*: the filled action).
+    def show_frame(self, title: str, position: str, advice: CardAdvice, *, row_count: int,
+                   fix_label: str, why: str = "") -> None:
+        """Fill the card for the frame on screen (*advice.action*: the filled button).
 
         *row_count*: frames of the selected row (0 = no row: no row actions).
         """
         self.title.setText(title)
         self.position.setText(position)
-        self.advice.setText(advice_text)
+        self.advice.setText(advice.text)
         self.advice.setToolTip(why)
-        self.buttons["accept"].setText("Accept the guess" if guess else "Accept this frame")
+        self.buttons["accept"].setText("Accept the guess" if advice.guess
+                                       else "Accept this frame")
         self.buttons["fix"].setText(fix_label)
         self.buttons["no_bubble"].setText("No bubble here")
+        self._can_accept = advice.can_accept
         self._row_count = row_count
+        recommended = advice.action
         self.buttons["accept_all"].setText(f"Accept all {row_count}")
         self.buttons["skip"].setText("Skip row" if row_count > 1 else "Skip")
         self._no_bubble_all.setText(f"No bubble on all {row_count} frames\tShift+N")
@@ -172,6 +187,8 @@ class ReviewCard(QWidget):
         on, rows = not self._fixing, self._row_count
         for action in FRAME_ACTIONS:
             self.buttons[action].setVisible(on)
+        # Nothing to accept on an empty frame (its A key means "no bubble", like N).
+        self.buttons["accept"].setVisible(on and self._can_accept)
         self.buttons["accept_all"].setVisible(on and rows > 1)
         self.buttons["skip"].setVisible(on and rows > 0)
         self.more.setVisible(on and rows > 0)

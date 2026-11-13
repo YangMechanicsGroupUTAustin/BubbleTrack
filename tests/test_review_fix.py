@@ -102,6 +102,17 @@ class TestPointsTool:
         rc.fix.cancel()
         assert not buttons["accept"].isHidden() and not buttons["skip"].isHidden()
 
+    def test_an_empty_frame_offers_no_accept_button(self, app):
+        """Nothing to accept: the card offers Fix and No bubble only."""
+        window, controller, rc = app
+        state = controller._get_state()
+        state.radius[2], state.fit_confidence[2] = -1.0, 0.1  # rejected, no guess
+        rc.refresh()
+        controller.file_ctrl.on_frame_changed(2)
+        card = rc.panel.card
+        assert card.buttons["accept"].isHidden()
+        assert card.recommended() == "fix" and not card.buttons["no_bubble"].isHidden()
+
     def test_no_bubble_during_a_fix_ends_it(self, app):
         window, controller, rc = app
         state = controller._get_state()

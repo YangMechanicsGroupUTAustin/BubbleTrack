@@ -30,6 +30,7 @@ from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.state import AppState
 from bubbletrack.ui import review_confirm
 from bubbletrack.ui.fix_strip import FixStrip
+from bubbletrack.ui.review_card import CardAdvice
 from bubbletrack.ui.review_panel import ReviewPanel
 from bubbletrack.ui.review_text import accept_all_question, span_text
 from bubbletrack.ui.shortcuts import FIX_BINDINGS, ReviewShortcuts
@@ -284,9 +285,9 @@ class ReviewController:
     def _go(self, frame: int) -> None:
         self._app.file_ctrl.on_frame_changed(frame)
 
-    def _advice(self, frame: int, item: ReviewItem | None) -> tuple[str, str, bool]:
+    def _advice(self, frame: int, item: ReviewItem | None) -> CardAdvice:
         advice = advise(self._state(), frame, item)
-        return advice.text, advice.action, advice.guess
+        return CardAdvice(advice.text, advice.action, advice.guess, advice.can_accept)
 
     def _show_range(self, segment: ReviewSegment | None) -> None:
         """Shade the selected run on the R(t) chart while the dock is open.

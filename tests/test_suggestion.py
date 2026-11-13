@@ -216,16 +216,14 @@ class TestReviewRows:
         row = segments[0]
         lines = tooltip_lines(row, ())
         assert ("Auto's guess on 1 of 3 frames (dashed): Accept (A) stores the one on screen, "
-                "then shows the next") in lines
-        assert ("A on a frame without a guess accepts the rest of the row and leaves the "
-                "guesses to look at") in lines
-        assert "Not a bubble? Shift+drag on the chart > Mark as no bubble" in lines
+                "Accept all (Shift+A) every one") in lines
+        assert "Not a bubble? No bubble (N); Shift+N for the whole row" in lines
         single = ReviewSegment("no_result", (row.items[1],))
         assert "Auto's guess (dashed outline): Accept (A) stores it as the result" \
             in tooltip_lines(single, ())
         guess, bare = row.items[1], row.items[0]
         assert detail_text(guess, 2, (), segment=row).endswith("A accepts the guess shown")
-        assert detail_text(bare, 1, (), segment=row).endswith("A skips the 1 frame with a guess")
+        assert detail_text(bare, 1, (), segment=row) == detail_text(bare, 1, ())  # no guess
         assert "A " not in detail_text(guess, 2, ())  # no row selected: no hint
         plain = ReviewSegment("no_result", (bare,))
         assert not any("Accept" in line for line in tooltip_lines(plain, ()))

@@ -31,7 +31,7 @@ from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.controller.review_segments import (
     CATEGORIES, OTHER, ReviewSegment, queue_frames, segment_of,
 )
-from bubbletrack.ui.review_card import DonePage, FeedbackLine, ReviewCard
+from bubbletrack.ui.review_card import CardAdvice, DonePage, FeedbackLine, ReviewCard
 from bubbletrack.ui.review_filter import KindFilter
 from bubbletrack.ui.review_rows import ROW_ROLE, ReviewRowDelegate, row_data, tooltip_html
 from bubbletrack.ui.review_text import (
@@ -44,8 +44,8 @@ EMPTY_ALL_DONE = "All done: every flagged frame is checked.\nNext: export R(t)."
 EMPTY_FILTERED = "Nothing of the selected types."
 _CATEGORY_ORDER = [c.key for c in CATEGORIES] + [OTHER.key]
 
-# advisor(frame, item) -> (advice text, recommended action, the frame shows a guess)
-Advisor = Callable[[int, ReviewItem | None], tuple[str, str, bool]]
+# advisor(frame, item) -> what the card says about the frame on screen
+Advisor = Callable[[int, ReviewItem | None], CardAdvice]
 
 
 class ReviewPanel(QWidget):
@@ -186,7 +186,7 @@ class ReviewPanel(QWidget):
         return self.count(), len(self._ever)
 
     def set_advisor(self, advisor: Advisor) -> None:
-        """*advisor(frame, item)*: the card's advice text, recommended action, guess."""
+        """*advisor(frame, item)*: what the card says about the frame on screen."""
         self._advisor = advisor
         self.refresh_card()
 
@@ -209,13 +209,12 @@ class ReviewPanel(QWidget):
             return
         frame = self.current_frame() if segment is not None else frame
         item = self._items.get(frame)  # may be of another type than the row
-        text, action, guess = (self._advisor(frame, item) if self._advisor is not None
-                               else ("", "accept", False))
+        advice = (self._advisor(frame, item) if self._advisor is not None
+                  else CardAdvice("", "accept"))
         self.card.show_frame(
             frame_title(frame, self._images),
-            position_text(segment, frame) if segment is not None else "", text, action,
-            row_count=segment.count if segment is not None else 0, guess=guess,
-            fix_label=self._fix_label,
+            position_text(segment, frame) if segment is not None else "", advice,
+            row_count=segment.count if segment is not None else 0, fix_label=self._fix_label,
             why=detail_text(item, frame, self._images, None) if item is not None else "")
 
     def show_feedback(self, text: str, *, undo: bool = True) -> None:

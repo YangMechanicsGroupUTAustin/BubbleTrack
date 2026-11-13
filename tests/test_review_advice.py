@@ -68,25 +68,37 @@ class TestNoResult:
         state = _state([-1, -1, -1, -1, -1, -1, -1, 40, 41])
         advice = advise(state, 2, _item(2, "rejected"))
         assert advice.action == NO_BUBBLE and "probably no bubble" in advice.text
+        assert not advice.can_accept  # nothing to accept
 
     def test_a_gap_inside_the_bubble_needs_a_fix(self):
         state = _state([40, 41, -1, 43, 44])
         advice = advise(state, 2, _item(2, "rejected"))
-        assert advice.action == FIX and "frames around it show a bubble" in advice.text
+        assert advice.action == FIX and "frames around it have one" in advice.text
+        assert not advice.can_accept
 
-    def test_guesses_around_an_empty_frame_mean_the_bubble_is_there(self):
+    def test_only_guesses_around_an_empty_frame_say_so(self):
+        """Not "the frames around it show a bubble": they only have Auto's guesses."""
         state = _state([-1] * 7)
         for f in (0, 1, 2, 4, 5, 6):
             _guess(state, f, 45.0)
-        assert advise(state, 3, _item(3, "rejected")).action == FIX
+        advice = advise(state, 3, _item(3, "rejected"))
+        assert advice.action == FIX and "only has guesses" in advice.text
 
 
 class TestResults:
-    @pytest.mark.parametrize("reason", ["lost", "jump"])
-    def test_likely_wrong_results_recommend_a_fix(self, reason):
+    @pytest.mark.parametrize("reason, said", [("lost", "Auto lost the bubble"),
+                                              ("jump", "Radius jumps")])
+    def test_likely_wrong_results_recommend_a_fix(self, reason, said):
         state = _state([40, 41, 42, 43, 44])
         advice = advise(state, 2, _item(2, reason))
         assert advice.action == FIX and "Fix it if the outline is off" in advice.text
+        assert advice.can_accept
+
+    def test_the_fix_advice_names_the_reason_that_makes_it_likely_wrong(self):
+        """Not "Tracking changed it. Fix it ...": the jump is why Fix is advised."""
+        state = _state([40, 41, 42, 43, 44])
+        advice = advise(state, 2, _item(2, "disagree", "jump"))
+        assert advice.action == FIX and advice.text.startswith("Radius jumps.")
 
     def test_doubtful_results_recommend_a_look_then_accept(self):
         state = _state([40, 41, 42, 43, 44])

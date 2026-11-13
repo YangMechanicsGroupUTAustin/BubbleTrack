@@ -34,28 +34,41 @@ class Advice:
     action: str  # ACCEPT | FIX | NO_BUBBLE: the recommended one
     text: str  # what is wrong and what to do (one or two short sentences)
     guess: bool = False  # the frame shows Auto's guess: Accept stores it
+    empty: bool = False  # no result and no guess: nothing to accept
+
+    @property
+    def can_accept(self) -> bool:
+        return not self.empty
 
 
 def advise(state: AppState, frame: int, item: ReviewItem | None) -> Advice:
     """The recommended action for *frame* (listed as *item*, None if not flagged)."""
     radius = state.radius
     if radius is None or not 0 <= frame < len(radius):
-        return Advice(FIX, "No result.")
+        return Advice(FIX, "No result.", empty=True)
     guess = shown_suggestion(state, frame)
     if guess is not None:
         return _advise_guess(state, frame, guess.radius)
     if not radius[frame] > 0:
-        if not _sizes_around(state, frame):
-            return Advice(NO_BUBBLE, "No result, and nothing on the frames around it either: "
-                                     "probably no bubble here.")
-        return Advice(FIX, "No result, but the frames around it show a bubble. "
-                           "Fix it, or choose No bubble if there is none.")
+        return _advise_empty(state, frame)
     if item is None:
         return Advice(ACCEPT, "Not flagged. Accept it if the outline sits on the bubble wall.")
-    problem = _problem(item)
-    if any(r in item.reasons for r in _LIKELY_WRONG):
-        return Advice(FIX, f"{problem}. Fix it if the outline is off the bubble wall.")
-    return Advice(ACCEPT, f"{problem}. Accept it if the outline sits on the bubble wall.")
+    wrong = next((r for r in _LIKELY_WRONG if r in item.reasons), None)
+    if wrong is not None:  # say the reason that makes it likely wrong
+        return Advice(FIX, f"{_capital(reason_text(wrong, item.confidence))}. "
+                           "Fix it if the outline is off the bubble wall.")
+    return Advice(ACCEPT, f"{_problem(item)}. Accept it if the outline sits on the bubble wall.")
+
+
+def _advise_empty(state: AppState, frame: int) -> Advice:
+    if any(state.radius[i] > 0 for i in _around(len(state.radius), frame)):
+        return Advice(FIX, "No result, but the frames around it have one. "
+                           "Fix it, or choose No bubble if there is none.", empty=True)
+    if _sizes_around(state, frame):
+        return Advice(FIX, "No result; Auto only has guesses on the frames around it. "
+                           "Fix it, or choose No bubble if there is none.", empty=True)
+    return Advice(NO_BUBBLE, "No result, and nothing on the frames around it either: "
+                             "probably no bubble here.", empty=True)
 
 
 def _problem(item: ReviewItem) -> str:
@@ -65,6 +78,10 @@ def _problem(item: ReviewItem) -> str:
     text = reason_text(reason, item.confidence) if reason else "Worth a look"
     if reason == "low_confidence" and np.isfinite(item.confidence):
         text = f"Low confidence ({item.confidence:.2f})"
+    return _capital(text)
+
+
+def _capital(text: str) -> str:
     return text[:1].upper() + text[1:]
 
 
