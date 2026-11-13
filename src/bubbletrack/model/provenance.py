@@ -25,7 +25,8 @@ class FitSource(IntEnum):
 
 AREA_RADIUS_FLAG = "area_radius"
 """Per-frame flag: this radius is the area-equivalent radius of the measured outline
-("Bubble may be non-round"); without it an Auto radius is the circle through the wall.
+("Bubble may be non-round"); without it an Auto radius is the least-squares circle through
+the bubble outline.
 Set by the Edge engine and ML assist; Review, the legend and exports read it."""
 
 

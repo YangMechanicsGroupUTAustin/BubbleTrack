@@ -14,7 +14,8 @@ engine is in use and no fit runs; its prompt shows in the attached view.
 
 A refused circle shows only what the decision is about, on both panels: the
 user's circle (cyan dashes) and the wall Auto found near it (grey), never
-the frame's stored result; the prompt names the rule that failed.  Closing
+the frame's stored result (the Auto view keeps its "not usable" fill, which
+describes the image); the prompt names the rule that failed.  Closing
 the prompt (Cancel, Keep my circle, a new drag, another frame) redraws the
 frame as usual.
 """
@@ -30,7 +31,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
-from bubbletrack.controller import edge_support
+from bubbletrack.controller import edge_support, unusable_view
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import current_source, display_frame, refresh_chart
 from bubbletrack.event_bus import CIRCLE_FIXED, EventBus
@@ -297,6 +298,9 @@ class CircleController(BaseController):
             if circle.dragged:
                 panel.draw_circle(circle.rc - 0.5 - origin[0], circle.cc - 0.5 - origin[1],
                                   circle.radius, USER_CIRCLE_COLOUR, dashed=True)
+        # The Auto view keeps its "not usable" fill: it describes the image, not a result
+        # (Auto may have refused because the wall lies there).
+        unusable_view.draw_unusable(state, self.w.binary_panel)
 
     def discard_prompt(self) -> bool:
         """Drop a refused circle and its drawing (no message); False if none."""

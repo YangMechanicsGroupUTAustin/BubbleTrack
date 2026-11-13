@@ -71,8 +71,8 @@ def test_outline_is_drawn_on_the_view_once_fitted(auto_app):
 
 @pytest.mark.parametrize("non_round, circle", [(False, "fitted circle"), (True, "equal-area circle")])
 def test_fit_current_frame_names_its_circle(auto_app, non_round, circle):
-    """The default radius is the circle through the wall; "Bubble may be non-round" draws
-    the circle with the outline's area."""
+    """The default radius is the least-squares circle through the bubble outline; "Bubble may
+    be non-round" draws the circle with the outline's area."""
     window, controller = auto_app
     controller._state = update_state(controller._get_state(), bubble_non_round=non_round)
     controller.file_ctrl.on_frame_changed(3)

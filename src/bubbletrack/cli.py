@@ -66,7 +66,8 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--non-round", action="store_true",
         help="Auto (reference frame) mode, --mode edge: the bubble may be non-round, so R is the "
-             "area-equivalent radius of the outline (default: the circle through the wall)",
+             "area-equivalent radius of the outline (default: the least-squares circle through the "
+             "bubble outline)",
     )
     parser.add_argument(
         "--reference", type=int, default=None, metavar="FRAME",

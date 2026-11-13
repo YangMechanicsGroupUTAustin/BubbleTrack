@@ -181,7 +181,7 @@ def _fitted(mode: str = "edge", source: FitSource = FitSource.AUTO, flags=frozen
 
 
 @pytest.mark.parametrize("mode, source, flags, circle", [
-    ("edge", FitSource.AUTO, (), "fitted circle"),  # Auto's default: the circle through the wall
+    ("edge", FitSource.AUTO, (), "fitted circle"),  # Auto's default: the circle through the outline
     ("edge", FitSource.AUTO, ("area_radius",), "equal-area circle"),  # "Bubble may be non-round"
     ("edge", FitSource.MANUAL, (), "fitted circle"),  # a circle through clicked points
     ("intensity", FitSource.AUTO, (), "fitted circle"),  # classic modes fit a circle

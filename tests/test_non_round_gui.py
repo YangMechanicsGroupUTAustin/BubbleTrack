@@ -24,6 +24,7 @@ def test_the_checkbox_sits_in_the_collapsed_advanced_section(gui):
     tip = check.toolTip()
     for words in ("Off (default)", "circle", "On:", "same area", "image edge", "Fit again"):
         assert words in tip, words
+    assert "Off (default): R is the least-squares circle through the bubble outline." in tip
 
 
 def test_ticking_it_sets_the_definition_and_asks_to_fit_again(gui, make_sequence):
@@ -37,7 +38,9 @@ def test_ticking_it_sets_the_definition_and_asks_to_fit_again(gui, make_sequence
         "Bubble may be non-round: on (R from the outline's area) — Fit again to apply")
     _box(window)._non_round_check.setChecked(False)
     assert controller._get_state().bubble_non_round is False
-    assert window.header.status_text().startswith("Bubble may be non-round: off")
+    assert window.header.status_text() == (
+        "Bubble may be non-round: off (R from the least-squares circle through the bubble "
+        "outline) — Fit again to apply")
 
 
 def test_without_results_there_is_nothing_to_fit_again(gui, make_sequence):
