@@ -45,6 +45,13 @@ class TestLabels:
         label = frame_label(AppResult(None, locked=True))
         assert (label.status, label.by) == (LABEL_NO_BUBBLE, BY_ACCEPTED)
 
+    def test_a_circle_fix_is_a_bubble_label(self):
+        """A drag-a-circle result is the user's decision, like a manual fit."""
+        from bubbletrack.model.cases.schema import BY_GUIDED
+
+        label = frame_label(AppResult(30.0, (100.0, 120.0), source="guided"))
+        assert (label.status, label.by, label.radius) == (LABEL_BUBBLE, BY_GUIDED, 30.0)
+
     @pytest.mark.parametrize("result", [AppResult(25.0, (1.0, 1.0), source="auto"),
                                         AppResult(25.0, (1.0, 1.0), source="tracked"),
                                         AppResult(None)])

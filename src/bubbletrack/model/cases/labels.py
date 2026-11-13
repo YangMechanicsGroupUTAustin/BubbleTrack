@@ -18,11 +18,14 @@ import math
 import numpy as np
 
 from bubbletrack.model.cases.schema import (
-    BY_ACCEPTED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, AppResult, Label,
+    BY_ACCEPTED, BY_GUIDED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, AppResult, Label,
 )
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import USER_CONFIRMED_SOURCES, FitSource
 
 _MANUAL = FitSource.MANUAL.name.lower()
+# Sources the user decided count as labels (a circle fix only if it counts as confirmed).
+_CONFIRMED_BY = {source.name.lower(): (BY_MANUAL if source == FitSource.MANUAL else BY_GUIDED)
+                 for source in USER_CONFIRMED_SOURCES}
 
 
 def _item(values, idx: int, default):
@@ -64,8 +67,8 @@ def app_result(state, idx: int) -> AppResult:
 def frame_label(result: AppResult) -> Label:
     """The verified answer behind *result* (unlabelled if nobody verified it)."""
     if result.radius is not None:
-        if result.source == _MANUAL:
-            return Label(LABEL_BUBBLE, result.radius, result.center, BY_MANUAL)
+        if result.source in _CONFIRMED_BY:
+            return Label(LABEL_BUBBLE, result.radius, result.center, _CONFIRMED_BY[result.source])
         if result.locked:
             return Label(LABEL_BUBBLE, result.radius, result.center, BY_ACCEPTED)
         return Label()

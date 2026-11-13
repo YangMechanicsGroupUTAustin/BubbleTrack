@@ -8,6 +8,7 @@ updates once it is done (the run lock keeps users from editing meanwhile).
 from __future__ import annotations
 
 import logging
+from collections.abc import Collection
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QThread, pyqtSignal
@@ -16,7 +17,7 @@ from bubbletrack.controller.edge_support import store_fit
 from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.model.edge_pipeline import EdgeJob, read_raw
 from bubbletrack.model.frame_source import open_recording
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import FitSource, is_user_confirmed
 from bubbletrack.model.sequence import SOURCE_TRACKED, SequenceResult, solve_sequence
 from bubbletrack.model.sequence_pipeline import (
     Redetector, TrackingStopped, anchors, observations,
@@ -79,18 +80,23 @@ class TrackingWorker(QThread):
         self.solved.emit(TrackingOutcome(result, redetector))
 
 
-def apply_tracking(state, outcome: TrackingOutcome) -> list[int]:
+def apply_tracking(state, outcome: TrackingOutcome,
+                   allowed_frames: Collection[int] | None = None) -> list[int]:
     """Store the frames the solver re-measured; returns their indices.
 
     Other frames keep their single-frame results: confirmed (raw), anchors,
     and lost / no-bubble frames, which go to the review list instead.
-    Manual and locked frames are never touched.
+    Manual (user-confirmed) and locked frames are never touched.  With
+    *allowed_frames* only those frames may change (a re-track after an edit
+    leaves frames that look good alone); None = every frame (Fit All).
     """
     changed = []
     for i, solution in enumerate(outcome.result.frames):
         if solution.source != SOURCE_TRACKED:
             continue
-        if state.fit_locked[i] or state.fit_source[i] == FitSource.MANUAL:
+        if allowed_frames is not None and i not in allowed_frames:
+            continue
+        if state.fit_locked[i] or is_user_confirmed(state.fit_source[i]):
             continue
         fit = outcome.redetector.fit_for(i, solution)
         if fit is None:

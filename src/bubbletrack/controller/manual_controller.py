@@ -17,8 +17,10 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.state import clear_frame_result
 from bubbletrack.model.undo import UndoStack
+from bubbletrack.ui.manual_tab import TOOL_POINTS
 
 logger = logging.getLogger(__name__)
 
@@ -49,11 +51,15 @@ class ManualController(BaseController):
     """Manages manual edge-point selection and fitting."""
 
     def __init__(self, bus: EventBus, get_state, set_state, window,
-                 get_max_radius, cache: ImageCache | None = None) -> None:
+                 get_max_radius, cache: ImageCache | None = None, *,
+                 history: ResultHistory | None = None) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._manual_points: list[tuple[float, float]] = []
         self._get_max_radius = get_max_radius
-        self._undo_stack = UndoStack()
+        self._undo_stack = UndoStack()  # clicked points of the running selection
+        # Committed fits and clears join the result undo history (Ctrl+Z),
+        # shared with the circle tool, so Ctrl+Z always undoes the newest fix.
+        self._history = history if history is not None else ResultHistory()
         self._cache = cache
         self._selecting = False
         bus.subscribe("frame_changed", self._on_frame_changed)
@@ -61,6 +67,8 @@ class ManualController(BaseController):
     # -- public handlers -------------------------------------------------- #
 
     def on_manual_select(self) -> None:
+        # Point selection is the "Click edge points" tool (e.g. from Review's Manual).
+        self.w.left_panel.manual_tab.set_tool(TOOL_POINTS)
         self._manual_points.clear()
         self._undo_stack.clear()
         self._selecting = True
@@ -77,6 +85,11 @@ class ManualController(BaseController):
         self.w.header.set_status(
             "Manual selection cancelled: the frame changed", "#f59e0b",
         )
+
+    def on_tool_changed(self, tool: str) -> None:
+        """Leaving the "Click edge points" tool cancels a running selection."""
+        if tool != TOOL_POINTS and (self._selecting or self._manual_points):
+            self._end_selection()
 
     def _end_selection(self) -> None:
         self._selecting = False
@@ -123,6 +136,7 @@ class ManualController(BaseController):
                 f"Radius outlier ({radius:.0f} px), skipped", "#f59e0b",
             )
         else:
+            before = snapshot(self.state, [idx])
             self.state.radius[idx] = radius
             self.state.circle_fit_par[idx] = [rc, cc]
             self.state.circle_xy[idx] = xy
@@ -130,6 +144,7 @@ class ManualController(BaseController):
                 self.state.region_count[idx] = 0
             if self.state.fit_source is not None:
                 self.state.fit_source[idx] = FitSource.MANUAL
+            self._history.push(record_edit(self.state, f"manual fit on frame {idx + 1}", before))
 
             # Clear old overlays before drawing new results
             redraw_original(self.state, self.w)
@@ -142,11 +157,14 @@ class ManualController(BaseController):
         # The fit is committed: Ctrl+Z must not resurrect its points.
         self._end_selection()
 
-    def undo_last_point(self) -> None:
-        """Undo the last point click, restoring the previous points list."""
+    def undo_last_point(self) -> bool:
+        """Undo the last point click, restoring the previous points list.
+
+        Returns False when there was no click to undo.
+        """
         snapshot = self._undo_stack.undo()
         if snapshot is None:
-            return
+            return False
         self._manual_points = snapshot
         n = len(self._manual_points)
         self.w.left_panel.manual_tab.set_point_count(n)
@@ -156,6 +174,7 @@ class ManualController(BaseController):
             pts = np.array(self._manual_points)
             self.w.original_panel.draw_points(pts, "#ef4444", 4.0)
         logger.info("Undo: %d points remaining", n)
+        return True
 
     def on_manual_clear(self) -> None:
         self._end_selection()
@@ -163,7 +182,10 @@ class ManualController(BaseController):
         # Mark the current frame as unprocessed, using the same sentinels as
         # everywhere else (-1 / NaN): a 0 radius exported as a 0 um point.
         idx = self.state.image_no
+        before = snapshot(self.state, [idx]) if self.state.radius is not None else None
         clear_frame_result(self.state, idx)
+        if before is not None:
+            self._history.push(record_edit(self.state, f"clear of frame {idx + 1}", before))
 
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 

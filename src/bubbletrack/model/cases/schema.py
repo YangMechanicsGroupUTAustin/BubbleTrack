@@ -38,6 +38,7 @@ LABEL_STATUSES = (LABEL_BUBBLE, LABEL_NO_BUBBLE, LABEL_UNLABELLED)
 
 BY_MANUAL = "manual"      # a manual fit (clicked edge points)
 BY_ACCEPTED = "accepted"  # accepted / locked in review or on the chart
+BY_GUIDED = "guided"      # a circle fix: the user's circle, wall measured by Auto
 
 
 class CaseFormatError(ValueError):

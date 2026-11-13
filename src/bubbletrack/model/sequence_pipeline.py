@@ -13,12 +13,12 @@ from a snapshot taken on the GUI thread.
 from __future__ import annotations
 
 import dataclasses
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 
 import numpy as np
 
 from bubbletrack.model.edge_pipeline import EdgeFrameFit, EdgeJob, fit_edge
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import user_confirmed_mask
 from bubbletrack.model.sequence import FrameSolution, Observation
 
 Circle = tuple[float, float, float]  # (rc, cc, R), 1-based full-image
@@ -39,7 +39,8 @@ def observations(state) -> list[Observation]:
 
 
 def anchors(state) -> dict[int, Circle]:
-    """Manual and locked frames: the solver keeps them and tracks from them.
+    """Manual (user-confirmed) and locked frames: the solver keeps them and
+    tracks from them.
 
     A locked frame without a result is an accepted "no bubble here".
     """
@@ -47,7 +48,7 @@ def anchors(state) -> dict[int, Circle]:
     source = state.fit_source if state.fit_source is not None else np.zeros(n, np.int8)
     locked = state.fit_locked if state.fit_locked is not None else np.zeros(n, bool)
     out: dict[int, Circle] = {}
-    for i in np.flatnonzero(locked | (source == FitSource.MANUAL)):
+    for i in np.flatnonzero(locked | user_confirmed_mask(source)):
         radius = float(state.radius[i])
         if radius > 0:
             rc, cc = state.circle_fit_par[i]
@@ -55,6 +56,23 @@ def anchors(state) -> dict[int, Circle]:
         elif locked[i]:
             out[int(i)] = (_NAN, _NAN, _NAN)
     return out
+
+
+def retrack_frames(state, queued: Iterable[int]) -> frozenset[int]:
+    """Frames a re-track after an edit may change.
+
+    Only frames that do not look good: those without a result and those the
+    Review queue lists (*queued*).  Every other frame, and every manual,
+    drawn-circle or locked frame (a locked empty frame is an accepted "no
+    bubble here"), stays exactly as it is.
+    """
+    n = len(state.radius)
+    radius = np.asarray(state.radius, dtype=float)
+    unfitted = set(np.flatnonzero(~(np.isfinite(radius) & (radius > 0))).tolist())
+    candidates = unfitted | {int(i) for i in queued if 0 <= i < n}
+    locked = state.fit_locked if state.fit_locked is not None else np.zeros(n, bool)
+    kept = np.asarray(locked, bool) | user_confirmed_mask(state.fit_source, n)
+    return frozenset(i for i in candidates if not kept[i])
 
 
 class TrackingStopped(BaseException):

@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
 )
 
 from bubbletrack.model.conventions import roi_to_slice
+from bubbletrack.ui.circle_drag import CircleDrag, dashed_pen
 
 # A polyline whose length exceeds this multiple of its convex-hull perimeter
 # is not a traced contour (raster-ordered edge pixels zig-zag across the shape).
@@ -23,6 +24,7 @@ _MIN_CONTOUR_POINTS = 8
 _VIEW_STYLE = {
     "normal": "border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;",
     "point": "border:2px solid #6366f1; border-radius:8px; background:#0c0d12;",
+    "circle": "border:2px solid #6366f1; border-radius:8px; background:#0c0d12;",
     "roi": "border:2px solid #f59e0b; border-radius:8px; background:#0c0d12;",
 }
 
@@ -86,10 +88,15 @@ class ImagePanel(QWidget):
         Emitted in *point-select* mode with scene (x, y) = (col, row).
     roi_selected(int, int, int, int)
         Emitted when rubber-band ROI selection finishes: (r0, r1, c0, c1) 1-indexed.
+    circle_drawn(float, float, float, bool)
+        Emitted in *circle* mode on release: scene (x, y) of the press (the
+        centre), the radius to the release point and whether it was dragged
+        (False: a click, radius 0).
     """
 
     point_clicked = pyqtSignal(float, float)
     roi_selected = pyqtSignal(int, int, int, int)
+    circle_drawn = pyqtSignal(float, float, float, bool)
     select_roi_clicked = pyqtSignal()
 
     def __init__(self, title: str = "Image", parent: QWidget | None = None):
@@ -108,7 +115,8 @@ class ImagePanel(QWidget):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._overlay_items: list = []
-        self._mode = "normal"  # "normal" | "point" | "roi"
+        self._mode = "normal"  # "normal" | "point" | "circle" | "roi"
+        self.circle_drag = CircleDrag(self._scene)
         self._image_size: tuple[int, int] | None = None  # (h, w)
         self._auto_fit = True  # follow the panel size until the user zooms
 
@@ -192,11 +200,11 @@ class ImagePanel(QWidget):
             self._fit()
 
     def draw_circle(self, row_c: float, col_c: float, radius: float,
-                    colour: str = "#6366f1", width: float = 2.0):
+                    colour: str = "#6366f1", width: float = 2.0, *, dashed: bool = False):
         """Draw a circle overlay. Coordinates are (row, col) = (y, x)."""
         item = self._scene.addEllipse(
             col_c - radius, row_c - radius, 2 * radius, 2 * radius,
-            _cosmetic_pen(colour, width),
+            dashed_pen(colour, width) if dashed else _cosmetic_pen(colour, width),
         )
         self._overlay_items.append(item)
 
@@ -259,20 +267,27 @@ class ImagePanel(QWidget):
             self._scene.removeItem(item)
         self._overlay_items.clear()
 
+    @property
+    def mode(self) -> str:
+        return self._mode
+
     def set_mode(self, mode: str):
-        """Set interaction mode: 'normal', 'point', or 'roi'.
+        """Set interaction mode: 'normal', 'point', 'circle' or 'roi'.
 
         | Mode   | Cursor       | Drag              | Border        |
         |--------|-------------|-------------------|---------------|
         | normal | default     | ScrollHandDrag    | subtle border |
         | point  | CrossCursor | NoDrag            | #6366f1 indigo|
+        | circle | CrossCursor | draws a circle    | #6366f1 indigo|
         | roi    | CrossCursor | RubberBandDrag    | #f59e0b amber |
         """
         self._mode = mode
+        if mode != "circle":
+            self.circle_drag.cancel()
         if mode == "roi":
             self._view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
-        elif mode == "point":
+        elif mode in ("point", "circle"):
             self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
         else:
@@ -339,14 +354,29 @@ class _PanZoomView(QGraphicsView):
             self._panel._fit()
 
     def mousePressEvent(self, event: QMouseEvent):
-        if (self._panel._mode == "point"
-                and event.button() == Qt.MouseButton.LeftButton):
+        left = event.button() == Qt.MouseButton.LeftButton
+        if self._panel._mode == "point" and left:
             pos = self.mapToScene(event.pos())
             self._panel.point_clicked.emit(pos.x(), pos.y())  # (col, row) in scene
             return
+        if self._panel._mode == "circle" and left:
+            self._panel.circle_drag.press(self.mapToScene(event.pos()), event.position())
+            return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._panel.circle_drag.active:
+            self._panel.circle_drag.move(self.mapToScene(event.pos()))
+            return
+        super().mouseMoveEvent(event)
+
     def mouseReleaseEvent(self, event: QMouseEvent):
+        drag = self._panel.circle_drag
+        if drag.active and event.button() == Qt.MouseButton.LeftButton:
+            drawn = drag.release(self.mapToScene(event.pos()), event.position())
+            if drawn is not None:
+                self._panel.circle_drawn.emit(drawn.x, drawn.y, drawn.radius, drawn.dragged)
+            return
         if self._panel._mode == "roi" and self.rubberBandRect():
             rect = self.mapToScene(self.rubberBandRect()).boundingRect()
             r0, r1 = int(rect.top()) + 1, int(rect.bottom()) + 1

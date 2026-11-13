@@ -21,7 +21,7 @@ from bubbletrack.controller.review_queue import (
 from bubbletrack.controller.review_segments import (
     ReviewSegment, anchor_frame, build_segments,
 )
-from bubbletrack.event_bus import RESULTS_CHANGED
+from bubbletrack.event_bus import CIRCLE_FIXED, RESULTS_CHANGED
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.review_panel import ReviewPanel
 from bubbletrack.ui.review_text import DASH
@@ -45,7 +45,7 @@ class ReviewController:
     """Keeps the review panel in sync with the app and performs its actions.
 
     Accept, Refit, Delete and Skip act on the whole selected row (segment);
-    Neighbours and Manual act on the frame on screen.
+    Neighbours, Circle and Manual act on the frame on screen.
     """
 
     def __init__(self, window, app, panel: ReviewPanel, dock: QDockWidget) -> None:
@@ -59,6 +59,9 @@ class ReviewController:
         self._running = False
         # (frame, its edge points before, queue order, anchor) while a Manual fit runs
         self._manual_pending: tuple[int, object, list[int], int] | None = None
+        # (frame, queue order, anchor) while the circle tool runs from Circle (C)
+        self._circle_pending: tuple[int, list[int], int] | None = None
+        app.bus.subscribe(CIRCLE_FIXED, self._on_circle_fixed)
 
         panel.frame_activated.connect(self._go)
         panel.action_requested.connect(self.perform)
@@ -103,13 +106,17 @@ class ReviewController:
     def refresh(self) -> None:
         """Rebuild the queue from the current results (cheap; no-op if unchanged)."""
         state = self._state()
+        self.panel.set_segments(build_segments(self._current_items()), state.images,
+                                fitted=_has_results(state))
+
+    def _current_items(self) -> list[ReviewItem]:
+        """The queue's items for the current results (as the dock lists them)."""
+        state = self._state()
         extra = [item for item in self._extra if state.radius is not None
                  and item.frame < len(state.radius)
                  and self._extra_keys.get(item.frame) == self._result_key(state, item.frame)]
-        items = [item for item in build_review_items(state, extra)
-                 if not self._is_dismissed(state, item.frame)]
-        self.panel.set_segments(build_segments(items), state.images,
-                                fitted=_has_results(state))
+        return [item for item in build_review_items(state, extra)
+                if not self._is_dismissed(state, item.frame)]
 
     def perform(self, action: str) -> None:
         """Apply *action* (see ``ReviewPanel.ACTIONS``) to the selected row,
@@ -123,6 +130,9 @@ class ReviewController:
         anchor = anchor_frame(segment, frame)  # the queue continues after it
         if action == "manual":
             self._start_manual(frame, anchor)
+            return
+        if action == "circle":
+            self._start_circle(frame, anchor)
             return
         old = self.panel.frames()
         if action == "refit_neighbors":
@@ -178,15 +188,19 @@ class ReviewController:
     def _refit_neighbors(self, frame: int) -> None:
         self._app._on_refit_point_with_neighbors(frame)
 
-    def _start_manual(self, frame: int, anchor: int) -> None:
-        """Manual tab on *frame* with point selection running."""
+    def _open_manual_tab(self, frame: int) -> None:
+        """Show *frame* with the Manual tab open."""
         self._go(frame)  # navigate first: a frame change cancels a selection
         lp = self.w.left_panel
-        if lp.isHidden():  # the Done button lives in the sidebar
+        if lp.isHidden():  # the Manual tab's controls live in the sidebar
             toggle = getattr(self.w, "_toggle_sidebar", None)
             if toggle is not None:
                 toggle()
         lp.tab_bar.select(MANUAL_TAB)
+
+    def _start_manual(self, frame: int, anchor: int) -> None:
+        """Manual tab on *frame* with point selection running."""
+        self._open_manual_tab(frame)
         self._app.manual_ctrl.on_manual_select()
         xy = self._state().circle_xy
         self._manual_pending = (frame, xy[frame] if xy is not None else None,
@@ -207,6 +221,28 @@ class ReviewController:
         # The queue was already refreshed by RESULTS_CHANGED: advance by the
         # order it had when the Manual fit started.
         self._advance(order, anchor)
+
+    # -- Circle (C): the Manual tab's "Drag a circle" tool ----------------- #
+
+    def _start_circle(self, frame: int, anchor: int) -> None:
+        """Manual tab on *frame* with the circle tool; advance once a circle is stored."""
+        circle = self._app.circle_ctrl
+        if not circle.available():
+            circle.explain_unavailable()
+            return
+        self._open_manual_tab(frame)
+        circle.activate()
+        self._circle_pending = (frame, self.panel.frames(), anchor)
+
+    def _on_circle_fixed(self, frame: int) -> None:
+        pending, self._circle_pending = self._circle_pending, None
+        if pending is None or pending[0] != frame:
+            return
+        self._advance(pending[1], pending[2])
+
+    def queued_frames(self) -> frozenset[int]:
+        """Every frame the queue lists now (all types; skipped ones left out)."""
+        return frozenset(item.frame for item in self._current_items())
 
     # -- helpers ----------------------------------------------------------- #
 
@@ -273,11 +309,14 @@ class ReviewController:
         self._extra = ()
         self._extra_keys = {}
         self._manual_pending = None
+        self._circle_pending = None
         self.refresh()
 
     def _on_frame_changed(self, idx: int) -> None:
         if self._manual_pending is not None and self._manual_pending[0] != idx:
             self._manual_pending = None
+        if self._circle_pending is not None and self._circle_pending[0] != idx:
+            self._circle_pending = None
         if not self._running:
             self.refresh()
         self.panel.select_frame(idx)  # keeps the row while its span holds idx

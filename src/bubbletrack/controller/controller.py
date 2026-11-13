@@ -12,6 +12,7 @@ from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.auto_controller import AutoController
+from bubbletrack.controller.circle_controller import CircleController
 from bubbletrack.controller.display_mixin import (
     current_source, display_frame, refresh_chart,
 )
@@ -19,6 +20,7 @@ from bubbletrack.controller.export_controller import ExportController
 from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
 from bubbletrack.controller.pretune_controller import PretuneController
+from bubbletrack.controller.retrack_controller import RetrackController
 from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
@@ -31,6 +33,7 @@ from bubbletrack.model.detection import (
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
+from bubbletrack.model.result_history import ResultHistory
 from bubbletrack.model.state import AppState, clear_frame_result, update_state
 from bubbletrack.ui.shortcuts import setup_shortcuts
 
@@ -87,13 +90,26 @@ class AppController:
             self._display_timer, self._preview_timer, self._get_max_radius,
             self._image_cache,
         )
+        # Manual fixes (points, circles) and automatic re-tracks share one
+        # undo history: Ctrl+Z always undoes the newest of them.
+        self.history = ResultHistory()
         self.manual_ctrl = ManualController(
             self.bus, gs, ss, self.w, self._get_max_radius,
-            self._image_cache,
+            self._image_cache, history=self.history,
         )
         self.auto_ctrl = AutoController(
             self.bus, gs, ss, self.w, self._get_max_radius,
             self._image_cache,
+        )
+        self.retrack = RetrackController(
+            self.bus, gs, ss, self.w, self._get_max_radius, self._image_cache,
+            history=self.history, is_run_active=lambda: self.auto_ctrl.is_busy(),
+            queued_frames=lambda: self.review.queued_frames(),
+        )
+        self.circle_ctrl = CircleController(
+            self.bus, gs, ss, self.w, self._get_max_radius, self._image_cache,
+            history=self.history, retrack=self.retrack,
+            is_run_active=lambda: self.auto_ctrl.is_busy(),
         )
         self.export_ctrl = ExportController(self.bus, gs, ss, self.w)
         self.session_ctrl = SessionController(
@@ -144,9 +160,16 @@ class AppController:
             "zoom_in": self.w.original_panel.zoom_in,
             "zoom_out": self.w.original_panel.zoom_out,
             "zoom_reset": self.w.original_panel.reset_zoom,
-            "undo": self.manual_ctrl.undo_last_point,
+            "undo": self._on_undo,
             "play_pause": self.w.frame_scrubber.toggle_play,
         })
+        self.circle_ctrl.sync_tool()
+
+    def _on_undo(self) -> None:
+        """Ctrl+Z: the last clicked edge point while selecting points, else the
+        newest manual fix (points or circle), clear or automatic re-track."""
+        if not self.manual_ctrl.undo_last_point():
+            self.circle_ctrl.undo()
 
     # ------------------------------------------------------------------ #
     #  State accessors (shared with sub-controllers)
@@ -249,6 +272,24 @@ class AppController:
         # Session save/load (menubar File menu)
         self.w.save_session_requested.connect(self._on_save_session)
         self.w.load_session_requested.connect(self._on_load_session)
+
+        # Last: these slots must run after the handlers connected above.
+        self._connect_circle_tool()
+
+    def _connect_circle_tool(self) -> None:
+        """Manual tab's Drag a circle tool and the automatic re-track."""
+        lp, circle = self.w.left_panel, self.circle_ctrl
+        mt = lp.manual_tab
+        self.w.original_panel.circle_drawn.connect(circle.on_circle_drawn)
+        mt.tool_changed.connect(self.manual_ctrl.on_tool_changed)
+        mt.tool_changed.connect(circle.on_tool_changed)
+        mt.use_circle_clicked.connect(circle.use_circle_as_manual)
+        mt.cancel_circle_clicked.connect(circle.cancel_prompt)
+        # After the pre-tune handlers stored the new detection mode / ROI:
+        lp.pretune_tab.filters_changed.connect(circle.sync_tool)
+        self.w.original_panel.roi_selected.connect(lambda *_roi: circle.sync_tool())
+        # After AutoController's Stop handler, so a re-track's status wins.
+        lp.automatic_tab.stop_clicked.connect(self.retrack.stop)
 
     def _sync_ui_from_state(self) -> None:
         """Reflect loaded/persisted state in the visible controls."""
@@ -683,6 +724,7 @@ class AppController:
     def _after_session_restore(self) -> None:
         """Bring every view in line with a freshly restored state."""
         self._sync_ui_from_state()
+        self.circle_ctrl.sync_tool()  # the restored detection mode decides the tool
         self.w.original_panel.set_roi_text(self._state.gridx, self._state.gridy)
         if self._state.images:
             self.file_ctrl.on_frame_changed(self._state.image_no)
@@ -713,5 +755,6 @@ class AppController:
             ):
                 return False
             self.auto_ctrl.stop_and_wait()
+        self.retrack.shutdown()
         self.session_ctrl.save_last_session()
         return True

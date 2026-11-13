@@ -44,13 +44,15 @@ class ReviewPanel(QWidget):
     always hit the run the user is looking at.
     """
 
-    ACTIONS = ("accept", "refit", "refit_neighbors", "manual", "delete", "skip")
+    ACTIONS = ("accept", "refit", "refit_neighbors", "circle", "manual", "delete", "skip")
     _BUTTONS = (  # (action, label, tooltip), laid out in pairs
         ("accept", "Accept (A)", "Keep the results of the whole row and lock them against Fit All"),
         ("skip", "Skip (S)", "Leave the row as it is and drop it from the queue"),
         ("refit", "Refit (R)", "Run detection again on every frame of the row"),
         ("refit_neighbors", "Neighbours (N)",
          "Refit the shown frame using neighbouring fits as a prior"),
+        ("circle", "Circle (C)", "Drag a circle on the shown frame in the Manual tab: "
+                                 "Auto measures the wall near it (Auto (reference frame) mode)"),
         ("manual", "Manual (M)", "Click edge points on the shown frame in the Manual tab"),
         ("delete", "Delete (D)", "Remove the results of every frame of the row"),
     )
@@ -151,7 +153,7 @@ class ReviewPanel(QWidget):
             btn.setObjectName("secondaryBtn")
             btn.setToolTip("Previous / next row (J/K); ←/→ step through a row's frames")
             btn.clicked.connect(lambda _checked, d=delta: self.step(d))
-        nav_row = len(self._BUTTONS) // 2
+        nav_row = (len(self._BUTTONS) + 1) // 2
         grid.addWidget(self._prev_btn, nav_row, 0)
         grid.addWidget(self._next_btn, nav_row, 1)
         return grid
