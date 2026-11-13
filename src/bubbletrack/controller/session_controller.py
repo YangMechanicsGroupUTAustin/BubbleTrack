@@ -195,7 +195,8 @@ class SessionController(BaseController):
         # recording replaces the current one only after asking (confirm_leave).
         self._saved_review: tuple = ()
         self.choose_save_path: Callable[[], str] | None = None  # None: a file dialog
-        file_ctrl.confirm_leave = self.confirm_leave
+        if file_ctrl is not None:  # None in tests of the autosave alone
+            file_ctrl.confirm_leave = self.confirm_leave
         self.bus.subscribe("source_loaded", self._on_source_loaded)
 
         self._clock = clock
