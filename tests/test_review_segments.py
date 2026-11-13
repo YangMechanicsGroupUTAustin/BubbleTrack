@@ -8,10 +8,10 @@ from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.controller.review_segments import (
     CATEGORIES,
     ReviewSegment,
-    anchor_frame,
     build_segments,
     category_label,
     category_of,
+    next_in_segment,
     queue_frames,
     segment_of,
     tier,
@@ -49,11 +49,14 @@ class TestCategories:
         assert category_of(_item(0, "fragmented", "collapse")) == "collapse"
         assert category_of(_item(0, "fragmented", "shoulder")) == "shape"
 
-    def test_a_handful_of_named_categories(self):
+    def test_a_handful_of_named_categories_in_plain_words(self):
         assert 5 <= len(CATEGORIES) <= 8
-        assert category_label("lost") == "Lost track"
-        assert category_label("other") == "Other"
+        assert category_label("lost") == "Auto lost the bubble"
+        assert category_label("low_confidence") == "Not sure: low confidence"
+        assert category_label("other") == "Worth a look"
         assert all(category_label(c.key) == c.label for c in CATEGORIES)
+        jargon = ("segment", "guided", "disagree", "reacquired", "ML result", "track ")
+        assert not any(word in c.label for c in CATEGORIES for word in jargon)
 
 
 class TestGrouping:
@@ -93,19 +96,22 @@ class TestGrouping:
         (segment,) = build_segments([_item(44, "jump", severity=80)])
         assert (segment.start, segment.end, segment.count) == (44, 44, 1)
         assert segment.is_single and segment.severity == 80
-        assert segment.label == "Sudden jump"
+        assert segment.label == "Radius jumps"
 
 
 class TestRanking:
-    def test_worst_severity_inside_first_then_frame(self):
+    def test_likely_wrong_rows_first_each_tier_in_frame_order(self):
+        """Working down the list moves forward through the recording."""
         items = [
             _item(1, "low_confidence", severity=60), _item(2, "low_confidence", severity=88),
             _item(20, "lost", severity=100),
             _item(40, "non_circular", severity=55), _item(30, "jump", severity=88),
+            _item(50, "collapse", severity=35), _item(45, "low_confidence", severity=70),
         ]
         segments = build_segments(items)
-        assert [s.start for s in segments] == [20, 1, 30, 40]
-        assert segments[1].severity == 88  # the worst frame of 1-2
+        assert [s.start for s in segments] == [1, 20, 30, 40, 45, 50]
+        assert [s.tier for s in segments] == ["high"] * 3 + ["medium"] * 2 + ["low"]
+        assert segments[0].severity == 88  # the worst frame of 1-2 makes the row red
 
     def test_queue_frames_lists_each_segment_in_frame_order(self):
         items = [_item(5, "lost", severity=100), _item(6, "lost", severity=100),
@@ -135,11 +141,16 @@ class TestLookup:
         assert segment_of(segments, 20) is None
         assert segment_of(segments, None) is None
 
-    def test_anchor_is_the_member_at_or_before_the_frame(self):
+    def test_next_in_segment_is_the_next_member_still_listed(self):
+        (segment,) = build_segments([_item(f, "lost") for f in (10, 12, 13, 14)])
+        assert next_in_segment(segment, 12, {10, 13, 14}) == 13
+        assert next_in_segment(segment, 12, {10, 14}) == 14  # 13 was settled meanwhile
+        assert next_in_segment(segment, 11, {10, 12, 13, 14}) == 12  # from a gap frame
+
+    def test_next_in_segment_wraps_to_the_members_before_then_ends(self):
         (segment,) = build_segments([_item(f, "lost") for f in (10, 12, 13)])
-        assert anchor_frame(segment, 12) == 12
-        assert anchor_frame(segment, 11) == 10
-        assert anchor_frame(segment, 5) == 10  # before the span: its first frame
+        assert next_in_segment(segment, 13, {10, 12}) == 10
+        assert next_in_segment(segment, 13, {13, 40}) is None  # only itself, or other rows
 
 
 class TestTier:

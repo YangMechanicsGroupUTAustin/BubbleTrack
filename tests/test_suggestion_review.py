@@ -1,12 +1,15 @@
-"""Accept (A) in Review on frames with Auto's guess, offscreen: a guess becomes a
-result only once the user has seen it.  A on a frame showing a guess stores
-that guess only (one Ctrl+Z) and shows the row's next guess; A on a frame
-without one accepts the row but leaves every guess alone."""
+"""Accept in Review on frames with Auto's guess, offscreen.
+
+A (Accept) stores the guess on screen only (one Ctrl+Z) and moves to the
+row's next frame.  Shift+A (Accept all) stores every guess of the row, and
+asks once when some of them were never on screen."""
 
 from __future__ import annotations
 
 import numpy as np
 import pytest
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from bubbletrack.controller.circle_controller import circle_outline
 from bubbletrack.controller.review_queue import ReviewItem
@@ -16,6 +19,7 @@ from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import update_state
 from bubbletrack.model.suggestion import make_suggestion, shown_suggestion
 from bubbletrack.ui import chart_style as cs
+from bubbletrack.ui import review_confirm
 from bubbletrack.ui.review_rows import tooltip_html
 from conftest import write_sequence
 
@@ -74,26 +78,36 @@ def _promoted(state) -> list[int]:
     return [int(i) for i in np.flatnonzero(state.radius > 0)]
 
 
-# -- a guess on screen ---------------------------------------------------------------------
+@pytest.fixture
+def answers(monkeypatch):
+    """Answer Accept all's question with the queued replies; records the questions."""
+    asked: list[str] = []
+    replies: list[bool] = []
 
-def test_a_stores_only_the_guess_on_screen_then_shows_the_next(app):
+    def ask(_parent, question):
+        asked.append(question)
+        return replies.pop(0)
+    monkeypatch.setattr(review_confirm, "ask_accept_all", ask)
+    return asked, replies
+
+
+# -- Accept: the guess on screen ------------------------------------------------------------
+
+def test_a_stores_only_the_guess_on_screen_then_shows_the_next_frame(app):
     window, controller = app
     state = _state(controller)
     _empty(state, [2, 4, 6, 7, 9])
     _guess(state, [3, 5, 8])
     _show(controller, 5)
     assert controller.review.panel.current_segment().frames == (2, 3, 4, 5, 6, 7, 8, 9)
+    assert controller.review.panel.card.buttons["accept"].text() == "Accept the guess"
     _accept(controller)
     assert _promoted(state) == [5] and np.flatnonzero(state.fit_locked).tolist() == [5]
     assert "Frame 6: Auto's guess accepted" in _status(window)
-    assert _state(controller).image_no == 8  # the row's next guess
-    _accept(controller)
-    assert _promoted(state) == [5, 8]
-    assert _state(controller).image_no == 3  # wraps to the row's first
-    _accept(controller)
-    assert _promoted(state) == [3, 5, 8]
-    assert _state(controller).image_no == 4  # no guess left: the next listed frame, as before
-    assert not state.fit_locked[[2, 4, 6, 7, 9]].any()
+    assert _state(controller).image_no == 6  # the row's next frame
+    _accept(controller)  # 6 has no guess: accepted as "no bubble"
+    assert _promoted(state) == [5] and state.fit_locked[6]
+    assert _state(controller).image_no == 7
 
 
 def test_accept_stores_the_guess_as_a_locked_auto_result(app):
@@ -134,26 +148,7 @@ def test_ctrl_z_undoes_one_accepted_guess(app):
     assert {3, 5} <= set(controller.review.panel.frames())
 
 
-# -- no guess on screen ----------------------------------------------------------------------
-
-def test_a_without_a_guess_accepts_the_row_but_skips_every_guess(app):
-    window, controller = app
-    state = _state(controller)
-    _empty(state, [2, 4, 6, 7, 9])
-    _guess(state, [3, 5, 8])
-    _show(controller, 2)
-    detail = controller.review.panel._detail.text()
-    assert detail.endswith("A skips the 3 frames with a guess")
-    _accept(controller)
-    assert _promoted(state) == []  # nobody has looked at the guesses
-    assert np.flatnonzero(state.fit_locked).tolist() == [2, 4, 6, 7, 9]  # "no bubble"
-    assert all(shown_suggestion(state, f) is not None for f in (3, 5, 8))
-    assert "3 frame(s) with Auto's guess left to look at" in _status(window)
-    assert _state(controller).image_no == 3  # the guesses still need their own look
-    assert controller.review.panel.current_segment().frames == (3, 5)  # 8 is a row of its own now
-
-
-def test_a_without_any_guess_still_means_no_bubble(app):
+def test_a_without_any_guess_means_no_bubble(app):
     _, controller = app
     state = _state(controller)
     _empty(state, [3])
@@ -163,9 +158,70 @@ def test_a_without_any_guess_still_means_no_bubble(app):
     assert frame_label(app_result(state, 3)).status == LABEL_NO_BUBBLE
 
 
-# -- texts ---------------------------------------------------------------------------------
+# -- Accept all: every guess of the row --------------------------------------------------
 
-def test_row_tooltip_and_detail_say_what_a_does(app):
+def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
+    window, controller = app
+    asked, _ = answers
+    state = _state(controller)
+    _empty(state, [2, 4])
+    _guess(state, [3, 5])
+    for f in (3, 5):
+        controller.file_ctrl.on_frame_changed(f)  # the user looked at both guesses
+    _show(controller, 2)
+    controller.review.perform("accept_all")
+    assert asked == []  # nothing unseen: no question
+    assert _promoted(state) == [3, 5] and state.fit_locked[2:6].all()
+    assert "(2 of Auto's guesses stored)" in _status(window)
+    controller._on_undo()  # one Ctrl+Z undoes it all
+    assert _promoted(state) == [] and not state.fit_locked.any()
+    assert all(shown_suggestion(state, f) is not None for f in (3, 5))
+
+
+def test_accept_all_asks_about_unseen_guesses_and_cancel_stores_nothing(app, answers):
+    _, controller = app
+    asked, replies = answers
+    state = _state(controller)
+    _empty(state, [2, 4, 6, 7, 9])
+    _guess(state, [3, 5, 8])
+    _show(controller, 3)
+    replies.append(False)
+    controller.review.perform("accept_all")
+    assert asked == ["Accept 8 frames? 2 of them are Auto's guesses you have not looked at."]
+    assert _promoted(state) == [] and not state.fit_locked.any()
+    assert _state(controller).image_no == 3  # cancelled: stay
+    replies.append(True)
+    controller.review.perform("accept_all")
+    assert _promoted(state) == [3, 5, 8] and state.fit_locked[2:10].all()
+
+
+def test_the_real_question_box(app, qapp):
+    """The dialog says what it will do; Cancel is one click away."""
+    window, controller = app
+    state = _state(controller)
+    _guess(state, [3, 4, 5])
+    _show(controller, 3)
+    seen = {}
+
+    def answer():
+        box = QApplication.activeModalWidget()
+        if not isinstance(box, QMessageBox):
+            QTimer.singleShot(20, answer)
+            return
+        seen["text"], seen["detail"] = box.text(), box.informativeText()
+        seen["buttons"] = sorted(b.text() for b in box.buttons())
+        box.button(QMessageBox.StandardButton.Cancel).click()
+    QTimer.singleShot(0, answer)
+    controller.review.perform("accept_all")
+    assert seen["text"] == "Accept 3 frames? 2 of them are Auto's guesses you have not looked at."
+    assert "Ctrl+Z" in seen["detail"]
+    assert "Accept all" in seen["buttons"] and len(seen["buttons"]) == 2
+    assert _promoted(state) == []
+
+
+# -- texts -----------------------------------------------------------------------------
+
+def test_row_tooltip_and_card_say_what_accept_does(app):
     _, controller = app
     state = _state(controller)
     _empty(state, [2])
@@ -173,15 +229,19 @@ def test_row_tooltip_and_detail_say_what_a_does(app):
     _show(controller, 3)
     panel = controller.review.panel
     tip = tooltip_html(panel.current_segment(), state.images)
-    assert "Auto&#x27;s guess on 2 of 3 frames (dashed): Accept (A) stores the one on screen" in tip
-    assert "Not a bubble? Shift+drag on the chart &gt; Mark as no bubble" in tip
-    assert panel._detail.text().endswith("A accepts the guess shown; 1 more guess to look at")
+    assert ("Auto&#x27;s guess on 2 of 3 frames (dashed): Accept (A) stores the one on screen, "
+            "Accept all (Shift+A) every one") in tip
+    assert "Not a bubble? No bubble (N); Shift+N for the whole row" in tip
+    assert panel.texts()[0].endswith("No result — Auto has a guess · 3 frames")
+    assert panel.card.advice.text().startswith("No result, but Auto has a guess")
+    assert panel.card.recommended() == "accept"
 
 
 # -- the hard case: one long row (lic_hard 05: 229 frames, 213 guesses) ----------------------
 
-def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path):
+def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path, answers):
     window, controller = _app(gui, tmp_path, 231)
+    asked, replies = answers
     state = _state(controller)
     bare = list(range(16, 231, 14))  # 16 of the row's frames have no guess, as on lic_hard 05
     _guess(state, [f for f in range(2, 231) if f not in bare])
@@ -190,15 +250,19 @@ def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path):
     segment = controller.review.panel.current_segment()
     assert segment.count == 229
     assert "Auto&#x27;s guess on 213 of 229 frames" in tooltip_html(segment, state.images)
-    assert controller.review.panel._detail.text().endswith(
-        "A accepts the guess shown; 212 more guesses to look at")
     _accept(controller)
     assert _promoted(state) == [5] and int(state.fit_locked.sum()) == 1
     assert _state(controller).image_no == 6
     assert controller.review.panel.current_segment().count == 228
+    # Accept all on the rest: one question, then 212 guesses stored at once
+    replies.append(True)
+    controller.review.perform("accept_all")
+    assert asked == ["Accept 228 frames? 211 of them are Auto's guesses you have not looked at."]
+    assert len(_promoted(state)) == 213 and state.fit_locked[2:231].all()
+    assert controller.review.count == 0
 
 
-# -- other rows with guesses (the tracker's "Lost track") --------------------------------------
+# -- other rows with guesses (the tracker's "Auto lost the bubble") --------------------------
 
 def test_lost_track_rows_follow_the_same_rule(app):
     _, controller = app
@@ -207,10 +271,10 @@ def test_lost_track_rows_follow_the_same_rule(app):
     _guess(state, [3, 5])
     controller.review.set_extra([ReviewItem(f, ("lost",), 100) for f in range(2, 7)])
     _show(controller, 3)
-    assert controller.review.panel.current_segment().label == "Lost track"
+    assert controller.review.panel.current_segment().label == "Auto lost the bubble"
     _accept(controller)
-    assert _promoted(state) == [3] and _state(controller).image_no == 5
+    assert _promoted(state) == [3] and _state(controller).image_no == 4
     _show(controller, 2)
-    _accept(controller)  # the row without its guess: 2, 4, 6
-    assert np.flatnonzero(state.fit_locked).tolist() == [2, 3, 4, 6]
+    _accept(controller)  # only the frame on screen
+    assert np.flatnonzero(state.fit_locked).tolist() == [2, 3]
     assert shown_suggestion(state, 5) is not None

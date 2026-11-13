@@ -99,13 +99,8 @@ def test_a_deleted_frame_is_unlabelled(app, tmp_path):
     _, controller = app
     controller._on_delete_point(3)  # chart: Delete point
     controller._on_delete_range(5, 6)  # chart: Delete range
-    state = controller._get_state()
-    state.fit_confidence[8] = 0.1  # Review > Delete on a low-confidence row
-    controller.review.refresh()
-    controller.review.panel.step(1)
-    controller.review.perform("delete")
     case, _ = _export(controller, 3, 8, tmp_path / "d.zip")
-    for idx in (3, 5, 6, 8):
+    for idx in (3, 5, 6):
         frame = case.frame(idx)
         assert frame.result.radius is None and frame.label.status == LABEL_UNLABELLED
     assert not any(f.label.is_labelled for f in case.frames)

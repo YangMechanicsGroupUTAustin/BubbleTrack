@@ -20,7 +20,7 @@ from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter
 from PyQt6.QtWidgets import QStyle, QStyledItemDelegate, QStyleOptionViewItem
 
 from bubbletrack.controller.review_segments import ReviewSegment
-from bubbletrack.ui.review_text import SEP, file_tag, segment_title, tooltip_lines
+from bubbletrack.ui.review_text import SEP, file_tag, problem_text, segment_title, tooltip_lines
 
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1  # RowData of a list item
 
@@ -46,8 +46,8 @@ class RowData(NamedTuple):
 def row_data(segment: ReviewSegment, images: Sequence[str]) -> RowData:
     if segment.is_single:  # the file number is drawn fainter than the frame
         return RowData(f"Frame {segment.start + 1}", file_tag(images, segment.start),
-                       segment.label, "", segment.tier)
-    return RowData(segment_title(segment, images), "", segment.label,
+                       problem_text(segment), "", segment.tier)
+    return RowData(segment_title(segment, images), "", problem_text(segment),
                    str(segment.count), segment.tier)
 
 

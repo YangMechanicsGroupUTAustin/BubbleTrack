@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import QComboBox, QDockWidget, QSpinBox
 from bubbletrack.controller.review_controller import build_review_items, install_review
 from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.ui.shortcuts import REVIEW_BINDINGS
+from bubbletrack.ui.shortcuts import FIX_BINDINGS, REVIEW_BINDINGS
 
 N_FRAMES = 8
 
@@ -53,6 +53,10 @@ def _show(qapp, window):
     qapp.processEvents()
 
 
+def _shown(controller) -> int:
+    return controller._get_state().image_no
+
+
 class TestInstall:
     def test_dock_and_view_menu_toggle(self, qapp, review):
         window, _, rc = review
@@ -82,7 +86,7 @@ class TestInstall:
         rc.refresh()
         assert rc.count == 0
 
-    def test_refresh_lists_flagged_frames_and_emits_count(self, review):
+    def test_refresh_lists_flagged_frames_in_plain_words(self, review):
         _, controller, rc = review
         counts = []
         rc.count_changed.connect(counts.append)
@@ -91,8 +95,8 @@ class TestInstall:
         state.fit_flags[5] = frozenset({"non_circular"})
         rc.refresh()
         assert rc.panel.frames() == [2, 5]
-        assert rc.panel.texts()[0] == "Frame 3 · _003 · Low confidence"
-        assert rc.panel.texts()[1] == "Frame 6 · _006 · Irregular shape"
+        assert rc.panel.texts() == ["Frame 3 · _003 · Not sure: low confidence",
+                                    "Frame 6 · _006 · Outline not round"]
         assert counts == [2]
 
     def test_locked_frames_are_excluded(self, review):
@@ -108,7 +112,7 @@ class TestInstall:
         state = _fitted(controller, conf=np.nan)
         state.radius[3] = 60.0
         rc.refresh()
-        assert rc.panel.texts() == ["Frame 4 · _004 · Sudden jump"]
+        assert rc.panel.texts() == ["Frame 4 · _004 · Radius jumps"]
 
     def test_set_extra_merges_and_new_source_resets(self, review, make_sequence):
         from bubbletrack.controller.review_controller import ReviewItem
@@ -122,37 +126,41 @@ class TestInstall:
 
 
 class TestActions:
-    def test_selecting_an_item_shows_its_frame(self, review):
+    def test_selecting_a_row_shows_its_frame(self, review):
         _, controller, rc = review
         _flag(controller, rc, f2=0.3, f5=0.1)
         rc.panel.step(1)
         assert rc.panel.current_frame() == 5  # lowest confidence first
-        assert controller._get_state().image_no == 5
+        assert _shown(controller) == 5
 
-    def test_accept_locks_keeps_source_and_advances(self, review):
+    def test_accept_locks_the_frame_keeps_its_source_and_moves_on(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, f2=0.1, f5=0.3)
         rc.panel.step(1)
         rc.perform("accept")
         assert state.fit_locked[2] and state.fit_source[2] == FitSource.AUTO
         assert rc.panel.frames() == [5]
-        assert rc.panel.current_frame() == 5 == controller._get_state().image_no
+        assert rc.panel.current_frame() == 5 == _shown(controller)
 
-    def test_delete_clears_result_and_drops_item(self, review):
+    def test_accept_is_undone_by_ctrl_z(self, review):
         _, controller, rc = review
-        state = _flag(controller, rc, f3=0.2)
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
         rc.panel.step(1)
-        rc.perform("delete")
-        assert state.radius[3] == -1.0 and state.fit_source[3] == FitSource.NONE
-        assert rc.count == 0
-        # A new low-confidence result for that frame is reviewed again (deleting
-        # cleared the old score, so the new fit brings its own).
-        state.radius[3] = 35.0
-        state.fit_confidence[3] = 0.2
-        rc.refresh()
-        assert rc.panel.frames() == [3]
+        rc.perform("accept")
+        controller._on_undo()
+        assert not state.fit_locked[2] and 2 in rc.panel.frames()
 
-    def test_skip_drops_item_and_changes_nothing(self, review):
+    def test_no_bubble_clears_and_locks_the_frame_and_undo_restores(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f3=0.2, f6=0.4)
+        rc.panel.step(1)
+        rc.perform("no_bubble")
+        assert state.radius[3] == -1.0 and state.fit_locked[3]
+        assert rc.panel.frames() == [6] and _shown(controller) == 6
+        controller._on_undo()
+        assert state.radius[3] > 0 and not state.fit_locked[3]
+
+    def test_skip_drops_the_row_and_changes_nothing(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, f1=0.1, f6=0.2)
         before = state.radius.copy()
@@ -160,56 +168,43 @@ class TestActions:
         rc.perform("skip")
         np.testing.assert_array_equal(state.radius, before)
         assert not state.fit_locked.any()
-        assert rc.panel.frames() == [6] and controller._get_state().image_no == 6
+        assert rc.panel.frames() == [6] and _shown(controller) == 6
 
-    @pytest.mark.parametrize("action, method", [
-        ("refit", "_on_refit_point"),
-        ("refit_neighbors", "_on_refit_point_with_neighbors"),
-    ])
-    def test_refit_calls_through_and_advances(self, review, monkeypatch, action, method):
-        _, controller, rc = review
-        _flag(controller, rc, f2=0.1, f5=0.3)  # two single-frame rows
-        calls = []
-        monkeypatch.setattr(controller, method, calls.append)
-        rc.panel.step(1)
-        rc.perform(action)
-        assert calls == [2]
-        assert rc.panel.current_frame() == 5  # frame 2 is still listed, but we move on
+    def test_review_never_deletes(self, review):
+        assert not {"delete", "refit", "refit_neighbors", "manual"} & set(
+            review[2].panel.ACTIONS)
+        with pytest.raises(ValueError):
+            review[2].perform("delete")
 
-    def test_manual_opens_manual_tab_in_point_mode_then_advances(self, review):
-        window, controller, rc = review
-        state = _flag(controller, rc, f4=0.1, f6=0.3)
-        rc.panel.step(1)
-        rc.perform("manual")
-        assert window.left_panel.tab_bar.current_name() == "Manual"
-        assert window.original_panel._mode == "point"
-        assert controller._get_state().image_no == 4
-        for a in np.linspace(0, 2 * np.pi, 8, endpoint=False):
-            controller.manual_ctrl.on_point_clicked(200 + 30 * np.cos(a), 125 + 30 * np.sin(a))
-        window.left_panel.manual_tab.done_clicked.emit()
-        assert state.fit_source[4] == FitSource.MANUAL
-        assert state.radius[4] == pytest.approx(30.0, abs=0.5)
-        assert rc.panel.frames() == [6]
-        assert controller._get_state().image_no == 6
-
-    def test_navigating_off_the_queue_clears_the_selection(self, review):
+    def test_navigating_off_the_queue_clears_the_row(self, review):
         window, controller, rc = review
         state = _flag(controller, rc, f2=0.1)
         rc.panel.step(1)
         controller.file_ctrl.on_frame_changed(7)
         assert rc.panel.current_frame() is None
-        rc.perform("accept")
+        rc.perform("accept_all")  # a row action: no row, nothing happens
         assert not state.fit_locked.any()
         window.frame_scrubber.value_changed.emit(2)  # back onto a queued frame
         assert rc.panel.current_frame() == 2
 
-    def test_panel_buttons_drive_the_same_actions(self, review):
+    def test_frame_actions_work_on_any_frame_on_screen(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1)
+        controller.file_ctrl.on_frame_changed(7)  # not flagged, in no row
+        assert rc.panel.card.isVisibleTo(rc.panel)
+        assert rc.panel.card.title.text() == "Frame 8 · _008"
+        assert rc.panel.card.advice.text().startswith("Not flagged.")
+        assert rc.panel.card.buttons["accept_all"].isHidden()
+        rc.perform("no_bubble")
+        assert state.radius[7] == -1.0 and state.fit_locked[7]
+        assert _shown(controller) == 7  # no row: nothing to move on to
+
+    def test_buttons_drive_the_same_actions(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, f2=0.1, f5=0.3)
-        rc.panel._next_btn.click()
-        assert controller._get_state().image_no == 2
-        rc.panel._action_buttons["accept"].click()
-        assert state.fit_locked[2] and controller._get_state().image_no == 5
+        rc.panel.step(1)
+        rc.panel.card.buttons["accept"].click()
+        assert state.fit_locked[2] and _shown(controller) == 5
 
     def test_edits_outside_the_queue_refresh_it(self, review):
         window, controller, rc = review
@@ -227,6 +222,63 @@ class TestActions:
         assert rc.count == 0
         assert controller.load_session_file(str(path))
         assert rc.panel.frames() == [3, 6]
+
+
+class TestCardAndFeedback:
+    def test_the_recommended_action_is_the_filled_button(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f3=0.2)
+        state.fit_flags[5] = frozenset({"jump"})
+        rc.refresh()
+        controller.file_ctrl.on_frame_changed(3)
+        card = rc.panel.card
+        assert card.recommended() == "accept"
+        assert [b.text() for b in (card.buttons["accept"], card.buttons["fix"],
+                                   card.buttons["no_bubble"])] == [
+            "Accept this frame", "Fix with edge points", "No bubble here"]
+        assert card.advice.text() == ("Low confidence (0.20). "
+                                      "Accept it if the outline sits on the bubble wall.")
+        controller.file_ctrl.on_frame_changed(5)
+        assert card.recommended() == "fix"
+
+    def test_feedback_says_what_happened_and_undo_reverts_it(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        rc.perform("accept")
+        feedback = rc.panel.feedback
+        assert feedback.text() == "✓ Frame 3 accepted and locked. That row is done."
+        assert feedback.offers_undo()
+        feedback._undo.click()
+        assert not state.fit_locked[2] and _shown(controller) == 2
+        assert feedback.isHidden()
+
+    def test_undo_of_a_skip_brings_the_row_back(self, review):
+        _, controller, rc = review
+        _flag(controller, rc, f1=0.1, f6=0.2)
+        rc.panel.step(1)
+        rc.perform("skip")
+        assert rc.panel.feedback.text().startswith("✓ Frame 2 skipped")
+        rc.panel.feedback._undo.click()
+        assert rc.panel.frames() == [1, 6] and _shown(controller) == 1
+
+    def test_progress_counts_down_then_all_done_offers_export(self, review, monkeypatch):
+        _, controller, rc = review
+        _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.reset_progress()
+        assert rc.panel._summary.text() == "2 frames to check"
+        rc.panel.step(1)
+        rc.perform("accept")
+        assert rc.panel._summary.text() == "1 of 2 frames to check"
+        rc.perform("accept")
+        assert rc.panel._summary.text() == "All 2 checked"
+        page = rc.panel.done_page
+        assert page.text().startswith("All done") and page.offers_export()
+        assert rc.panel.feedback.text().endswith("All done.")
+        exported = []
+        monkeypatch.setattr(controller.export_ctrl, "on_export_rof_t", lambda: exported.append(1))
+        page._export.click()
+        assert exported == [1]
 
 
 class TestRunLock:
@@ -266,7 +318,12 @@ class TestKeys:
         keys += [a.shortcut().toString() for a in window.findChildren(QAction)
                  if not a.shortcut().isEmpty()]
         assert len(keys) == len(set(keys))
-        assert set(REVIEW_BINDINGS) <= set(keys)
+        assert set(REVIEW_BINDINGS) | set(FIX_BINDINGS) <= set(keys)
+
+    def test_the_bindings(self):
+        assert REVIEW_BINDINGS == {"A": "accept", "Shift+A": "accept_all", "F": "fix",
+                                   "N": "no_bubble", "Shift+N": "no_bubble_all", "S": "skip",
+                                   "J": "next", "K": "prev"}
 
     def test_j_k_navigate_and_a_accepts(self, qapp, review):
         window, controller, rc = review
@@ -275,10 +332,24 @@ class TestKeys:
         rc.panel._list.setFocus(Qt.FocusReason.MouseFocusReason)  # clicked into the dock
         for key, expected in ((Qt.Key.Key_J, 1), (Qt.Key.Key_J, 4), (Qt.Key.Key_K, 1)):
             QTest.keyClick(rc.panel._list, key)
-            assert controller._get_state().image_no == expected
+            assert _shown(controller) == expected
         QTest.keyClick(rc.panel._list, Qt.Key.Key_A)
         assert state.fit_locked[1]
-        assert rc.panel.frames() == [4, 7] and controller._get_state().image_no == 4
+        assert rc.panel.frames() == [4, 7] and _shown(controller) == 4
+        QTest.keyClick(rc.panel._list, Qt.Key.Key_N)
+        assert state.radius[4] == -1.0 and state.fit_locked[4] and _shown(controller) == 7
+
+    def test_shift_keys_act_on_the_whole_row(self, qapp, review):
+        window, controller, rc = review
+        _show(qapp, window)
+        state = _flag(controller, rc, f2=0.1, f3=0.2, f4=0.15, f7=0.4)
+        rc.panel._list.setFocus(Qt.FocusReason.MouseFocusReason)
+        QTest.keyClick(rc.panel._list, Qt.Key.Key_J)
+        assert rc.panel.current_segment().frames == (2, 3, 4)
+        QTest.keyClick(rc.panel._list, Qt.Key.Key_A, Qt.KeyboardModifier.ShiftModifier)
+        assert state.fit_locked[2:5].all() and _shown(controller) == 7
+        QTest.keyClick(rc.panel._list, Qt.Key.Key_N, Qt.KeyboardModifier.ShiftModifier)
+        assert state.radius[7] == -1.0 and state.fit_locked[7]
 
     @pytest.mark.parametrize("widget_type", [QSpinBox, QComboBox])
     def test_keys_do_nothing_while_a_field_has_focus(self, qapp, review, widget_type):
@@ -290,7 +361,7 @@ class TestKeys:
                      if w.isVisible() and w.isEnabled())
         field.setFocus()
         qapp.processEvents()
-        for key in (Qt.Key.Key_A, Qt.Key.Key_D):
+        for key in (Qt.Key.Key_A, Qt.Key.Key_N):
             QTest.keyClick(field, key)
         assert not state.fit_locked[2] and state.radius[2] > 0
 

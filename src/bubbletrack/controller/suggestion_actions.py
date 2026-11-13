@@ -1,12 +1,10 @@
-"""Accept (A) in Review and Auto's guesses: a guess becomes a result only once seen.
+"""Accept in Review and Auto's guesses: a guess becomes a result once accepted.
 
-* The frame on screen shows a guess: A stores that guess only (an Auto
+* Accept (A) on a frame showing a guess stores that guess only (an Auto
   result, locked: the user accepted it) as one undoable edit in the shared
-  history, then Review shows the row's next frame with a guess.
-* The frame on screen has none: A accepts the row as before, but leaves
-  every frame that shows a guess alone (each needs its own look).
-
-Guesses of frames the user has not displayed are never stored.
+  history.
+* Accept all (Shift+A) stores every guess of the row; it asks first when
+  some of them were never on screen (``ReviewController``).
 """
 
 from __future__ import annotations
@@ -45,12 +43,6 @@ def accept_shown_guess(state, frame: int | None) -> Promotion | None:
 def guessed_frames(state, segment) -> tuple[int, ...]:
     """*segment*'s listed frames that show a guess, in frame order."""
     return tuple(f for f in segment.frames if shown_suggestion(state, f) is not None)
-
-
-def next_guess(state, segment, frame: int) -> int | None:
-    """The row's next frame with a guess after *frame* (then from its start)."""
-    others = [f for f in guessed_frames(state, segment) if f != frame]
-    return next((f for f in others if f > frame), others[0] if others else None)
 
 
 def finish_promotion(app, promotion: Promotion) -> str:
