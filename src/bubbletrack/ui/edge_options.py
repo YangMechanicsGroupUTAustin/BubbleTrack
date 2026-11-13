@@ -77,7 +77,7 @@ def _button(text: str, tip: str, slot) -> QPushButton:
 
 def _undo_button(name: str, tip: str, slot) -> QPushButton:
     """A small '×' that undoes a choice; *name* is what it is called (tooltip, a11y)."""
-    button = _button("×", f"{name}: {tip}", slot)
+    button = _button("×", f"{name}: {tip[:1].lower()}{tip[1:]}", slot)
     button.setAccessibleName(name)
     button.setFixedWidth(UNDO_BUTTON_WIDTH)
     return button
