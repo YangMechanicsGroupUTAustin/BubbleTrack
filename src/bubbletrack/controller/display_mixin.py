@@ -208,6 +208,7 @@ def display_frame(
             frame_to_display(idx), state.total_frames,
         )
         window.status_bar.update_roi(state.gridx, state.gridy)
+        run_display_hooks(window, state, idx)
         if (state.region_count is not None and state.region_count[idx] > 0):
             window.header.set_status(
                 f"Area-equivalent R = {state.radius[idx]:.1f} px; "
@@ -215,6 +216,16 @@ def display_frame(
             )
     except Exception as exc:
         window.header.set_status(f"Error: {exc}", "#ef4444")
+
+
+def run_display_hooks(window, state: AppState, idx: int) -> None:
+    """Call ``window.frame_display_hooks`` (e.g. ML assist's teaching overlays)
+    after frame *idx* was drawn; a failing hook is logged, never fatal."""
+    for hook in tuple(getattr(window, "frame_display_hooks", ())):
+        try:
+            hook(state, idx)
+        except Exception:
+            logger.exception("Display hook failed for frame %d", idx + 1)
 
 
 MASK_TITLE = "Binary Mask"

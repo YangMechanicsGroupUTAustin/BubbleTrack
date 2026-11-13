@@ -55,6 +55,8 @@ class MainWindow(QMainWindow):
         self._size_to_screen()
 
         self._build_menubar()
+        # Called as hook(state, idx) after a frame is drawn (controller/display_mixin).
+        self.frame_display_hooks: list = []
 
         central = QWidget()
         self.setCentralWidget(central)

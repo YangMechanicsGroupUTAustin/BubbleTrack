@@ -149,6 +149,10 @@ class AppController:
         from bubbletrack.controller.hard_case_controller import install_hard_cases
         self.hard_cases = install_hard_cases(self.w, self)
 
+        # ML assist: the Auto box's helper (teaching dock, Apply, Fit All)
+        from bubbletrack.controller.ml_controller import install_ml_assist
+        self.ml = install_ml_assist(self.w, self)
+
         # Keyboard shortcuts
         self._shortcuts = setup_shortcuts(self.w, {
             "frame_prev": lambda: self.file_ctrl.on_frame_changed(
@@ -167,7 +171,10 @@ class AppController:
 
     def _on_undo(self) -> None:
         """Ctrl+Z: the last clicked edge point while selecting points, else the
-        newest manual fix (points or circle), clear or automatic re-track."""
+        newest manual fix (points or circle), clear or automatic re-track.
+        While ML assist teaches, its last brush stroke comes first."""
+        if self.ml.teach.undo_stroke():
+            return
         if not self.manual_ctrl.undo_last_point():
             self.circle_ctrl.undo()
 
@@ -729,6 +736,7 @@ class AppController:
         if self._state.images:
             self.file_ctrl.on_frame_changed(self._state.image_no)
         self._refresh_chart()
+        self.ml.refresh_state_line()  # the restored ML assist examples and switch
 
     # ------------------------------------------------------------------ #
     #  Closing the window
@@ -756,5 +764,6 @@ class AppController:
                 return False
             self.auto_ctrl.stop_and_wait()
         self.retrack.shutdown()
+        self.ml.shutdown()
         self.session_ctrl.save_last_session()
         return True

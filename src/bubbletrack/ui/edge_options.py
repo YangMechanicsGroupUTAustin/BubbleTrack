@@ -34,14 +34,26 @@ def _select(box: QComboBox, value: str) -> None:
         box.blockSignals(False)
 
 
+ML_ASSIST_TIP = (
+    "ML assist helps Auto on hard recordings (blood, speckle, low contrast).\n"
+    "Teach it with a few frames: the frames you verified count automatically\n"
+    "(manual fits, circle fixes, accepted frames); a few brush strokes help more.\n"
+    "Apply re-measures every frame you have not confirmed; ML's own outlines\n"
+    "always go to the Review queue.")
+ML_SWITCH_TIP = ("On: Fit All measures with ML assist.\n"
+                 "Off: plain Auto (re-fit to return to Auto's results).")
+
+
 class EdgeOptionsBox(QGroupBox):
-    """Edge definition, bubble polarity, reference frame, seed point, tracking."""
+    """Edge definition, bubble polarity, reference frame, seed point, ML assist, tracking."""
 
     options_changed = pyqtSignal()
     use_current_reference_clicked = pyqtSignal()
     auto_reference_clicked = pyqtSignal()
     pick_seed_clicked = pyqtSignal()
     clear_seed_clicked = pyqtSignal()
+    ml_assist_clicked = pyqtSignal()  # "ML assist..." (teaching mode)
+    ml_switch_toggled = pyqtSignal(bool)  # ML assist on / off for this recording
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__("Auto (reference frame)", parent)
@@ -105,6 +117,7 @@ class EdgeOptionsBox(QGroupBox):
         grid.addWidget(QLabel("Seed:"), 4, 0)
         grid.addWidget(self._seed_label, 4, 1)
         grid.addLayout(seed_buttons, 5, 1, 1, 2)
+        self._build_ml_assist(grid, 6)
 
         # Advanced (collapsed): on by default, rarely needs changing.
         advanced = CollapsibleSection("Advanced", collapsed=True)
@@ -117,8 +130,41 @@ class EdgeOptionsBox(QGroupBox):
             "Manual and locked frames are kept and anchor the track.\n"
             "Turn off to keep pure single-frame results.")
         advanced.add_widget(self._track_check)
-        grid.addWidget(advanced, 6, 0, 1, 3)
+        grid.addWidget(advanced, 8, 0, 1, 3)
         self.advanced = advanced
+
+    def _build_ml_assist(self, grid: QGridLayout, row: int) -> None:
+        """'ML assist:' state line, the switch and the 'ML assist...' button."""
+        self.ml_state_label = QLabel("Off")
+        self.ml_state_label.setToolTip(ML_ASSIST_TIP)
+        self.ml_button = QPushButton("ML assist…")
+        self.ml_button.setObjectName("secondaryBtn")
+        self.ml_button.setToolTip(ML_ASSIST_TIP)
+        self.ml_button.clicked.connect(self.ml_assist_clicked)
+        self.ml_switch = QCheckBox("On")
+        self.ml_switch.setToolTip(ML_SWITCH_TIP)
+        self.ml_switch.setEnabled(False)
+        self.ml_switch.toggled.connect(self.ml_switch_toggled)
+        buttons = QHBoxLayout()
+        buttons.addWidget(self.ml_button)
+        buttons.addWidget(self.ml_switch)
+        grid.addWidget(QLabel("ML assist:"), row, 0)
+        grid.addWidget(self.ml_state_label, row, 1, 1, 2)
+        grid.addLayout(buttons, row + 1, 1, 1, 2)
+
+    def set_ml_state(self, text: str, on: bool, can_switch: bool, colour: str = "") -> None:
+        """Show the state line and the switch without emitting ml_switch_toggled."""
+        self.ml_state_label.setText(text)
+        self.ml_state_label.setStyleSheet(f"color:{colour};" if colour else "")
+        self.ml_switch.blockSignals(True)
+        self.ml_switch.setChecked(on)
+        self.ml_switch.blockSignals(False)
+        self.ml_switch.setEnabled(can_switch)
+
+    def set_ml_available(self, available: bool, tip: str = "") -> None:
+        """Without scikit-learn the button is disabled and says why."""
+        self.ml_button.setEnabled(available)
+        self.ml_button.setToolTip(ML_ASSIST_TIP if available else tip)
 
     # -- values ---------------------------------------------------------- #
 
