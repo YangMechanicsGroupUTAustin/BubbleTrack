@@ -45,10 +45,11 @@ def _no_autosave_into_data(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _no_blocking_questions(monkeypatch):
     """Questions that would block an offscreen test answer like the app used to
-    before they were asked: loading another recording discards an unsaved review.
-    Tests of the questions override this."""
-    from bubbletrack.controller import session_controller
+    before they were asked: a reference with a bubble is used, and loading another
+    recording discards an unsaved review.  Tests of the questions override this."""
+    from bubbletrack.controller import edge_setup, session_controller
 
+    monkeypatch.setattr(edge_setup, "ask_bubble_reference", lambda _parent, _frame: True)
     monkeypatch.setattr(session_controller, "ask_save_review",
                         lambda _parent, _name, _detail: "discard")
 

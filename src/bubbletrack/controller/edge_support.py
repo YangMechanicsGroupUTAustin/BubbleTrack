@@ -37,24 +37,6 @@ def reference_index(state: AppState) -> int | None:
     return _reference_cache[key]
 
 
-def reference_text(state: AppState) -> str:
-    """Label for the UI, e.g. 'Frame 2 (auto)' or 'None found'."""
-    if not state.images:
-        return "Auto"
-    idx = reference_index(state)
-    if idx is None:
-        return "None found (surface fallback)"
-    origin = "set" if state.reference_frame is not None else "auto"
-    return f"Frame {idx + 1} ({origin})"
-
-
-def seed_text(state: AppState) -> str:
-    if state.edge_seed is None:
-        return "None"
-    row, col = state.edge_seed
-    return f"row {row:.0f}, col {col:.0f}"
-
-
 def reference_raw(state: AppState) -> np.ndarray | None:
     """The reference frame's pixels (read once per source and reference)."""
     idx = reference_index(state)

@@ -31,17 +31,32 @@ from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.ml_assist import (
     UNAVAILABLE_TIP, examples_for_run, failures, make_job, ml_available,
-    protected_frames, readiness, state_text, stored_auto_map,
+    protected_frames, readiness, stored_auto_map,
 )
 from bubbletrack.model.ml_pipeline import MLJob, train_job
 from bubbletrack.model.state import update_state
+from bubbletrack.model.teach import MLExamples
 from bubbletrack.ui.ml_hint import MLHint
 from bubbletrack.ui.ml_teach_panel import MLTeachPanel
+from bubbletrack.ui.wording import plural
 
 logger = logging.getLogger(__name__)
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
 GUI_THREADS = 4  # model threads when training on the GUI thread (validation)
+
+
+def example_count(examples) -> int:
+    """Frames with verified circles or strokes."""
+    return len(examples.frames) if isinstance(examples, MLExamples) else 0
+
+
+def switch_text(on: bool, n_examples: int) -> str:
+    """The ML assist switch's text: 'On · 2 examples', 'Off · not taught yet'."""
+    head = "On" if on else "Off"
+    if n_examples:
+        return f"{head} · {plural(n_examples, 'example')}"
+    return head if on else f"{head} · not taught yet"
 
 
 @contextmanager
@@ -131,12 +146,16 @@ class MLAssistController:
     # -- the Auto box -------------------------------------------------------------- #
 
     def refresh_state_line(self) -> None:
+        """The Auto box's ML assist line: 'On · 2 examples', shown once relevant."""
         state = self.state
         examples = examples_for_run(state) if state.radius is not None else None
         ready = examples is not None and readiness(examples)[0]
         on = bool(state.ml_assist)
+        n = example_count(examples)
+        fitted = state.radius is not None and bool((state.radius > 0).any())
         self.w.left_panel.measure_panel.edge_box.set_ml_state(
-            state_text(on, examples), on, self.available and (ready or on), _OK if on else "")
+            switch_text(on, n), on, self.available and (ready or on), _OK if on else "",
+            relevant=fitted or n > 0 or on)
 
     def open_teaching(self) -> None:
         if not self.available:

@@ -84,10 +84,10 @@ def _wait_model(qapp, controller):
 def test_auto_box_shows_state_switch_and_button(app):
     window, controller = app
     box = _box(window)
-    assert box.ml_button.text() == "ML assist…" and box.ml_button.isEnabled()
-    assert box.ml_state_label.text() == "Off" and not box.ml_switch.isEnabled()
+    assert box.ml_button.text() == "Teach…" and box.ml_button.isEnabled()
+    assert box.ml_switch.text() == "Off · not taught yet" and not box.ml_switch.isEnabled()
     _verify(controller, (3,))
-    assert box.ml_state_label.text() == "Off (1 example)" and box.ml_switch.isEnabled()
+    assert box.ml_switch.text() == "Off · 1 example" and box.ml_switch.isEnabled()
 
 
 def test_without_scikit_learn_the_button_is_disabled_with_a_reason(qapp, isolated_config, monkeypatch):
@@ -223,7 +223,7 @@ def test_apply_measures_unconfirmed_frames_and_lists_ml_outlines(app, qapp):
     assert any("ml_guided" in state.fit_flags[f] for f in (1, 2, 4))
     assert any("Outline from ML assist" in text for text in controller.review.panel.texts())
     assert state.ml_assist and _box(window).ml_switch.isChecked()
-    assert _box(window).ml_state_label.text().startswith("On (")
+    assert _box(window).ml_switch.text().startswith("On · ")
     assert "ML assist:" in window.header.status_text()
 
 
@@ -259,4 +259,4 @@ def test_session_keeps_ml_assist_and_a_new_source_clears_it(app, qapp, tmp_path)
     assert controller.load_session_file(str(path))
     state = controller._get_state()
     assert state.ml_assist and state.ml_examples.strokes == examples.strokes
-    assert _box(window).ml_switch.isChecked() and _box(window).ml_state_label.text().startswith("On")
+    assert _box(window).ml_switch.isChecked() and _box(window).ml_switch.text().startswith("On")

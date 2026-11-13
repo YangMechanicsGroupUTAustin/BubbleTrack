@@ -69,6 +69,19 @@ def read_raw(source) -> np.ndarray:
     return raw
 
 
+def frame_has_bubble(raw: np.ndarray) -> bool:
+    """True when *raw* seems to contain a bubble, so it cannot be a reference.
+
+    The test the automatic reference choice applies to its candidates
+    (``model.edge.reference``): the engine, without a reference, finds a
+    confident circle of a plausible size on the full frame.
+    """
+    from bubbletrack.model.edge.config import DEFAULT_CONFIG
+    from bubbletrack.model.edge.reference import _has_bubble
+
+    return bool(_has_bubble(raw, DEFAULT_CONFIG))
+
+
 def resolve_reference_index(read_frame: Callable[[int], np.ndarray], n_frames: int,
                             explicit: int | None) -> int | None:
     """The user's reference frame if set and valid, else the auto-selected one."""
