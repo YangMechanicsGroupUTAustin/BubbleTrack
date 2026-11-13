@@ -20,12 +20,16 @@ from bubbletrack.model.removing_factor import compute_removing_factor
 
 logger = logging.getLogger(__name__)
 
+EVAL_CASES = "eval-cases"  # subcommand: the hard-case regression runner (cases_cli)
+
 
 def _build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
         prog="bubbletrack-cli",
         description="BubbleTrack -- headless batch bubble radius fitting",
+        epilog=f"Also: bubbletrack-cli {EVAL_CASES} FOLDER runs the hard-case regression "
+               f"library (see bubbletrack-cli {EVAL_CASES} --help).",
     )
     parser.add_argument(
         "--folder", required=True,
@@ -226,8 +230,13 @@ def main(argv: list[str] | None = None) -> None:
     """Entry point for the CLI.
 
     Exit status: 0 on success, 1 if no frame could be read or fitted, 2 for
-    invalid arguments.
+    invalid arguments.  ``bubbletrack-cli eval-cases ...`` runs the hard-case
+    regression library instead (``bubbletrack.cases_cli``, own exit codes).
     """
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if argv and argv[0] == EVAL_CASES:
+        from bubbletrack.cases_cli import main as eval_cases
+        sys.exit(eval_cases(argv[1:]))
     parser = _build_parser()
     args = parser.parse_args(argv)
     _validate_args(parser, args)

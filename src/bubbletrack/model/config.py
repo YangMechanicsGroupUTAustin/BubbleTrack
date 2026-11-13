@@ -301,6 +301,19 @@ def _as_folder(value: Any) -> str:
     return text
 
 
+_MAX_NAME_CHARS = 80
+
+
+def _as_name(value: Any) -> str:
+    """A person's name on one line ('' = none), e.g. who reports a hard case."""
+    if not isinstance(value, str):
+        raise ValueError("expected text")
+    text = " ".join(value.split())
+    if len(text) > _MAX_NAME_CHARS or any(ord(ch) < 32 for ch in text):
+        raise ValueError(f"expected a name of at most {_MAX_NAME_CHARS} characters")
+    return text
+
+
 def _as_timestamp(value: Any) -> float:
     """Seconds since the epoch (``time.time()``)."""
     number = _as_number(value)
@@ -313,6 +326,7 @@ _META_VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "last_export_dir": _as_folder,                  # export dialogs start here
     "last_export_format": _one_of(EXPORT_FORMATS),  # pre-selected Format combo
     "last_clean_exit": _as_timestamp,               # newer autosave => offer restore
+    "hard_case_reporter": _as_name,                 # "Your name" in Export Hard Case
 }
 
 

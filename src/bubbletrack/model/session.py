@@ -45,26 +45,14 @@ def _from_json_array(values) -> np.ndarray:
     return np.array(_fix(values), dtype=np.float64)
 
 
-def save_session(filepath: str, state) -> None:
-    """Serialize the current AppState to a ``.brt`` JSON file.
+def session_parameters(state) -> dict:
+    """The analysis parameters of *state* as plain JSON data.
 
-    Parameters
-    ----------
-    filepath : str
-        Destination file path (should end in ``.brt``).
-    state : AppState
-        The application state to persist.
-
-    Raises
-    ------
-    OSError
-        If the file cannot be written.
+    Everything a session stores besides the source paths, the shown frame
+    and the results: thresholds, ROI, filters, detection mode, Edge options
+    and the physical scales.  Hard-case bundles store the same dict.
     """
-    data = {
-        "version": SESSION_VERSION,
-        "folder_path": state.folder_path,
-        "video_path": state.video_path,
-        "image_no": state.image_no,
+    return {
         "img_thr": state.img_thr,
         "gridx": list(state.gridx),
         "gridy": list(state.gridy),
@@ -86,6 +74,30 @@ def save_session(filepath: str, state) -> None:
         "um2px": state.um2px,
         "fps": state.fps,
         "rmax_fit_length": state.rmax_fit_length,
+    }
+
+
+def save_session(filepath: str, state) -> None:
+    """Serialize the current AppState to a ``.brt`` JSON file.
+
+    Parameters
+    ----------
+    filepath : str
+        Destination file path (should end in ``.brt``).
+    state : AppState
+        The application state to persist.
+
+    Raises
+    ------
+    OSError
+        If the file cannot be written.
+    """
+    data = {
+        "version": SESSION_VERSION,
+        "folder_path": state.folder_path,
+        "video_path": state.video_path,
+        "image_no": state.image_no,
+        **session_parameters(state),
         "radius": _to_json_array(state.radius),
         "circle_fit_par": _to_json_array(state.circle_fit_par),
         "region_count": (
