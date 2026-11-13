@@ -1,4 +1,9 @@
-"""Options for the Edge detection engine (shown only in Edge mode)."""
+"""The Auto (reference frame) box: reference, seed, ML assist; Advanced options.
+
+The wall is always placed at the 50% crossing of the steep edge; the former
+"Outer extent" choice is no longer offered (``edge_definition`` stays
+"steep").  The bubble colour (dark by default) is in Advanced.
+"""
 
 from __future__ import annotations
 
@@ -9,10 +14,7 @@ from PyQt6.QtWidgets import (
 
 from bubbletrack.ui.widgets import CollapsibleSection
 
-_DEFINITIONS = (
-    ("Steep edge (50%)", "steep"),
-    ("Outer extent", "outer"),
-)
+STEEP_EDGE = "steep"  # the only wall position the app offers
 _POLARITIES = (
     ("Dark bubble", "dark"),
     ("Bright bubble", "bright"),
@@ -40,12 +42,12 @@ ML_ASSIST_TIP = (
     "(manual fits, circle fixes, accepted frames); a few brush strokes help more.\n"
     "Apply re-measures every frame you have not confirmed; ML's own outlines\n"
     "always go to the Review queue.")
-ML_SWITCH_TIP = ("On: Fit All measures with ML assist.\n"
+ML_SWITCH_TIP = ("On: Fit measures with ML assist.\n"
                  "Off: plain Auto (re-fit to return to Auto's results).")
 
 
 class EdgeOptionsBox(QGroupBox):
-    """Edge definition, bubble polarity, reference frame, seed point, ML assist, tracking."""
+    """Reference frame, seed point, ML assist; Advanced: bubble colour, tracking."""
 
     options_changed = pyqtSignal()
     use_current_reference_clicked = pyqtSignal()
@@ -59,27 +61,6 @@ class EdgeOptionsBox(QGroupBox):
         super().__init__("Auto (reference frame)", parent)
         grid = QGridLayout(self)
         grid.setSpacing(6)
-
-        self._definition = _combo(_DEFINITIONS)
-        self._definition.setToolTip(
-            "Where on the dark-to-bright transition the bubble wall is placed.\n"
-            "Steep edge (50%): halfway up the steep part of the edge. Independent\n"
-            "of focus and optics; recommended and comparable across setups.\n"
-            "Outer extent: where brightness has recovered to ~90% of the\n"
-            "background. Moves outward with blur/defocus."
-        )
-        self._definition.currentIndexChanged.connect(self.options_changed)
-        grid.addWidget(QLabel("Wall at:"), 0, 0)
-        grid.addWidget(self._definition, 0, 1, 1, 2)
-
-        self._polarity = _combo(_POLARITIES)
-        self._polarity.setToolTip(
-            "Dark bubble: the usual backlit shadowgraph.\n"
-            "Bright bubble: the bubble appears brighter than its surroundings."
-        )
-        self._polarity.currentIndexChanged.connect(self.options_changed)
-        grid.addWidget(QLabel("Bubble:"), 1, 0)
-        grid.addWidget(self._polarity, 1, 1, 1, 2)
 
         self._reference_label = QLabel("Auto")
         self._reference_label.setToolTip(
@@ -96,9 +77,9 @@ class EdgeOptionsBox(QGroupBox):
         auto.clicked.connect(self.auto_reference_clicked)
         ref_buttons.addWidget(use_current)
         ref_buttons.addWidget(auto)
-        grid.addWidget(QLabel("Reference:"), 2, 0)
-        grid.addWidget(self._reference_label, 2, 1)
-        grid.addLayout(ref_buttons, 3, 1, 1, 2)
+        grid.addWidget(QLabel("Reference:"), 0, 0)
+        grid.addWidget(self._reference_label, 0, 1)
+        grid.addLayout(ref_buttons, 1, 1, 1, 2)
 
         self._seed_label = QLabel("None")
         self._seed_label.setToolTip(
@@ -114,14 +95,29 @@ class EdgeOptionsBox(QGroupBox):
         clear.clicked.connect(self.clear_seed_clicked)
         seed_buttons.addWidget(pick)
         seed_buttons.addWidget(clear)
-        grid.addWidget(QLabel("Seed:"), 4, 0)
-        grid.addWidget(self._seed_label, 4, 1)
-        grid.addLayout(seed_buttons, 5, 1, 1, 2)
-        self._build_ml_assist(grid, 6)
+        grid.addWidget(QLabel("Seed:"), 2, 0)
+        grid.addWidget(self._seed_label, 2, 1)
+        grid.addLayout(seed_buttons, 3, 1, 1, 2)
+        self._build_ml_assist(grid, 4)
+        self.advanced = self._build_advanced()
+        grid.addWidget(self.advanced, 6, 0, 1, 3)
 
-        # Advanced (collapsed): on by default, rarely needs changing.
+    def _build_advanced(self) -> CollapsibleSection:
+        """Collapsed: options that rarely need changing."""
         advanced = CollapsibleSection("Advanced", collapsed=True)
-        self._track_check = QCheckBox("Track across frames after Fit All")
+        self._polarity = _combo(_POLARITIES)
+        self._polarity.setToolTip(
+            "Dark bubble: the usual backlit shadowgraph.\n"
+            "Bright bubble: the bubble appears brighter than its surroundings."
+        )
+        self._polarity.currentIndexChanged.connect(self.options_changed)
+        polarity = QWidget()
+        row = QHBoxLayout(polarity)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(QLabel("Bubble:"))
+        row.addWidget(self._polarity, 1)
+        advanced.add_widget(polarity)
+        self._track_check = QCheckBox("Track across frames after Fit")
         self._track_check.setChecked(True)
         self._track_check.setToolTip(
             "Follow the bubble from frame to frame once every frame is fitted:\n"
@@ -130,8 +126,7 @@ class EdgeOptionsBox(QGroupBox):
             "Manual and locked frames are kept and anchor the track.\n"
             "Turn off to keep pure single-frame results.")
         advanced.add_widget(self._track_check)
-        grid.addWidget(advanced, 8, 0, 1, 3)
-        self.advanced = advanced
+        return advanced
 
     def _build_ml_assist(self, grid: QGridLayout, row: int) -> None:
         """'ML assist:' state line, the switch and the 'ML assist...' button."""
@@ -169,7 +164,8 @@ class EdgeOptionsBox(QGroupBox):
     # -- values ---------------------------------------------------------- #
 
     def edge_definition(self) -> str:
-        return self._definition.currentData()
+        """Where the wall is placed: always the 50% crossing of the steep edge."""
+        return STEEP_EDGE
 
     def polarity(self) -> str:
         return self._polarity.currentData()
@@ -178,8 +174,11 @@ class EdgeOptionsBox(QGroupBox):
         return self._track_check.isChecked()
 
     def set_options(self, edge_definition: str, polarity: str) -> None:
-        """Set values without emitting options_changed."""
-        _select(self._definition, edge_definition)
+        """Show *polarity* without emitting options_changed.
+
+        *edge_definition* is accepted for older sessions and presets but not
+        offered: the wall is always the steep edge (see :meth:`edge_definition`).
+        """
         _select(self._polarity, polarity)
 
     def set_reference_text(self, text: str) -> None:

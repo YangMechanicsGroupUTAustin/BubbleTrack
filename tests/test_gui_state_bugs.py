@@ -8,7 +8,8 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bubbletrack.ui.pretune_tab import PreTuneTab
+from bubbletrack.model.state import update_state
+from bubbletrack.ui.classic_controls import ClassicControls
 from bubbletrack.ui.widgets import SliderInput, ToggleSliderInput
 
 
@@ -16,7 +17,7 @@ from bubbletrack.ui.widgets import SliderInput, ToggleSliderInput
 
 class TestSliderRounding:
     def test_saved_threshold_is_shown_unchanged(self, qapp):
-        tab = PreTuneTab()
+        tab = ClassicControls()
         for value in (0.29, 0.57, 0.58):
             tab.set_threshold(value)
             assert tab.get_threshold() == pytest.approx(value)
@@ -34,12 +35,12 @@ class TestSliderRounding:
         assert slider.value() == pytest.approx(5.7)
 
 
-# -- post-processing parameters ----------------------------------------------
+# -- physical parameters (Export dialog) ----------------------------------------
 
 class TestPhysicalParamsReachState:
-    def test_panel_edits_update_state(self, gui):
+    def test_dialog_edits_update_state(self, gui):
         window, controller = gui
-        pp = window.left_panel.post_processing
+        pp = controller.export_ctrl.make_dialog()
         pp._fps_unit.setCurrentText("M")
         pp._fps_spin.setValue(5.0)
         pp._scale_spin.setValue(1.25)
@@ -51,7 +52,7 @@ class TestPhysicalParamsReachState:
 
     def test_unit_change_updates_state(self, gui):
         window, controller = gui
-        pp = window.left_panel.post_processing
+        pp = controller.export_ctrl.make_dialog()
         pp._fps_spin.setValue(2.0)
         pp._fps_unit.setCurrentText("k")
         assert controller._get_state().fps == pytest.approx(2e3)
@@ -86,14 +87,6 @@ class TestFolderSwitch:
         _load(controller, make_sequence("B", 5))
         assert len(window.radius_chart._frames) == 0
 
-    def test_fit_range_resets_when_loading_another_folder(self, gui, make_sequence):
-        window, controller = gui
-        at = window.left_panel.automatic_tab
-        _load(controller, make_sequence("A", 40))
-        at._start_spin.setValue(30)
-        _load(controller, make_sequence("B", 10))
-        assert at.get_range() == (1, 10)
-
     def test_programmatic_frame_change_moves_scrubber(self, gui, make_sequence):
         window, controller = gui
         _load(controller, make_sequence("A", 10))
@@ -111,18 +104,6 @@ class TestFolderSwitch:
         _load(controller, make_sequence("A", 5))
         controller.file_ctrl.on_frame_changed(90)
         assert controller._get_state().image_no == 0
-
-
-class TestFitAllRange:
-    def test_start_after_end_is_rejected(self, gui, make_sequence):
-        window, controller = gui
-        _load(controller, make_sequence("A", 10))
-        at = window.left_panel.automatic_tab
-        at._end_spin.setValue(3)
-        at._start_spin.setValue(8)
-        controller.auto_ctrl.on_auto_fit()
-        assert controller.auto_ctrl._worker is None
-        assert "start" in window.header._status_label.text().lower()
 
 
 # -- manual fitting --------------------------------------------------------------
@@ -181,6 +162,7 @@ class TestRefit:
     def test_failed_refit_keeps_previous_result(self, gui, make_sequence, monkeypatch):
         window, controller = gui
         _load(controller, make_sequence("A", 5))
+        controller._state = update_state(controller._get_state(), detection_mode="intensity")
         state = controller._get_state()
         state.radius[2] = 55.0
         state.circle_fit_par[2] = [120.0, 190.0]

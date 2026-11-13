@@ -67,7 +67,7 @@ class MLAssistController:
         self.hint.open_clicked.connect(self.open_teaching)
         app.review.panel.add_banner(self.hint)
         self._validated: tuple | None = None  # what the last validation trained on
-        box = window.left_panel.pretune_tab.edge_box
+        box = window.left_panel.measure_panel.edge_box
         box.ml_assist_clicked.connect(self.open_teaching)
         box.ml_switch_toggled.connect(self.set_enabled)
         box.set_ml_available(self.available, UNAVAILABLE_TIP)
@@ -75,7 +75,7 @@ class MLAssistController:
         panel.close_clicked.connect(self.teach.leave)
         panel.stop_clicked.connect(self._stop)
         # After the pre-tune handler stored the new method: teaching is for Auto only.
-        window.left_panel.pretune_tab.filters_changed.connect(self._on_method_changed)
+        window.left_panel.measure_panel.filters_changed.connect(self._on_method_changed)
         app.auto_ctrl.ml_job_provider = self.job_for_fit_all
         bus = app.bus
         bus.subscribe("source_loaded", self._on_source_loaded)
@@ -135,7 +135,7 @@ class MLAssistController:
         examples = examples_for_run(state) if state.radius is not None else None
         ready = examples is not None and readiness(examples)[0]
         on = bool(state.ml_assist)
-        self.w.left_panel.pretune_tab.edge_box.set_ml_state(
+        self.w.left_panel.measure_panel.edge_box.set_ml_state(
             state_text(on, examples), on, self.available and (ready or on), _OK if on else "")
 
     def open_teaching(self) -> None:
@@ -165,9 +165,9 @@ class MLAssistController:
         self._app.session_ctrl.notify_results_changed()
         self.refresh_state_line()
         if on:
-            self.status("ML assist on: Fit All measures with it", _OK)
+            self.status("ML assist on: Fit measures with it", _OK)
         else:
-            self.status("ML assist off: Fit All measures with plain Auto "
+            self.status("ML assist off: Fit measures with plain Auto "
                         "(fit again to return to Auto's results)", _OK)
 
     # -- runs ------------------------------------------------------------------------ #

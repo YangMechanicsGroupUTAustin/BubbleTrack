@@ -214,7 +214,7 @@ class TestActions:
     def test_edits_outside_the_queue_refresh_it(self, review):
         window, controller, rc = review
         _flag(controller, rc, f2=0.1)
-        window.left_panel.automatic_tab.clear_clicked.emit()  # Clear wipes all results
+        controller.auto_ctrl.on_auto_clear()  # Clear All Results wipes everything
         assert rc.count == 0
 
     def test_session_load_rebuilds_the_queue(self, review, make_sequence, tmp_path):
@@ -249,7 +249,7 @@ class TestRunLock:
         controller.auto_ctrl.on_auto_fit()
         assert not rc.panel.isEnabled()
         deadline = time.monotonic() + 90
-        while not window.left_panel.automatic_tab._fit_btn.isEnabled():
+        while controller.auto_ctrl.is_busy():
             assert time.monotonic() < deadline, "Fit All did not finish"
             qapp.processEvents()
             time.sleep(0.01)
@@ -286,7 +286,8 @@ class TestKeys:
         _show(qapp, window)
         state = _flag(controller, rc, f2=0.1)
         rc.panel.step(1)
-        field = next(w for w in window.left_panel.pretune_tab.findChildren(widget_type)
+        window.left_panel.measure_panel.edge_box.advanced._toggle.click()  # its Bubble combo
+        field = next(w for w in window.findChildren(widget_type)
                      if w.isVisible() and w.isEnabled())
         field.setFocus()
         qapp.processEvents()

@@ -72,7 +72,8 @@ class PretuneController(BaseController):
         self._preview_timer.start()  # debounced
 
     def on_filters_changed(self) -> None:
-        p = self.w.left_panel.pretune_tab.get_filter_params()
+        p = self.w.left_panel.measure_panel.get_filter_params()
+        method_changed = p["detection_mode"] != self.state.detection_mode
         self._update(
             gaussian_sigma=p["gaussian_sigma"],
             clahe_clip=p["clahe_clip"],
@@ -89,7 +90,10 @@ class PretuneController(BaseController):
         self._invalidate_binary_cache()
         if self._cache is not None:
             self._cache.invalidate()
-        self._preview_timer.start()  # debounced
+        if method_changed:
+            self._display_timer.start()  # the new method's view, titles and overlays
+        else:
+            self._preview_timer.start()  # debounced
 
     def _invalidate_binary_cache(self) -> None:
         """Clear the preview binary ROI cache."""
@@ -98,7 +102,7 @@ class PretuneController(BaseController):
 
     def on_edges_changed(self) -> None:
         self._update(
-            bubble_cross_edges=tuple(self.w.left_panel.pretune_tab.get_edge_flags()),
+            bubble_cross_edges=tuple(self.w.left_panel.measure_panel.get_edge_flags()),
         )
         self.preview_detection()
 
@@ -113,7 +117,7 @@ class PretuneController(BaseController):
         to skip the expensive load_and_normalize step.
         """
         if not self.state.images or self.state.detection_mode == "edge":
-            return  # Edge mode has no threshold preview; use Fit Current Frame
+            return  # Edge mode has no threshold preview
         idx = self.state.image_no
         rf = compute_removing_factor(
             self.state.removing_factor, self.state.gridx, self.state.gridy,
@@ -183,7 +187,7 @@ class PretuneController(BaseController):
     # -- Edge engine: reference frame and seed -------------------------- #
 
     def refresh_edge_labels(self) -> None:
-        box = self.w.left_panel.pretune_tab.edge_box
+        box = self.w.left_panel.measure_panel.edge_box
         if self.state.detection_mode != "edge":
             return
         try:
@@ -239,7 +243,7 @@ class PretuneController(BaseController):
         else:  # rejected: its guess, if any, dashed
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
         refresh_chart(self.state, self.w)
-        self.w.left_panel.pretune_tab.hide_quality()
+        self.w.left_panel.measure_panel.hide_quality()
         self.w.header.set_status(*edge_support.status_text(idx, fit))
         self._results_changed()
 
@@ -290,7 +294,7 @@ class PretuneController(BaseController):
                     self.w.header.set_status(
                         f"Radius outlier ({radius:.0f} px), skipped", "#f59e0b",
                     )
-                    self.w.left_panel.pretune_tab.hide_quality()
+                    self.w.left_panel.measure_panel.hide_quality()
                 else:
                     logger.info("Fit frame %d: radius=%.2f", idx, radius)
                     self.state.radius[idx] = radius
@@ -317,22 +321,22 @@ class PretuneController(BaseController):
                     roi_h = self.state.gridx[1] - self.state.gridx[0] + 1
                     roi_w = self.state.gridy[1] - self.state.gridy[0] + 1
                     if self.state.detection_mode == "area":
-                        self.w.left_panel.pretune_tab.show_area_result(
+                        self.w.left_panel.measure_panel.show_area_result(
                             int(processed.sum()), count,
                         )
                     else:
                         q = compute_fit_quality(
                             edge_xy, rc, cc, radius, min(roi_h, roi_w),
                         )
-                        self.w.left_panel.pretune_tab.show_quality(
+                        self.w.left_panel.measure_panel.show_quality(
                             q.n_edge_points, q.rms_residual, int(q.score * 100),
                         )
             else:
                 self.w.header.set_status("Too few edge points", "#ef4444")
-                self.w.left_panel.pretune_tab.hide_quality()
+                self.w.left_panel.measure_panel.hide_quality()
         except Exception as exc:
             self.w.header.set_status(f"Error: {exc}", "#ef4444")
-            self.w.left_panel.pretune_tab.hide_quality()
+            self.w.left_panel.measure_panel.hide_quality()
 
     # -- Auto-tune -------------------------------------------------------- #
 
@@ -357,7 +361,7 @@ class PretuneController(BaseController):
 
         idx = self.state.image_no
         self.w.header.set_status("Auto-tuning...", "#f59e0b")
-        self.w.left_panel.pretune_tab.set_autotune_enabled(False)
+        self.w.left_panel.measure_panel.set_autotune_enabled(False)
 
         self._autotune_worker = AutoTuneWorker(
             current_source(self.state, idx),
@@ -379,7 +383,7 @@ class PretuneController(BaseController):
         self.w.header.set_status(f"Auto-tuning... {pct}%", "#f59e0b")
 
     def _on_autotune_finished(self, result) -> None:
-        self.w.left_panel.pretune_tab.set_autotune_enabled(True)
+        self.w.left_panel.measure_panel.set_autotune_enabled(True)
         # Wait for the thread to fully exit before dropping the reference,
         # otherwise GC may destroy the QThread while it is still running.
         if self._autotune_worker is not None:
@@ -391,7 +395,7 @@ class PretuneController(BaseController):
             return
 
         # Apply best parameters to state + UI
-        pt = self.w.left_panel.pretune_tab
+        pt = self.w.left_panel.measure_panel
         pt.set_threshold(result.threshold)
         pt.set_removing_factor(result.removing_factor)
 

@@ -1,21 +1,17 @@
-"""AutoController — batch automatic fitting across frame ranges."""
+"""AutoController — Fit: measures every frame (or a chart range) in the background."""
 
 from __future__ import annotations
 
 import logging
 import time
-from datetime import datetime
 from functools import partial
 from pathlib import Path
 
 import numpy as np
-from PyQt6.QtWidgets import QFileDialog, QMessageBox
-
-from bubbletrack.ui.batch_config_dialog import BatchConfigDialog
+from PyQt6.QtWidgets import QMessageBox
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
-from bubbletrack.controller.batch_folder_worker import BatchFolderWorker
 from bubbletrack.controller.display_mixin import (
     current_source, display_frame, refresh_chart,
 )
@@ -24,10 +20,11 @@ from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
-from bubbletrack.model.conventions import display_to_frame, frame_to_display
+from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
+from bubbletrack.ui.tab_bar import mode_label
 
 logger = logging.getLogger(__name__)
 
@@ -48,16 +45,11 @@ class AutoController(BaseController):
         super().__init__(bus, get_state, set_state, window)
         self._worker: BatchWorker | None = None
         self._tracker: TrackingWorker | None = None
-        self._batch_worker: BatchFolderWorker | None = None
         self._running = False
-        self._batch_running = False
         self._auto_last_display: float = 0.0
         self._auto_start_time: float = 0.0
         self._get_max_radius = get_max_radius
         self._cache = cache
-        self._batch_results: list = []  # Accumulates FolderResult during batch
-        self._batch_params: tuple | None = None  # (gridx, gridy, sensitivity) at start
-        self._batch_store = None  # last BatchResultStore, for "Load into Main View"
         # Per-run bookkeeping
         self._protected: frozenset[int] = frozenset()
         self._stop_requested = False
@@ -74,12 +66,12 @@ class AutoController(BaseController):
     # -- run state -------------------------------------------------------- #
 
     def is_busy(self) -> bool:
-        """True while a single-folder or multi-folder fit is running."""
-        return self._running or self._batch_running
+        """True while a fit is running."""
+        return self._running
 
     def stop_and_wait(self, timeout_ms: int = 10_000) -> None:
         """Stop any running worker and wait for its thread to exit."""
-        for worker in (self._worker, self._tracker, self._batch_worker):
+        for worker in (self._worker, self._tracker):
             if worker is not None and worker.isRunning():
                 worker.request_stop()
                 worker.wait(timeout_ms)
@@ -90,26 +82,20 @@ class AutoController(BaseController):
     # -- public handlers -------------------------------------------------- #
 
     def on_auto_fit(self) -> None:
+        """The Fit button: measure every frame."""
         if not self.state.images:
+            self.w.header.set_status("Load images or a video first", "#f59e0b")
             return
         if self.is_busy():
             self.w.header.set_status("A fit is already running", "#f59e0b")
             return
-
-        start, end = self.w.left_panel.automatic_tab.get_range()
-        if start > end:
-            self.w.header.set_status(
-                f"Start frame ({start}) must not be after end frame ({end})",
-                "#ef4444",
-            )
-            return
-        self.fit_range(display_to_frame(start), display_to_frame(end))
+        self.fit_range(0, len(self.state.images) - 1)
 
     def fit_range(self, start_idx: int, end_idx: int) -> None:
         """Fit frames start_idx..end_idx (0-based, inclusive) in the background.
 
-        Same run as Fit All (locked frames kept, manual fits asked about),
-        without changing the From/To fields of the Automatic tab.
+        The Fit button runs it on every frame, the chart's range menu on a
+        selection: locked frames are kept, manual fits are asked about.
         """
         if not self.state.images:
             return
@@ -134,7 +120,7 @@ class AutoController(BaseController):
                 return
         ml_job, ml_note = None, ""
         if edge_job is not None and self.ml_job_provider is not None:
-            ml_job, ml_note = self.ml_job_provider()  # ML assist is on: Fit All uses it
+            ml_job, ml_note = self.ml_job_provider()  # ML assist is on: Fit uses it
         self._launch(start_idx, end_idx, protected, edge_job, ml_job=ml_job,
                      notes=[ml_note] if ml_note else [])
 
@@ -143,7 +129,7 @@ class AutoController(BaseController):
         """ML assist's Apply: re-measure *frames* (default: all) but *protected*.
 
         *stored* ({frame: StoredAuto}) are the plain-Auto results to reuse.
-        Runs like Fit All (progress, Stop, tracking); False if it cannot start.
+        Runs like Fit (progress, Stop, tracking); False if it cannot start.
         """
         if not self.state.images or self.state.detection_mode != "edge":
             return False
@@ -218,9 +204,9 @@ class AutoController(BaseController):
         self._running = True
         self._set_run_state(True)
 
-        self.w.left_panel.automatic_tab.set_running(True)
+        self.w.left_panel.fit_controls.set_running(True)
         self.w.header.set_status("Processing...", "#f59e0b")
-        self.w.status_bar.update_mode("Automatic")
+        self.w.status_bar.update_mode("Fitting")
         self._auto_last_display = 0.0  # force first frame to display
         self._auto_start_time = time.monotonic()
         worker.start()
@@ -232,16 +218,13 @@ class AutoController(BaseController):
             if self._tracker is not None:
                 self._tracker.request_stop()
             self.w.header.set_status("Stopping...", "#f59e0b")
-        if self._batch_worker:
-            self._batch_worker.request_stop()
-            self.w.header.set_status("Stopping batch...", "#f59e0b")
 
     def on_auto_clear(self) -> None:
         if self.is_busy():
             return
         if self.state.images:
             self.state = self.state.with_results_initialized(len(self.state.images))
-        self.w.left_panel.automatic_tab.reset_progress()
+        self.w.left_panel.fit_controls.reset_progress()
         self.w.radius_chart.clear()
         display_frame(
             self.state, self.w, self.state.image_no, self._set_state,
@@ -253,7 +236,7 @@ class AutoController(BaseController):
     # -- manual-fix protection -------------------------------------------- #
 
     def _choose_protected_frames(self, start_idx: int, end_idx: int) -> frozenset[int] | None:
-        """Frames Fit All must not overwrite, or None if the user cancelled."""
+        """Frames a fit must not overwrite, or None if the user cancelled."""
         source = self.state.fit_source
         if source is None:
             return frozenset()
@@ -274,14 +257,14 @@ class AutoController(BaseController):
         return locked | frozenset(manual)
 
     def _ask_manual_policy(self, n_manual: int) -> str:
-        """Ask whether Fit All may overwrite manual fixes: keep/overwrite/cancel."""
+        """Ask whether a fit may overwrite manual fixes: keep/overwrite/cancel."""
         box = QMessageBox(self.w)
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle("Manual fixes in range")
         box.setText(
             f"{n_manual} frame(s) in this range were fixed by hand "
             "(manual fits or drawn circles).\n"
-            "Fit All can keep them or replace them with automatic fits."
+            "Fit can keep them or replace them with automatic fits."
         )
         keep = box.addButton("Keep manual fits", QMessageBox.ButtonRole.AcceptRole)
         overwrite = box.addButton("Overwrite", QMessageBox.ButtonRole.DestructiveRole)
@@ -327,7 +310,7 @@ class AutoController(BaseController):
         if worker is not self._worker:
             return
         if (not self._stop_requested and self._edge_job is not None
-                and self.w.left_panel.pretune_tab.edge_box.tracking_enabled()):
+                and self.w.left_panel.measure_panel.edge_box.tracking_enabled()):
             self._start_tracking()
         else:
             self._finish_run(stopped=self._stop_requested)
@@ -340,7 +323,7 @@ class AutoController(BaseController):
         tracker.failed.connect(partial(self._on_tracking_ended, tracker, "tracking failed: {}"))
         tracker.stopped.connect(partial(self._on_tracking_ended, tracker, "tracking stopped", ""))
         self._tracker = tracker
-        self.w.left_panel.automatic_tab.set_progress_text("Tracking the bubble across frames...")
+        self.w.left_panel.fit_controls.set_progress_text("Tracking the bubble across frames...")
         self.w.header.set_status("Tracking the bubble across frames...", "#f59e0b")
         tracker.start()
 
@@ -369,7 +352,7 @@ class AutoController(BaseController):
             eta_text = f"{minutes}m {secs}s remaining"
         else:
             eta_text = "Calculating..."
-        self.w.left_panel.automatic_tab.set_progress(current, total, eta_text)
+        self.w.left_panel.fit_controls.set_progress(current, total, eta_text)
         self.bus.emit("run_progress", current, total)
 
     def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi,
@@ -488,7 +471,8 @@ class AutoController(BaseController):
         self._running = False
         self._tracker = None
         self._set_run_state(False)
-        self.w.left_panel.automatic_tab.set_running(False)
+        self.w.left_panel.fit_controls.set_running(False)
+        self.w.status_bar.update_mode(mode_label(self.w.left_panel.tab_bar.current_name()))
         self._write_autosave()  # final state, not just the last multiple of 50
 
         # Final full display update
@@ -527,234 +511,3 @@ class AutoController(BaseController):
         self.bus.emit("run_finished", {"stopped": stopped, "ml": self._ml_run,
                                        "edge": self._edge_job is not None,
                                        "frames": self._run_frames})
-
-    # ------------------------------------------------------------------ #
-    #  Batch processing of many sources (image folders and videos)
-    # ------------------------------------------------------------------ #
-
-    def on_batch_folders(self) -> None:
-        """Ask for a parent directory and process every folder and video in it."""
-        if self.is_busy():
-            self.w.header.set_status("A fit is already running", "#f59e0b")
-            return
-        if not self.state.images:
-            QMessageBox.information(
-                self.w, "Load a source first",
-                "Load one experiment folder or video and tune the ROI and "
-                "parameters on it first.\n\nBatch processing applies exactly "
-                "those settings to every folder and video.",
-            )
-            return
-
-        root = QFileDialog.getExistingDirectory(
-            self.w, "Select Parent Directory Containing Experiments",
-        )
-        if not root:
-            return
-
-        from bubbletrack.model.batch_experiments import find_batch_sources
-        sources = find_batch_sources(root)
-        if not sources:
-            QMessageBox.information(
-                self.w, "No Experiments Found",
-                f"No image folders or videos found under:\n{root}\n\n"
-                "Image folders are subfolders holding TIFF, PNG, JPG or BMP "
-                "files. Videos (AVI, MP4, MOV, MKV) may sit in the folder "
-                "itself or in its subfolders.",
-            )
-            return
-
-        edge_params = None
-        if self.state.detection_mode == "edge":
-            from bubbletrack.model import edge_pipeline
-            try:
-                edge_params = edge_pipeline.params_from_state(self.state)
-            except Exception as exc:
-                self.w.header.set_status(f"Cannot prepare Auto batch: {exc}", "#ef4444")
-                return
-
-        pp = self.w.left_panel.post_processing
-        dlg = BatchConfigDialog(
-            sources,
-            detection_mode=self.state.detection_mode,
-            default_fps=pp.get_fps(),
-            default_um2px=pp.get_scale(),
-            default_fit_length=pp.get_fit_length(),
-            parent=self.w,
-        )
-        if dlg.exec() != BatchConfigDialog.DialogCode.Accepted:
-            return
-        cfg = dlg.get_config()
-        if cfg.sources and not self.is_busy():
-            self._start_batch_worker(cfg, edge_params)
-
-    def _start_batch_worker(self, cfg, edge_params) -> None:
-        """Start a BatchFolderWorker with the current parameters."""
-        state = self.state
-        at = self.w.left_panel.automatic_tab
-        at.set_batch_running(True)
-        at.set_batch_status(f"Starting batch: {len(cfg.sources)} source(s)...")
-        self.w.header.set_status("Batch processing...", "#f59e0b")
-
-        # Record the parameters actually used, not those current at the end.
-        self._batch_params = (state.gridx, state.gridy, state.img_thr, state.detection_mode)
-        worker = BatchFolderWorker(
-            sources=cfg.sources,
-            sensitivity=state.img_thr,
-            gridx=state.gridx,
-            gridy=state.gridy,
-            removing_factor_slider=state.removing_factor,
-            bubble_cross_edges=state.bubble_cross_edges,
-            removing_obj_radius=state.removing_obj_radius,
-            gaussian_sigma=state.gaussian_sigma,
-            clahe_clip=state.clahe_clip,
-            closing_radius=state.closing_radius,
-            opening_radius=state.opening_radius,
-            detection_mode=state.detection_mode,
-            gradient_boundary=state.gradient_boundary,
-            area_max_regions=state.area_max_regions,
-            max_radius=self._get_max_radius(),
-            export_physical=cfg.export_physical,
-            fps=cfg.fps,
-            um2px=cfg.um2px,
-            rmax_fit_length=cfg.rmax_fit_length,
-            edge_params=edge_params,
-        )
-        self._batch_results = []
-        self._batch_error = ""
-        worker.folder_started.connect(self._on_batch_folder_started)
-        worker.frame_progress.connect(self._on_batch_frame_progress)
-        worker.folder_done.connect(self._on_batch_folder_done)
-        worker.result_ready.connect(self._on_batch_folder_result)
-        worker.error.connect(self._on_batch_error)
-        worker.all_done.connect(self._on_batch_all_done)
-        self._batch_worker = worker
-        self._batch_running = True
-        self._set_run_state(True)
-        worker.start()
-
-    def _on_batch_folder_started(self, idx: int, total: int, name: str) -> None:
-        at = self.w.left_panel.automatic_tab
-        at.set_batch_status(f"Source {idx}/{total}: {name}")
-        self.w.header.set_status(f"Batch: {name} ({idx}/{total})", "#f59e0b")
-
-    def _on_batch_frame_progress(self, done: int, total: int) -> None:
-        self.w.left_panel.automatic_tab.set_batch_progress(done, total)
-
-    def _on_batch_folder_done(self, name: str, success: bool, msg: str) -> None:
-        if success:
-            logger.info("Batch source %s: ✓ — %s", name, msg)
-        else:
-            logger.warning("Batch source %s: ✗ — %s", name, msg)
-
-    def _on_batch_folder_result(self, result) -> None:
-        """One FolderResult per source (failed sources included)."""
-        self._batch_results.append(result)
-
-    def _on_batch_error(self, message: str) -> None:
-        self._batch_error = message
-        logger.error("Batch run failed: %s", message)
-
-    def _on_batch_all_done(self, folders_ok: int, total_fitted: int) -> None:
-        results = tuple(self._batch_results)
-        error = getattr(self, "_batch_error", "")
-        n_failed = sum(1 for r in results if not r.success)
-        summary = f"{folders_ok}/{len(results)} source(s), {total_fitted} frames fitted"
-        if n_failed:
-            summary += f", {n_failed} failed"
-
-        at = self.w.left_panel.automatic_tab
-        at.set_batch_running(False)
-        at.set_batch_status(f"Complete: {summary}")
-        if error:
-            self.w.header.set_status(error, "#ef4444")
-        else:
-            self.w.header.set_status(f"Batch done: {summary}",
-                                     "#f59e0b" if n_failed else "#10b981")
-        self._batch_worker = None
-        self._batch_running = False
-        self._set_run_state(False)
-
-        if results or error:
-            from bubbletrack.model.batch_result import BatchResultStore
-            gridx, gridy, sensitivity, mode = self._batch_params or (
-                self.state.gridx, self.state.gridy, self.state.img_thr,
-                self.state.detection_mode,
-            )
-            store = BatchResultStore(
-                results=results,
-                timestamp=datetime.now().strftime("%Y%m%d_%H%M%S"),
-                gridx=gridx,
-                gridy=gridy,
-                sensitivity=sensitivity,
-                detection_mode=mode,
-                error=error,
-            )
-            self._batch_store = store
-            self._show_batch_browser(store)
-        self._batch_results = []
-
-    def _show_batch_browser(self, store) -> None:
-        from bubbletrack.ui.batch_results_dialog import BatchResultsBrowserDialog
-        # Store reference to prevent garbage collection before dialog is shown
-        self._batch_browser_dlg = BatchResultsBrowserDialog(store, parent=self.w)
-        self._batch_browser_dlg.load_folder_requested.connect(self._on_load_batch_folder)
-        self._batch_browser_dlg.show()  # Non-modal
-
-    def _on_load_batch_folder(self, result) -> None:
-        """Load a batch source (folder or video) and restore its results.
-
-        Parameters
-        ----------
-        result : FolderResult
-            The batch result to restore.
-        """
-        if self.is_busy():
-            self.w.header.set_status("Stop the running fit first", "#f59e0b")
-            return
-        if not result.has_results:
-            self.w.header.set_status(
-                f"{result.folder_name} has no results to load", "#f59e0b")
-            return
-
-        # 1. Open the source the normal way (blank results, frame 0 displayed)
-        is_video = result.source_kind == "video"
-        self.bus.emit("load_video" if is_video else "load_folder", result.folder_path)
-        state = self.state
-        if is_video:
-            loaded = state.video_reader is not None and state.video_path == result.folder_path
-        else:
-            loaded = state.video_reader is None and state.folder_path == result.folder_path
-        if state.radius is None or not loaded:
-            logger.warning("Batch source %s was not loaded", result.folder_path)
-            return
-
-        # 2. Restore the ROI the batch actually used
-        store = self._batch_store
-        if store is not None:
-            self._update(gridx=tuple(store.gridx), gridy=tuple(store.gridy))
-            self.w.original_panel.set_roi_text(self.state.gridx, self.state.gridy)
-
-        # 3. Restore batch results (radius, centres, edges, confidence, flags, metrics)
-        from bubbletrack.model.batch_result import restore_into_state
-        n_copy = restore_into_state(self.state, result)
-        n_state = len(self.state.radius)
-
-        # 4. Re-display current frame and chart
-        display_frame(
-            self.state, self.w, self.state.image_no, self._set_state,
-            self._cache,
-        )
-        if result.circle_xy is not None:
-            refresh_chart(self.state, self.w)
-        else:
-            frames = np.arange(1, n_state + 1)
-            scores = np.zeros(n_state)
-            scores[:n_copy] = result.quality_scores[:n_copy]
-            self.w.radius_chart.plot_all(frames, self.state.radius, scores)
-
-        n_fitted = int(np.sum(self.state.radius[:n_copy] > 0))
-        self.w.header.set_status(
-            f"Loaded {result.folder_name}: {n_fitted}/{n_state} fitted", "#10b981",
-        )
-        self._results_changed()

@@ -150,11 +150,13 @@ def test_edit_starts_a_retrack_after_the_debounce_and_locks_editing(qapp, app):
     worker = _started(qapp)
     lp = window.left_panel
     assert controller.retrack.is_running()
-    assert not lp.pretune_tab.isEnabled() and not controller.review.panel.isEnabled()
+    assert not lp.measure_panel.isEnabled() and not controller.review.panel.isEnabled()
     assert lp.manual_tab.isEnabled()  # fixes there cancel and restart the re-track
-    assert lp.automatic_tab._stop_btn.isEnabled()
+    assert lp.fit_controls.stop_button.isVisibleTo(lp) and lp.fit_controls.stop_button.isEnabled()
+    assert "Re-tracking" in lp.fit_controls.progress_text()
     worker.finish()
-    assert not controller.retrack.is_running() and lp.pretune_tab.isEnabled()
+    assert not controller.retrack.is_running() and lp.measure_panel.isEnabled()
+    assert lp.fit_controls.progress_row.isHidden()
 
 
 def test_only_unfitted_and_queued_frames_change(qapp, app):
@@ -230,7 +232,7 @@ def test_edit_during_a_retrack_cancels_and_restarts_it(qapp, app):
     first = _started(qapp)
     controller._on_lock_range(2, 2, locked=True)  # edited again (e.g. a circle fix)
     assert first.stop_requested and not controller.retrack.is_running()
-    assert window.left_panel.pretune_tab.isEnabled()
+    assert window.left_panel.measure_panel.isEnabled()
     radius_4 = state.radius[4]
     first.finish()  # a late result of the stale solve is ignored
     assert state.radius[4] == radius_4
@@ -243,7 +245,7 @@ def test_stop_cancels_the_retrack(qapp, app):
     state = controller._get_state()
     _edit(controller)
     worker = _started(qapp)
-    window.left_panel.automatic_tab._stop_btn.click()
+    window.left_panel.fit_controls.stop_button.click()
     assert worker.stop_requested and not controller.retrack.is_running()
     assert "Re-track stopped" in window.header._status_label.text()
     worker.finish()
@@ -264,7 +266,7 @@ def test_switch_off_means_no_retrack(qapp, app, monkeypatch):
 
 def test_tracking_checkbox_off_means_no_retrack(qapp, app):
     window, controller = app
-    window.left_panel.pretune_tab.edge_box._track_check.setChecked(False)
+    window.left_panel.measure_panel.edge_box._track_check.setChecked(False)
     assert _no_retrack(qapp, controller)
 
 
@@ -331,11 +333,11 @@ def test_real_retrack_after_an_edit_leaves_good_frames_alone(qapp, gui, drift_se
     controller._state = update_state(controller._get_state(), detection_mode="edge",
                                      reference_frame=0,
                                      edge_seed=(truth["rc"][peak], truth["cc"][peak]))
-    window.left_panel.pretune_tab.edge_box._track_check.setChecked(False)
+    window.left_panel.measure_panel.edge_box._track_check.setChecked(False)
     controller.auto_ctrl.on_auto_fit()
     _wait(qapp, lambda: not controller.auto_ctrl.is_busy(), 240.0)
     assert controller.retrack.worker_factory is TrackingWorker
-    window.left_panel.pretune_tab.edge_box._track_check.setChecked(True)
+    window.left_panel.measure_panel.edge_box._track_check.setChecked(True)
     controller.retrack.timer.setInterval(20)
     _settle(qapp)
 

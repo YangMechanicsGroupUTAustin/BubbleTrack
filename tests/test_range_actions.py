@@ -84,15 +84,13 @@ def test_erasing_a_locked_frame_unlocks_it(app, erase):
     assert state.radius[0] == -1.0 and not state.fit_locked[0]
 
 
-def test_refit_range_fits_only_that_range_and_keeps_from_to(qapp, app):
+def test_refit_range_fits_only_that_range(qapp, app):
     window, controller, state, _ = app
-    controller._state = update_state(controller._get_state(), img_thr=0.58,
-                                     removing_factor=85, gaussian_sigma=3.0)
+    controller._state = update_state(controller._get_state(), detection_mode="intensity",
+                                     img_thr=0.58, removing_factor=85, gaussian_sigma=3.0)
     state = controller._get_state()
     state.radius[:] = 5.0  # a recognisable wrong value everywhere
     state.fit_locked[4] = True
-    tab = window.left_panel.automatic_tab
-    before = tab.get_range()
     window.radius_chart.refit_range_requested.emit(3, 5)
     _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
     state = controller._get_state()
@@ -101,7 +99,6 @@ def test_refit_range_fits_only_that_range_and_keeps_from_to(qapp, app):
     assert state.radius[5] == pytest.approx(expected[5], rel=0.05)
     assert state.radius[4] == 5.0  # locked: kept
     assert (state.radius[:3] == 5.0).all() and (state.radius[6:] == 5.0).all()
-    assert tab.get_range() == before
 
 
 def test_mark_no_bubble_clears_and_locks_empty_frames(app):

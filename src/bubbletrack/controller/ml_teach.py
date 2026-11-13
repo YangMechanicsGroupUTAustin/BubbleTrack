@@ -83,7 +83,7 @@ class TeachingMode:
         w.original_panel.stroke_drawn.connect(self.on_stroke)
         w.original_panel.brush_scrolled.connect(self.on_wheel)
         w.original_panel.roi_selected.connect(lambda *_roi: self._settings_changed())
-        box = w.left_panel.pretune_tab.edge_box
+        box = w.left_panel.measure_panel.edge_box
         box.use_current_reference_clicked.connect(self._settings_changed)
         box.auto_reference_clicked.connect(self._settings_changed)
 

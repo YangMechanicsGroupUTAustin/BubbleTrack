@@ -71,7 +71,7 @@ def test_fit_all_on_video(qapp, gui, video):
     controller.file_ctrl.on_video_selected(str(video))
     _owner_params(controller)
     controller.auto_ctrl.on_auto_fit()
-    _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
     state = controller._get_state()
     assert (state.radius > 0).all(), _status(window)
     assert (state.fit_source == FitSource.AUTO).all()

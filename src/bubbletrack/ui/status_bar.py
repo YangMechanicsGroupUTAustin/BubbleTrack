@@ -35,7 +35,7 @@ class StatusBar(QWidget):
 
         layout.addStretch()
 
-        self._mode_label = QLabel("Mode: Pre-tune")
+        self._mode_label = QLabel("Mode: Measure")
         layout.addWidget(self._mode_label)
 
     def set_frame_labels(self, labels: Sequence[str]) -> None:

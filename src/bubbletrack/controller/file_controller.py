@@ -1,4 +1,4 @@
-"""FileController — folder/video loading, frame navigation, tab switching."""
+"""FileController — folder/video loading, frame navigation, side-panel mode."""
 
 from __future__ import annotations
 
@@ -21,13 +21,13 @@ from bubbletrack.model.image_io import (
 )
 from bubbletrack.model.state import update_state
 from bubbletrack.ui.frame_scrubber import frame_file_labels
-from bubbletrack.ui.tab_bar import TabBar
+from bubbletrack.ui.tab_bar import TabBar, mode_label
 
 logger = logging.getLogger(__name__)
 
 
 class FileController(BaseController):
-    """Handles folder selection, frame navigation, and tab switching."""
+    """Handles folder selection, frame navigation, and the side-panel mode."""
 
     def __init__(self, bus: EventBus, get_state, set_state, window,
                  set_max_radius, cache: ImageCache | None = None,
@@ -145,15 +145,11 @@ class FileController(BaseController):
         self._update(gridx=(1, h), gridy=(1, w))
         self._set_max_radius(float(max(h, w)))
 
-        # If the video has a valid FPS, store it in state and show it
-        lp = self.w.left_panel
+        # A valid video frame rate becomes the export's frame rate.
         if reader.fps > 0:
             self._update(fps=reader.fps)
-            lp.post_processing.set_physical_params(
-                self.state.fps, self.state.um2px, self.state.rmax_fit_length,
-            )
 
-        lp.image_source.set_video_loaded(video_path, n, reader.fps)
+        self.w.left_panel.image_source.set_video_loaded(video_path, n, reader.fps)
         self._reset_views(n, os.path.splitext(video_path)[1])
         self.w.header.set_status("Ready (video)", "#10b981")
 
@@ -165,7 +161,7 @@ class FileController(BaseController):
         self._show_frame(idx)
 
     def on_tab_frame_selected(self, idx: int) -> None:
-        """Frame selected from a tab's frame spinbox."""
+        """Frame selected from a frame spinbox (the manual-fix tools)."""
         if not self._valid_frame(idx):
             return
         self._show_frame(idx)
@@ -178,15 +174,14 @@ class FileController(BaseController):
     def _show_frame(self, idx: int) -> None:
         """Make *idx* the current frame and keep every frame control in sync.
 
-        Callers include the scrubber itself, the tab spinboxes, the chart and
-        the arrow-key shortcuts, so all of them are updated here.
+        Callers include the scrubber itself, the manual-fix spinbox, the chart
+        and the arrow-key shortcuts, so all of them are updated here.
         """
         self._update(image_no=idx)
         scrubber = self.w.frame_scrubber
         scrubber.blockSignals(True)
         scrubber.set_value(idx)
         scrubber.blockSignals(False)
-        self.w.left_panel.pretune_tab.set_frame_value(idx)
         self.w.left_panel.manual_tab.set_frame_value(idx)
         self.bus.emit("frame_changed", idx)
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
@@ -209,11 +204,8 @@ class FileController(BaseController):
         scrubber.set_range(n)
         scrubber.set_value(0)
         scrubber.blockSignals(False)
-        lp.pretune_tab.set_frame_range(n)
         lp.manual_tab.set_frame_range(n)
-        lp.pretune_tab.set_frame_value(0)
         lp.manual_tab.set_frame_value(0)
-        lp.automatic_tab.set_range(n)
         self.w.original_panel.set_roi_text(self.state.gridx, self.state.gridy)
         self.w.radius_chart.clear()
         self.w.radius_chart.set_total_frames(n)
@@ -222,8 +214,8 @@ class FileController(BaseController):
         self.bus.emit("source_loaded", n)
 
     def on_tab_changed(self, idx: int) -> None:
-        """Tab bar switched — exit interactive modes, update status."""
+        """Side-panel mode switched (measure / manual fix): leave interactive modes."""
         self.w.original_panel.set_mode("normal")
         self.w.left_panel.manual_tab.reset()
-        self.w.status_bar.update_mode(TabBar.name_of(idx))
+        self.w.status_bar.update_mode(mode_label(TabBar.name_of(idx)))
         self.bus.emit("tab_changed", idx)

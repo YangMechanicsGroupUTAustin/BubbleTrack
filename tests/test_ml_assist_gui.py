@@ -40,7 +40,7 @@ def app(gui, tmp_path, monkeypatch, qapp):
     monkeypatch.setattr(controller.auto_ctrl, "_ask_manual_policy", lambda _n: "keep")
     controller.file_ctrl.on_folder_selected(str(S.write_recording(tmp_path / "rec")))
     controller._state = update_state(controller._get_state(), detection_mode="edge", reference_frame=0)
-    pt = window.left_panel.pretune_tab
+    pt = window.left_panel.measure_panel
     pt.set_filter_params({**pt.get_filter_params(), "detection_mode": "edge"})
     pt.filters_changed.emit()
     return window, controller
@@ -64,7 +64,7 @@ def _verify(controller, frames=(3, 7)):
 
 
 def _box(window):
-    return window.left_panel.pretune_tab.edge_box
+    return window.left_panel.measure_panel.edge_box
 
 
 def _teach(controller):

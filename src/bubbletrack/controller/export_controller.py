@@ -1,9 +1,10 @@
-"""ExportController — pixel-data, physical-data, and PDF report export.
+"""ExportController — the Export dialog: pixel data, physical data, PDF report.
 
 Every export carries the per-frame fit results and provenance metadata.
 The folder and format of the last successful export are remembered in
-config.json: dialogs start in that folder and the Format combo starts on
-that format at the next launch.
+config.json: the next dialog proposes a file in that folder, in that format.
+The dialog's frame rate, scale and Rmax fit length go straight into the
+state, so sessions, the config and reports record the values exported with.
 """
 
 from __future__ import annotations
@@ -14,8 +15,6 @@ import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-
-from PyQt6.QtWidgets import QFileDialog
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
@@ -30,46 +29,35 @@ from bubbletrack.model.export import (
     fit_result_arrays,
 )
 from bubbletrack.model.report import generate_report
+from bubbletrack.ui.export_dialog import FORMAT_EXT, ExportDialog, report_path_for
 
 logger = logging.getLogger(__name__)
 
-# File dialog filter strings keyed by format
-_FORMAT_FILTERS: dict[str, str] = {
-    "mat": "MAT Files (*.mat);;All Files (*)",
-    "csv": "CSV Files (*.csv);;All Files (*)",
-    "xlsx": "Excel Files (*.xlsx);;All Files (*)",
-}
-
-_FORMAT_EXT: dict[str, str] = {
-    "mat": ".mat",
-    "csv": ".csv",
-    "xlsx": ".xlsx",
-}
-
-# Item texts of the PostProcessing Format combo, keyed by format.
-_FORMAT_LABELS: dict[str, str] = {"mat": "MAT", "csv": "CSV", "xlsx": "Excel"}
+# File-name prefix of each kind of export (``<source>_<prefix>_<stamp>.<ext>``).
+PREFIXES: dict[str, str] = {"pixel": "R_data", "physical": "RofT_data"}
 
 # Characters that are not allowed in a Windows file name (or are control chars).
 _UNSAFE_NAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
-# Amber, as used elsewhere in the UI for "marginal" states.
-_WARNING_COLOUR = "#f59e0b"
+_OK_COLOUR = "#10b981"
+_WARNING_COLOUR = "#f59e0b"  # amber, as used elsewhere for "marginal" states
+
+Outcome = tuple[str, str]  # (status text, colour) of a finished export
 
 
-def _show_export_success(pp, path: str, warning: str = "") -> None:
-    """Report a finished export: green when clean, amber with a warning.
-
-    ``PostProcessingPanel.set_status`` only knows success (green) and
-    error (red), so the warning colour is applied to its status label.
-    """
+def _show_export_success(panel, path: str, warning: str = "") -> Outcome:
+    """Report a finished export: green when clean, amber with a warning."""
     if not warning:
-        pp.set_status(f"Exported: {os.path.basename(path)}", True)
-        return
+        text = f"Exported: {os.path.basename(path)}"
+        panel.set_status(text, True)
+        return text, _OK_COLOUR
     logger.warning("Export %s: %s", path, warning)
-    pp.set_status(f"Exported with warning: {warning}", True)
-    label = getattr(pp, "_status", None)
+    text = f"Exported with warning: {warning}"
+    panel.set_status(text, True)
+    label = getattr(panel, "_status", None)
     if label is not None:
         label.setStyleSheet(f"color:{_WARNING_COLOUR}; font-size:11px;")
+    return text, _WARNING_COLOUR
 
 
 def source_stem(state) -> str:
@@ -88,26 +76,6 @@ def default_filename(state, prefix: str, ext: str, now: datetime | None = None) 
     stamp = (now or datetime.now()).strftime("%Y%m%d_%H%M%S")
     stem = source_stem(state)
     return f"{stem}_{prefix}_{stamp}{ext}" if stem else f"{prefix}_{stamp}{ext}"
-
-
-def select_format(panel, fmt: str) -> bool:
-    """Pre-select *fmt* ("mat" / "csv" / "xlsx") in the panel's Format combo.
-
-    Uses ``panel.set_format`` when the panel has one; PostProcessing does
-    not (yet), so its combo is driven by item text.  Returns False when the
-    format cannot be selected.
-    """
-    setter = getattr(panel, "set_format", None)
-    if callable(setter):
-        setter(fmt)
-        return True
-    combo = getattr(panel, "_format_combo", None)
-    label = _FORMAT_LABELS.get(fmt)
-    index = combo.findText(label) if combo is not None and label else -1
-    if index < 0:
-        return False
-    combo.setCurrentIndex(index)
-    return True
 
 
 def _aligned_fit_results(state) -> dict[str, object]:
@@ -145,123 +113,160 @@ def _remove_quietly(path: str) -> None:
 
 
 class ExportController(BaseController):
-    """Handles exporting radius data to .mat / CSV / Excel files."""
+    """Opens the Export dialog and writes .mat / CSV / Excel files and reports.
+
+    The ``export_*`` methods take a *panel* with the dialog's getters
+    (``get_format``, ``get_fps``, ``get_scale``, ``get_fit_length``) and
+    ``set_status``; they return the outcome, or None after reporting why not.
+    """
 
     def __init__(self, bus, get_state, set_state, window) -> None:
         super().__init__(bus, get_state, set_state, window)
-        self.restore_export_format()
+        self._units = "physical"  # the last export's choice, offered next time
 
-    def restore_export_format(self) -> None:
-        """Pre-select the format of the last export in the Format combo."""
-        fmt = config.get_meta("last_export_format")
-        if fmt is not None:
-            select_format(self.w.left_panel.post_processing, fmt)
+    # -- the dialog ---------------------------------------------------------- #
 
-    # -- public handlers -------------------------------------------------- #
+    def make_dialog(self) -> ExportDialog:
+        state = self.state
+        dialog = ExportDialog(
+            fps=state.fps, um2px=state.um2px, fit_length=state.rmax_fit_length,
+            fmt=config.get_meta("last_export_format") or "mat", units=self._units,
+            default_path=self.default_path, parent=self.w,
+        )
+        dialog.physical_params_changed.connect(lambda: self.on_physical_params_changed(dialog))
+        dialog.export_clicked.connect(lambda: self.export_from(dialog))
+        return dialog
 
-    def on_export_r_data(self) -> None:
-        pp = self.w.left_panel.post_processing
+    def open_dialog(self) -> None:
+        self.make_dialog().exec()
+
+    def on_physical_params_changed(self, panel) -> None:
+        self._update(fps=panel.get_fps(), um2px=panel.get_scale(),
+                     rmax_fit_length=panel.get_fit_length())
+
+    def export_from(self, dialog: ExportDialog) -> bool:
+        """Export what the dialog says; close it on success, else show why not."""
         if self.state.radius is None:
-            pp.set_status("No data to export", False)
-            return
-
-        fmt = pp.get_format()
-        path = self._ask_save_path("Export Pixel Data", "R_data", fmt)
+            dialog.set_status("No data to export", False)
+            return False
+        path = dialog.get_path()
         if not path:
-            return  # user cancelled
+            dialog.set_status("Choose where to save the file", False)
+            return False
+        report = report_path_for(path) if dialog.report_enabled() else ""
+        if not dialog.confirm_overwrite([path, report]):
+            return False
+        units = dialog.get_units()
+        self._units = units
+        export = self.export_pixel if units == "pixel" else self.export_physical
+        outcome = export(dialog, path)
+        if outcome is not None and report:
+            text, colour = outcome
+            if self.export_report(dialog, report) is None:
+                return False
+            outcome = (f"{text}; report {os.path.basename(report)}", colour)
+        if outcome is None:
+            return False
+        header = getattr(self.w, "header", None)
+        if header is not None:
+            header.set_status(*outcome)
+        dialog.accept()
+        return True
 
+    # -- the exports (no dialogs) ------------------------------------------------ #
+
+    def _ready(self, panel, path: str, what: str = "data to export") -> bool:
+        if self.state.radius is None:
+            panel.set_status(f"No {what}", False)
+            return False
+        if not path:
+            panel.set_status("Choose where to save the file", False)
+            return False
+        return True
+
+    def export_pixel(self, panel, path: str) -> Outcome | None:
+        """R per frame in pixels (with centres, edges and the fit results)."""
+        if not self._ready(panel, path):
+            return None
+        fmt = panel.get_format()
         try:
-            warning = self._do_export_r_data(path, fmt, metadata=self._export_metadata(pp))
+            warning = self._do_export_r_data(path, fmt, metadata=self._export_metadata(panel))
         except Exception as exc:
-            pp.set_status(f"Error: {exc}", False)
-            return
+            panel.set_status(f"Error: {exc}", False)
+            return None
         logger.info("Export: %s", path)
-        _show_export_success(pp, path, warning)
+        outcome = _show_export_success(panel, path, warning)
         self._remember_export(path, fmt)
+        return outcome
 
-    def on_export_rof_t(self) -> None:
-        pp = self.w.left_panel.post_processing
-        if self.state.radius is None:
-            pp.set_status("No data to export", False)
-            return
-
-        fmt = pp.get_format()
-        path = self._ask_save_path("Export Physical Data", "RofT_data", fmt)
-        if not path:
-            return  # user cancelled
-
+    def export_physical(self, panel, path: str) -> Outcome | None:
+        """R(t) in physical units, normalised by the fitted Rmax."""
+        if not self._ready(panel, path):
+            return None
+        fmt = panel.get_format()
         try:
-            metadata = self._export_metadata(pp)
+            metadata = self._export_metadata(panel)
             if fmt in ("csv", "xlsx"):
                 ok, msg = True, self._do_export_r_data(
                     path, fmt,
-                    fps=pp.get_fps(),
-                    um2px=pp.get_scale(),
-                    rmax_fit_length=pp.get_fit_length(),
+                    fps=panel.get_fps(),
+                    um2px=panel.get_scale(),
+                    rmax_fit_length=panel.get_fit_length(),
                     metadata=metadata,
                 )
             else:
                 ok, msg = export_rof_t_data(
                     path,
                     self.state.radius,
-                    pp.get_scale(),
-                    pp.get_fps(),
-                    pp.get_fit_length(),
+                    panel.get_scale(),
+                    panel.get_fps(),
+                    panel.get_fit_length(),
                     metadata=metadata,
                     confidence=_aligned_fit_results(self.state).get("fit_confidence"),
                 )
         except Exception as exc:
-            pp.set_status(f"Error: {exc}", False)
-            return
+            panel.set_status(f"Error: {exc}", False)
+            return None
         if not ok:
-            pp.set_status(msg, False)
-            return
+            panel.set_status(msg, False)
+            return None
         logger.info("Export: %s", path)
-        _show_export_success(pp, path, msg)
-        self.w.status_bar.update_scale(pp.get_scale())
+        outcome = _show_export_success(panel, path, msg)
+        status_bar = getattr(self.w, "status_bar", None)
+        if status_bar is not None:
+            status_bar.update_scale(panel.get_scale())
         self._remember_export(path, fmt)
+        return outcome
 
-    def on_generate_report(self) -> None:
-        pp = self.w.left_panel.post_processing
-        if self.state.radius is None:
-            pp.set_status("No data for report", False)
-            return
-
-        path, _ = QFileDialog.getSaveFileName(
-            self.w, "Save PDF Report", self._default_path("report", ".pdf"),
-            "PDF Files (*.pdf);;All Files (*)",
-        )
-        if not path:
-            return  # user cancelled
-
+    def export_report(self, panel, path: str) -> Outcome | None:
+        """The PDF report: R(t) chart and fit summary."""
+        if not self._ready(panel, path, "data for report"):
+            return None
         chart_path = self._save_chart_image()
         try:
             generate_report(
                 path, self.state, chart_image_path=chart_path,
-                fps=pp.get_fps(), um2px=pp.get_scale(),
+                fps=panel.get_fps(), um2px=panel.get_scale(),
             )
         except Exception as exc:
-            pp.set_status(f"Report error: {exc}", False)
-            return
+            panel.set_status(f"Report error: {exc}", False)
+            return None
         finally:
             if chart_path:
                 _remove_quietly(chart_path)
         logger.info("Report: %s", path)
-        pp.set_status(f"Report saved: {os.path.basename(path)}", True)
+        text = f"Report saved: {os.path.basename(path)}"
+        panel.set_status(text, True)
         self._remember_export(path)
+        return text, _OK_COLOUR
 
     # -- private helpers -------------------------------------------------- #
 
-    def _ask_save_path(self, title: str, prefix: str, fmt: str) -> str:
-        """Ask where to save an export; '' if cancelled."""
-        path, _ = QFileDialog.getSaveFileName(
-            self.w, title, self._default_path(prefix, _FORMAT_EXT.get(fmt, ".mat")),
-            _FORMAT_FILTERS.get(fmt, _FORMAT_FILTERS["mat"]),
-        )
-        return path
-
     def _save_chart_image(self) -> str | None:
         """Render the R-t chart to a temporary PNG; None if that is not possible."""
+        chart = getattr(self.w, "radius_chart", None)
+        if chart is None:
+            return None
         try:
             from pyqtgraph.exporters import ImageExporter
         except ImportError:
@@ -270,7 +275,7 @@ class ExportController(BaseController):
         os.close(fd)
         try:
             # The report shows the data, not the cursor/selection/hover text.
-            with self.w.radius_chart.export_view() as plot_item:
+            with chart.export_view() as plot_item:
                 exporter = ImageExporter(plot_item)
                 exporter.parameters()["width"] = 1200
                 exporter.export(chart_path)
@@ -319,13 +324,13 @@ class ExportController(BaseController):
         )
         return ""
 
-    def _export_metadata(self, pp) -> dict:
-        """Provenance for an export: current state plus the panel values."""
+    def _export_metadata(self, panel) -> dict:
+        """Provenance for an export: current state plus the dialog values."""
         return build_export_metadata(
             self.state,
-            fps=pp.get_fps(),
-            um2px=pp.get_scale(),
-            rmax_fit_length=pp.get_fit_length(),
+            fps=panel.get_fps(),
+            um2px=panel.get_scale(),
+            rmax_fit_length=panel.get_fit_length(),
             reference_index=self._edge_reference_index(),
         )
 
@@ -340,9 +345,11 @@ class ExportController(BaseController):
             logger.warning("Could not resolve the Edge reference frame: %s", exc)
             return None
 
-    def _default_path(self, prefix: str, ext: str) -> str:
-        return os.path.join(self._default_export_dir(),
-                            default_filename(self.state, prefix, ext))
+    def default_path(self, units: str, fmt: str) -> str:
+        """Where the dialog proposes to save: last folder, source name, timestamp."""
+        name = default_filename(self.state, PREFIXES.get(units, PREFIXES["pixel"]),
+                                FORMAT_EXT.get(fmt, ".mat"))
+        return os.path.join(self._default_export_dir(), name)
 
     def _default_export_dir(self) -> str:
         """The last export folder if it still exists, else the source folder, else home."""
