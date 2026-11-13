@@ -26,7 +26,7 @@ class RunOutcome:
     stopped: bool = False
     frames_done: int = 0       # frames processed before Stop
     ml: bool = False           # measured with ML assist
-    to_check: int = 0          # frames waiting in the Review queue
+    to_check: int = 0          # frames in Review rows to check (red or amber)
     problems: tuple[str, ...] = field(default_factory=tuple)
     details: tuple[str, ...] = field(default_factory=tuple)
 

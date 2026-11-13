@@ -12,6 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from bubbletrack.controller.key_frames import to_check_frames
 from bubbletrack.model import ml_assist
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import update_state
@@ -121,6 +122,15 @@ class TestHeaderAndList:
         assert not rc.panel.tier_key.isHidden()
         assert "likely wrong" in rc.panel.tier_key.text()
         assert "for information" in rc.panel.tier_key.text()
+
+    def test_status_line_and_key_frames_count_what_review_counts(self, app):
+        _, controller, rc = app
+        # "to check" means red and amber rows everywhere: the status line after
+        # a fit says 5 like Review's header, and the key-frame strip does not
+        # call the grey before-the-bubble frames "to check".
+        assert controller.auto_ctrl.review_count() == 5
+        firsts = to_check_frames(rc.panel.segments())
+        assert 3 in firsts and 0 not in firsts
 
     def test_skipped_frames_are_not_counted_as_checked(self, app):
         _, controller, rc = app

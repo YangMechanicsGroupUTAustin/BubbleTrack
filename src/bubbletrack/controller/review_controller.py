@@ -113,6 +113,11 @@ class ReviewController:
     def count(self) -> int:
         return self.panel.count()
 
+    @property
+    def check_count(self) -> int:
+        """Frames in rows to check (red or amber), as Review's header counts them."""
+        return len(self.panel.check_frames())
+
     def set_extra(self, items: Iterable[ReviewItem]) -> None:
         """Merge another review list (e.g. the sequence solver's) and refresh.
 

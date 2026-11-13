@@ -12,7 +12,6 @@ from collections.abc import Collection, Sequence
 from bubbletrack.controller.review_segments import ReviewSegment
 from bubbletrack.ui.review_text import done_text, summary_text
 
-CHECK_TIERS = frozenset({"high", "medium"})  # red and amber rows
 EMPTY_BEFORE_FIT = "Frames to check show up here after a fit."
 EMPTY_ALL_CLEAR = "Nothing to check: Auto is sure of every frame.\nNext: export R(t)."
 EMPTY_ALL_DONE = done_text(0)
@@ -22,7 +21,7 @@ NOTHING_YET = "Nothing to check yet"
 
 def check_frames(segments: Sequence[ReviewSegment]) -> set[int]:
     """Frames listed in a row to check (red or amber)."""
-    return {f for s in segments if s.tier in CHECK_TIERS for f in s.frames}
+    return {f for s in segments if s.to_check for f in s.frames}
 
 
 class ReviewProgress:
@@ -52,7 +51,7 @@ class ReviewProgress:
         if not (fitted or segments):
             return NOTHING_YET
         left, total = self.progress(segments)
-        info = sum(s.count for s in segments if s.tier not in CHECK_TIERS)
+        info = sum(s.count for s in segments if not s.to_check)
         return summary_text(left, total, info, skipped=len(self.checks & set(skipped)))
 
     def empty_page(self, segments: Sequence[ReviewSegment], skipped: Collection[int], *,

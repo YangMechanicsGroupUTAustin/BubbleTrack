@@ -77,11 +77,12 @@ class TestKeyFrameChoice:
         kinds = {k.frame: k.kinds for k in choose_key_frames(r, to_check=[peak])}
         assert kinds[peak] == ("Rmax", "to check")
 
-    def test_one_frame_per_review_row_in_queue_order(self):
-        def row(category, *frames):
-            return ReviewSegment(category, tuple(ReviewItem(f, ("x",), 50) for f in frames))
-        rows = [row("no_result", 0, 1, 2), row("jump", 111), row("collapse", 65, 66, 67)]
-        assert to_check_frames(rows) == [0, 111, 65]
+    def test_one_frame_per_review_row_to_check_in_queue_order(self):
+        def row(category, severity, *frames):
+            return ReviewSegment(category, tuple(ReviewItem(f, ("x",), severity) for f in frames))
+        rows = [row("no_result", 90, 0, 1, 2), row("jump", 60, 111),
+                row("collapse", 50, 65, 66, 67)]  # red, amber, grey
+        assert to_check_frames(rows) == [0, 111]  # grey rows are for information
         assert to_check_frames([]) == []
 
 

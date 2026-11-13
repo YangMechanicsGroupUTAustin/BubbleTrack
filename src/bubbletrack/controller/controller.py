@@ -141,7 +141,7 @@ class AppController:
         from bubbletrack.controller.review_controller import install_review
         self.review = install_review(self.w, self)
         self.bus.subscribe("tracking_review", self.review.set_extra)
-        self.auto_ctrl.review_count = lambda: self.review.count  # "· 15 to check in Review"
+        self.auto_ctrl.review_count = lambda: self.review.check_count  # "· 3 to check in Review"
 
         # Key-frame filmstrip above the R(t) chart
         from bubbletrack.controller.filmstrip_controller import install_filmstrip

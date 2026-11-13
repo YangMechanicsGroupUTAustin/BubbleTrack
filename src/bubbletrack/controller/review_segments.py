@@ -99,6 +99,11 @@ class ReviewSegment:
         return tier(self.severity)
 
     @property
+    def to_check(self) -> bool:
+        """A red or amber row; grey rows are for information only."""
+        return self.tier != "low"
+
+    @property
     def label(self) -> str:
         return category_label(self.category)
 

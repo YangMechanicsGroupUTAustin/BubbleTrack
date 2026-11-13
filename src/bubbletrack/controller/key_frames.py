@@ -2,7 +2,8 @@
 
 The strip gives an overview of the recording (first fit, Rmax, collapses,
 last fit) plus a few frames *to check*: the first frame of the top Review
-rows, so the strip and the Review dock always agree on what needs a look.
+rows to check (red or amber), so the strip and the Review dock always agree
+on what needs a look.
 """
 
 from __future__ import annotations
@@ -54,8 +55,9 @@ def find_collapses(radius: np.ndarray, max_count: int = MAX_COLLAPSES) -> list[i
 
 
 def to_check_frames(rows: Iterable) -> list[int]:
-    """The first frame of each Review row (``ReviewSegment``), in queue order."""
-    return [int(row.frames[0]) for row in rows if row.frames]
+    """The first frame of each Review row to check (``ReviewSegment.to_check``,
+    red or amber), in queue order; grey rows are for information only."""
+    return [int(row.frames[0]) for row in rows if row.frames and row.to_check]
 
 
 def choose_key_frames(
