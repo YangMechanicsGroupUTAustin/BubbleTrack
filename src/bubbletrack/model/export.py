@@ -28,6 +28,7 @@ from bubbletrack.model.export_meta import (
     radius_definition,
 )
 from bubbletrack.model.export_table import export_csv, export_excel
+from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.rmax import (
     RmaxEstimate,
     locate_rmax,
@@ -74,7 +75,7 @@ def safe_loadmat(filepath: str, expected_keys: frozenset[str]) -> dict:
         If the file is invalid or missing expected keys.
     """
     try:
-        data = scipy.io.loadmat(filepath)
+        data = scipy.io.loadmat(os_path(filepath))
     except Exception as e:
         raise ValueError(f"Invalid MAT file '{filepath}': {e}") from e
 
@@ -147,7 +148,7 @@ def export_r_data(
     data.update(fit.mat_variables())
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
-    savemat(save_path, data)
+    savemat(os_path(save_path), data)
 
 
 def export_rof_t_data(
@@ -260,7 +261,7 @@ def export_rof_t_data(
         ).reshape(-1, 1)
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
-    savemat(save_path, data)
+    savemat(os_path(save_path), data)
 
     return True, " ".join(estimate.warnings)
 

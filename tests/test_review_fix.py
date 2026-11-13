@@ -234,13 +234,14 @@ class TestRuns:
         assert rc.fix.strip.isEnabled()
 
 
-def test_the_status_bar_says_manual_while_fixing(app):
+def test_the_status_bar_mode_is_manual_while_fixing(app):
+    """The mode is kept for callers but no longer shown (it told users nothing)."""
     window, controller, rc = app
     rc.panel.step(1)
     rc.perform("fix")
-    assert window.status_bar._mode_label.text() == "Mode: Manual"
+    assert window.status_bar.mode() == "Manual"
     rc.fix.cancel()
-    assert window.status_bar._mode_label.text() == "Mode: Measure"
+    assert window.status_bar.mode() == "Measure"
 
 
 def test_the_fix_tools_do_not_use_the_old_manual_tab():

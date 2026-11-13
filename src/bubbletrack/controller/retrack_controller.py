@@ -12,9 +12,11 @@ that, when it starts, have no result or are listed in the Review queue
 frames are anchors and stay as they are.  Everything it changed is undone
 with one Ctrl+Z (shared ``ResultHistory``).
 
-While it runs, editing is locked like a run (``run_state_changed``) except
-the Manual tab: a fix there cancels the re-track (its snapshot is stale) and
-restarts the countdown.  Stop cancels it.
+It runs quietly: the status bar says "Updating…" and nothing is locked; an
+edit, a Fit or a new recording simply cancels it (its snapshot is stale).
+Only a re-track still running after ``RETRACK_ESCALATE_MS`` locks editing like
+a run (``run_state_changed``) and shows the progress line with Stop.  The
+header speaks only when frames changed ("Tracking updated 2 nearby frames").
 """
 
 from __future__ import annotations
@@ -35,6 +37,7 @@ from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.sequence_pipeline import retrack_frames
+from bubbletrack.ui.wording import plural
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +45,8 @@ AUTO_RETRACK_ENABLED = True
 """Owner decision (pending; default on): re-track automatically after edits.
 Set to False to keep tracking a Fit All step only (one-line switch)."""
 RETRACK_DEBOUNCE_MS = 2000  # quiet time after the last edit before re-tracking
+RETRACK_ESCALATE_MS = 2000  # a re-track running longer shows progress and Stop
+UPDATING = "Updating…"
 
 _OK, _WARN = "#10b981", "#f59e0b"
 
@@ -71,6 +76,11 @@ class RetrackController(BaseController):
         self.timer.setSingleShot(True)
         self.timer.setInterval(RETRACK_DEBOUNCE_MS)
         self.timer.timeout.connect(self._on_timer)
+        self._locked = False  # the re-track ran long: editing locked, Stop shown
+        self.escalate_timer = QTimer()
+        self.escalate_timer.setSingleShot(True)
+        self.escalate_timer.setInterval(RETRACK_ESCALATE_MS)
+        self.escalate_timer.timeout.connect(self._escalate)
         bus.subscribe(RESULTS_CHANGED, self._on_results_changed)
         bus.subscribe("run_state_changed", self._on_run_state)
         bus.subscribe("source_loaded", self._on_source_loaded)
@@ -124,6 +134,8 @@ class RetrackController(BaseController):
             return
         if running:
             self.timer.stop()  # a run tracks on its own
+            if self._worker is not None and not self._locked:  # Fit during a quiet re-track
+                self._abandon()
         else:
             self._quiet_turn()  # its closing RESULTS_CHANGED is not an edit
 
@@ -165,7 +177,8 @@ class RetrackController(BaseController):
         worker.failed.connect(partial(self._on_ended, worker, "failed"))
         worker.stopped.connect(partial(self._on_ended, worker, "stopped"))
         self._worker, self._allowed = worker, allowed
-        self._lock(True)
+        self.w.status_bar.set_activity(UPDATING)
+        self.escalate_timer.start()
         logger.info("Re-tracking after an edit: %d frame(s) may change", len(allowed))
         worker.start()
 
@@ -182,9 +195,10 @@ class RetrackController(BaseController):
         refresh_chart(state, self.w)
         if state.images:
             display_frame(state, self.w, state.image_no, self._set_state, self._cache)
-        text = f"Re-tracked: {n} frame(s) updated" + (" — Ctrl+Z undoes" if n else "")
-        self.w.header.set_status(text, _OK)
-        logger.info(text)
+        logger.info("Re-tracked after an edit: %d frame(s) updated", n)
+        if n:  # nothing changed: the user's own message stays in view
+            self.w.header.set_status(f"Tracking updated {plural(n, 'nearby frame')} "
+                                     "— Ctrl+Z undoes", _OK)
         with self.muted():
             self.bus.emit("tracking_review", tuple(review_items(outcome.result)))
             if n:
@@ -206,9 +220,18 @@ class RetrackController(BaseController):
         self._worker = None
         self._retired = [w for w in self._retired if w.isRunning()]
         self._retired.append(worker)
-        self._lock(False)
+        self.escalate_timer.stop()
+        self.w.status_bar.set_activity("")
+        if self._locked:
+            self._lock(False)
+
+    def _escalate(self) -> None:
+        """Still running: lock editing and offer Stop, like a run."""
+        if self._worker is not None and not self._locked:
+            self._lock(True)
 
     def _lock(self, running: bool) -> None:
+        self._locked = running
         self._own_emit = True
         try:
             self.bus.emit("run_state_changed", running)
@@ -217,6 +240,6 @@ class RetrackController(BaseController):
         lp = self.w.left_panel
         lp.fit_controls.set_running(running)
         if running:
-            lp.fit_controls.set_progress_text("Re-tracking after your edit...")
-            self.w.header.set_status("Re-tracking the bubble after your edit... "
+            lp.fit_controls.set_progress_text("Re-tracking after your edit…")
+            self.w.header.set_status("Re-tracking the bubble after your edit… "
                                      "(Stop cancels)", _WARN)

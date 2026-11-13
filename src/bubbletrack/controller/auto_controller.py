@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable
 from functools import partial
 from pathlib import Path
 
@@ -12,9 +13,9 @@ from PyQt6.QtWidgets import QMessageBox
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
-from bubbletrack.controller.display_mixin import (
-    current_source, display_frame, refresh_chart,
-)
+from bubbletrack.controller.display_mixin import display_frame, refresh_chart
+from bubbletrack.controller.live_view import show_live_frame
+from bubbletrack.controller.run_summary import RunOutcome, summary_line
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.controller.worker import BatchWorker
 from bubbletrack.event_bus import EventBus
@@ -22,9 +23,8 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
 from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.export import export_r_data
-from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
-from bubbletrack.ui.status_bar import MEASURE_MODE
+from bubbletrack.ui.wording import plural, score_name
 
 logger = logging.getLogger(__name__)
 
@@ -66,11 +66,14 @@ class AutoController(BaseController):
         self._frames_done = 0
         self._autosave_failed = False
         self._edge_job = None  # the run's EdgeJob, reused by tracking
-        self._run_notes: list[str] = []  # e.g. what tracking changed
+        self._run_notes: list[str] = []  # routine notes, e.g. what tracking changed
+        self._run_problems: list[str] = []  # what went wrong (named in the summary)
         self._ml_run = False  # the run measures with ML assist
         self._run_frames: tuple[int, ...] = ()  # frames of the current / last run
         # ML assist for Fit All: () -> (MLJob | None, note); set by MLAssistController.
         self.ml_job_provider = None
+        # () -> frames waiting in the Review queue, for the run summary; set by the app.
+        self.review_count: Callable[[], int] | None = None
 
     # -- run state -------------------------------------------------------- #
 
@@ -131,7 +134,7 @@ class AutoController(BaseController):
         if edge_job is not None and self.ml_job_provider is not None:
             ml_job, ml_note = self.ml_job_provider()  # ML assist is on: Fit uses it
         self._launch(start_idx, end_idx, protected, edge_job, ml_job=ml_job,
-                     notes=[ml_note] if ml_note else [])
+                     problems=[ml_note] if ml_note else [])
 
     def run_ml_assist(self, ml_job, *, protected: frozenset[int], stored: dict,
                       frames=None) -> bool:
@@ -161,7 +164,7 @@ class AutoController(BaseController):
         return True
 
     def _launch(self, start_idx: int, end_idx: int, protected: frozenset[int], edge_job, *,
-                ml_job=None, stored: dict | None = None, notes=(), frames=None) -> None:
+                ml_job=None, stored: dict | None = None, problems=(), frames=None) -> None:
         """Start the background run of frames start_idx..end_idx, or of *frames*."""
         worker = BatchWorker(
             images=self.state.images,
@@ -202,7 +205,8 @@ class AutoController(BaseController):
         self._worker = worker
         self._tracker = None
         self._edge_job = edge_job
-        self._run_notes = list(notes)
+        self._run_notes = []
+        self._run_problems = list(problems)
         self._ml_run = ml_job is not None and edge_job is not None
         self._run_frames = tuple(range(start_idx, end_idx + 1) if frames is None else frames)
         self._protected = protected
@@ -215,7 +219,6 @@ class AutoController(BaseController):
 
         self.w.left_panel.fit_controls.set_running(True)
         self.w.header.set_status("Processing...", "#f59e0b")
-        self.w.status_bar.update_mode("Fitting")
         self._auto_last_display = 0.0  # force first frame to display
         self._auto_start_time = time.monotonic()
         worker.start()
@@ -342,14 +345,14 @@ class AutoController(BaseController):
         changed = apply_tracking(self.state, outcome)
         logger.info("Tracking re-measured %d frame(s): %s", len(changed), changed[:20])
         if changed:
-            self._run_notes.append(f"tracking re-measured {len(changed)} frame(s)")
+            self._run_notes.append(f"tracking re-measured {plural(len(changed), 'frame')}")
         self._finish_run(stopped=False, review=review_items(outcome.result))
 
     def _on_tracking_ended(self, tracker, note: str, detail: str = "") -> None:
         """Tracking failed or was stopped: keep the single-frame results."""
         if tracker is not self._tracker:
             return
-        self._run_notes.append(note.format(detail))
+        self._run_problems.append(note.format(detail))
         self._finish_run(stopped=False)
 
     def _on_auto_progress(self, current: int, total: int) -> None:
@@ -390,9 +393,9 @@ class AutoController(BaseController):
         if (idx + 1) % AUTOSAVE_INTERVAL == 0:
             self._write_autosave()
 
-        self._update_live_view(idx, radius, edge_xy, binary_roi, rc, cc, count)
+        self._update_live_view(idx, radius, binary_roi)
 
-    def _update_live_view(self, idx, radius, edge_xy, binary_roi, rc, cc, count) -> None:
+    def _update_live_view(self, idx: int, radius: float, binary_roi) -> None:
         # Throttle display updates so the UI thread can process user events
         now = time.monotonic()
         if now - self._auto_last_display < AUTO_DISPLAY_THROTTLE_MS / 1000.0:
@@ -404,41 +407,9 @@ class AutoController(BaseController):
         self.w.frame_scrubber.set_value(idx)
         self.w.frame_scrubber.blockSignals(False)
         self._update(image_no=idx)
-
-        self.w.status_bar.update_frame(
-            frame_to_display(idx), self.state.total_frames,
-        )
-
-        # Load and display original image for current frame
-        try:
-            cur_img, _, _, _ = normalize_source(
-                current_source(self.state, idx), self.state.img_thr,
-                self.state.gridx, self.state.gridy,
-                gaussian_sigma=self.state.gaussian_sigma,
-                clahe_clip=self.state.clahe_clip,
-            )
-            self.w.original_panel.set_image(cur_img)
-            self.w.original_panel.draw_roi_rect(
-                self.state.gridx, self.state.gridy,
-            )
-            # Draw fitted circle and edge points on original image
-            if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
-                if count == 0:
-                    self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
-                self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
-        except Exception:
-            logger.debug("Live view update failed for frame %d", idx, exc_info=True)
-
-        # Show binary result from worker (no disk I/O needed). Apply
-        # invert_mask as a pure visual swap — same convention as the
-        # display_frame / preview path so the binary panel behaves
-        # consistently across the auto-fit, manual fit, and idle views.
-        if binary_roi is not None:
-            bin_display = ~binary_roi if self.state.invert_mask else binary_roi
-            self.w.binary_panel.set_image(bin_display)
-
-        # Update chart periodically (skip quality scoring for speed;
-        # quality coloring is applied once when the run finishes)
+        self.w.status_bar.update_frame(frame_to_display(idx), self.state.total_frames)
+        show_live_frame(self.state, self.w, idx, binary_roi)
+        # The chart so far, without colours for speed (they come when the run ends).
         if radius > 0 and self.state.radius is not None:
             frames = np.arange(1, len(self.state.radius) + 1)
             self.w.radius_chart.plot_all(frames, self.state.radius)
@@ -487,7 +458,6 @@ class AutoController(BaseController):
         self._tracker = None
         self._set_run_state(False)
         self.w.left_panel.fit_controls.set_running(False)
-        self.w.status_bar.update_mode(MEASURE_MODE)
         self._write_autosave()  # final state, not just the last multiple of 50
 
         # Final full display update
@@ -497,32 +467,36 @@ class AutoController(BaseController):
                 self._cache,
             )
         scores = refresh_chart(self.state, self.w)
-
-        notes = list(self._run_notes)
-        if self._ml_run and self.state.radius is not None:
-            from bubbletrack.model.ml_assist import run_counts, run_summary
-            notes.append(run_summary(run_counts(self.state, self._run_frames)))
-        if self._frame_errors:
-            notes.append(f"{self._frame_errors} frame(s) could not be read")
-        if self._autosave_failed:
-            notes.append("autosave failed (is the folder read-only?)")
-        poor_count = 0
-        if scores is not None and self.state.radius is not None:
-            valid = self.state.radius > 0
-            poor_count = int(np.sum(valid & (scores < QUALITY_WARN_THRESHOLD)))
-            logger.info("Fit quality: %d / %d valid fits below threshold",
-                        poor_count, int(valid.sum()))
-        if poor_count and not stopped:
-            notes.append(f"{poor_count} unreliable fits detected")
-
-        head = (f"Stopped after {self._frames_done} frame(s)" if stopped else "Done")
-        text = head + (" — " + "; ".join(notes) if notes else "")
-        warn = stopped or bool(notes)
-        self.w.header.set_status(text, "#f59e0b" if warn else "#10b981")
         # The tracking review list (empty when tracking did not run) and the
-        # frames it re-measured.
+        # frames it re-measured; the Review queue is up to date afterwards.
         self.bus.emit("tracking_review", tuple(review))
         self._results_changed()
+        self._show_summary(stopped, scores)
         self.bus.emit("run_finished", {"stopped": stopped, "ml": self._ml_run,
                                        "edge": self._edge_job is not None,
                                        "frames": self._run_frames})
+
+    def _show_summary(self, stopped: bool, scores) -> None:
+        """The run's line in the header (see ``run_summary``)."""
+        state, frames = self.state, list(self._run_frames)
+        problems, details = list(self._run_problems), list(self._run_notes)
+        if self._ml_run and state.radius is not None:
+            from bubbletrack.model.ml_assist import run_counts, run_summary
+            details.append(run_summary(run_counts(state, self._run_frames)))
+        if self._frame_errors:
+            problems.append(f"{plural(self._frame_errors, 'frame')} could not be read")
+        if self._autosave_failed:
+            problems.append("autosave failed (is the folder read-only?)")
+        if scores is not None and state.radius is not None and not stopped:
+            low = int(np.sum((state.radius > 0) & (scores < QUALITY_WARN_THRESHOLD)))
+            if low:
+                details.append(f"{plural(low, 'fit')} with low {score_name(state.detection_mode)} "
+                               f"(below {QUALITY_WARN_THRESHOLD:.2f})")
+        for note in details:
+            logger.info("Run note: %s", note)
+        measured = 0 if state.radius is None else int(np.sum(state.radius[frames] > 0))
+        self.w.header.set_status(*summary_line(RunOutcome(
+            total=len(frames), measured=measured, stopped=stopped,
+            frames_done=self._frames_done, ml=self._ml_run,
+            to_check=self.review_count() if self.review_count is not None else 0,
+            problems=tuple(problems), details=tuple(details))))

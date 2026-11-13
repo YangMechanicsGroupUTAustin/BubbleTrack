@@ -28,6 +28,7 @@ from bubbletrack.model.cases.labels import app_result, frame_label
 from bubbletrack.model.cases.schema import HardCase, ROLE_CONTEXT, ROLE_REFERENCE
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.hard_case_dialog import HardCaseDialog, HardCaseInput
+from bubbletrack.ui.wording import plural
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,7 @@ class HardCaseController:
         logger.info("Hard case %s: %d frames, %d labels, %d bytes",
                     path, len(written.frames), labels, size)
         self.w.header.set_status(f"Hard case saved: {os.path.basename(path)} "
-                                 f"({_megabytes(size)}, {labels} labelled frame(s)); "
+                                 f"({_megabytes(size)}, {plural(labels, 'labelled frame')}); "
                                  "send it to the maintainer", _OK)
         return written, size
 
@@ -133,7 +134,7 @@ class HardCaseController:
         plan = plan_frames(start, end, len(state.images),
                            reference=self._reference_index() if edge else None)
         roles = [role for _, role in plan]
-        parts = [f"{end - start + 1} frame(s)"]
+        parts = [plural(end - start + 1, "frame")]
         if roles.count(ROLE_CONTEXT):
             parts.append(f"{roles.count(ROLE_CONTEXT)} neighbours")
         if ROLE_REFERENCE in roles:
@@ -143,7 +144,7 @@ class HardCaseController:
                      for i, role in plan if role != ROLE_REFERENCE)
         text = " + ".join(parts) + (f" · up to {_megabytes(size)}" if size else "")
         if labels:
-            return text + f"\n{labels} frame(s) fixed by you (manual fits or accepted)"
+            return text + f"\n{plural(labels, 'frame')} fixed by you (manual fits or accepted)"
         return text + ("\nNo frame here is fixed yet: fix or accept the right frames first "
                        "so the case can be scored (it is still worth sending).")
 

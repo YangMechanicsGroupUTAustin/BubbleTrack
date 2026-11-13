@@ -149,14 +149,14 @@ class TestLoadAndNormalize:
 
     def test_nonexistent_file_raises(self):
         """Passing a path that does not exist raises ImageLoadError."""
-        with pytest.raises(ImageLoadError, match="missing or corrupted"):
+        with pytest.raises(ImageLoadError, match="file not found"):
             load_and_normalize("/does/not/exist/image.tif", 0.5, (1, 10), (1, 10))
 
     def test_corrupted_file_raises(self, tmp_path):
         """A file with random bytes (not a valid image) raises ImageLoadError."""
         corrupted = tmp_path / "corrupted.tif"
         corrupted.write_bytes(os.urandom(256))
-        with pytest.raises(ImageLoadError, match="missing or corrupted"):
+        with pytest.raises(ImageLoadError, match="damaged or not an image"):
             load_and_normalize(str(corrupted), 0.5, (1, 10), (1, 10))
 
     def test_full_roi(self, img_folder):

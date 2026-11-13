@@ -11,19 +11,21 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from bubbletrack import APP_TITLE
+
 
 class WelcomeDialog(QDialog):
     """First-launch tutorial overlay showing the 3-step workflow."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Welcome to BubbleTrack")
+        self.setWindowTitle(f"Welcome to {APP_TITLE}")
         self.setMinimumSize(500, 350)
         layout = QVBoxLayout(self)
         layout.setSpacing(16)
 
         # Title
-        title = QLabel("<h2>Welcome to BubbleTrack v3.0</h2>")
+        title = QLabel(f"<h2>Welcome to {APP_TITLE}</h2>")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title)
 
@@ -37,7 +39,7 @@ class WelcomeDialog(QDialog):
             (
                 "2. Fit",
                 "Auto compares every frame with a bubble-free reference frame: "
-                "no threshold to tune. Optionally click the bubble once (Seed), "
+                "no threshold to tune. Optionally click the bubble once (Bubble position), "
                 "then press Fit to measure every frame.",
             ),
             (

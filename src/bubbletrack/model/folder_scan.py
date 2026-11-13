@@ -16,6 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import BinaryIO
 
+from bubbletrack.model.long_paths import os_path, plain
+
 logger = logging.getLogger(__name__)
 
 # Upper bound on IFDs followed, a guard against corrupt chains.
@@ -109,7 +111,7 @@ def tiff_page_count(path: str | os.PathLike) -> int:
         TIFF.  A truncated or looping IFD chain counts the pages read so far.
     """
     try:
-        with open(path, "rb") as fh:
+        with open(os_path(path), "rb") as fh:
             return _count_ifds(fh)
     except OSError:
         return 0
@@ -166,7 +168,7 @@ def _candidate_files(folder: Path) -> tuple[dict[str, list[str]], int]:
     """
     groups: dict[str, list[str]] = {}
     hidden = 0
-    with os.scandir(folder) as entries:
+    with os.scandir(os_path(folder)) as entries:  # paths beyond MAX_PATH too
         for entry in entries:
             group = _GROUP_OF_EXTENSION.get(os.path.splitext(entry.name)[1].lower())
             if group is None:
@@ -179,7 +181,7 @@ def _candidate_files(folder: Path) -> tuple[dict[str, list[str]], int]:
                 continue
             if not entry.is_file(follow_symlinks=False):
                 continue
-            groups.setdefault(group, []).append(entry.path)
+            groups.setdefault(group, []).append(os.path.join(str(folder), entry.name))
     return groups, hidden
 
 
@@ -221,8 +223,8 @@ def scan_folder_report(folder: str, *, check_pages: bool = True) -> ScanResult:
         Empty (``images == ()``) when *folder* is not a directory or holds
         no images.
     """
-    p = Path(folder).resolve()
-    if not p.is_dir():
+    p = Path(plain(str(Path(folder).resolve())))
+    if not os.path.isdir(os_path(p)):
         logger.warning("Not a directory: %s", folder)
         return ScanResult(images=())
 

@@ -257,8 +257,8 @@ class ClassicControls(QWidget):
         self._quality_label.setText(
             f'<span style="color:#a1a1aa;">Edge pts:</span> {n_pts} &nbsp; '
             f'<span style="color:#a1a1aa;">RMS:</span> {rms:.1f} px &nbsp; '
-            f'<span style="color:#a1a1aa;">Confidence:</span> '
-            f'<span style="color:{colour};">{score_pct}%</span>')
+            f'<span style="color:#a1a1aa;">Fit quality:</span> '
+            f'<span style="color:{colour};">{score_pct / 100:.2f}</span>')  # 0-1, as everywhere
         self._quality_label.show()
 
     def show_area_result(self, area: int, count: int) -> None:

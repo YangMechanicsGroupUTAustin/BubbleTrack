@@ -3,6 +3,11 @@
 The physical values (frame rate, um/px, Rmax fit length) belong to the
 recording: edits apply at once (``physical_params_changed``) and are kept when
 the dialog is closed without exporting, as the old side-panel fields were.
+
+Frame rate and scale that were not set for this recording (*unset*) are
+marked "Not set for this recording — check" and physical export waits until
+they are: typing a value sets it, "These are right" keeps the values shown.
+Pixels need neither.
 """
 
 from __future__ import annotations
@@ -26,6 +31,13 @@ FORMAT_FILTERS = {
     "xlsx": "Excel Files (*.xlsx);;All Files (*)",
 }
 _FPS_UNITS = (("Hz", 1.0), ("k", 1e3), ("M", 1e6))
+PHYSICAL_FIELDS = frozenset({"fps", "scale"})
+NOT_SET_TEXT = "⚠ Not set for this recording — check"
+BLOCKED_TEXT = ("Check the frame rate and scale of this recording first "
+                "(or choose Pixels).")
+RMAX_FIT_TEXT = "frames around the largest radius, used to find Rmax and its time (t = 0)"
+_MARK_STYLE = "border: 1px solid #f59e0b;"
+_WARN = "#f59e0b"
 
 
 def with_format_extension(path: str, fmt: str) -> str:
@@ -55,11 +67,12 @@ class ExportDialog(QDialog):
 
     def __init__(self, *, fps: float, um2px: float, fit_length: int, fmt: str = "mat",
                  units: str = "physical", default_path: Callable[[str, str], str],
-                 parent: QWidget | None = None) -> None:
+                 unset: frozenset[str] = frozenset(), parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Export Results")
         self.setMinimumWidth(520)
         self._default_path = default_path
+        self._unset = frozenset(unset) & PHYSICAL_FIELDS
         self._path_edited = False  # the user typed or browsed a path: keep it
         self._browsed = ""  # confirmed in the save dialog (it asks about replacing)
 
@@ -78,9 +91,11 @@ class ExportDialog(QDialog):
         self.set_units(units if units in UNITS else "physical")
         self.set_format(fmt)
         self._refresh_path()
-        for control in (self._fps_spin, self._scale_spin, self._fit_len_spin):
-            control.valueChanged.connect(self.physical_params_changed)
-        self._fps_unit.currentIndexChanged.connect(self.physical_params_changed)
+        self._fps_spin.valueChanged.connect(lambda _v: self._mark_set({"fps"}))
+        self._fps_unit.currentIndexChanged.connect(lambda _i: self._mark_set({"fps"}))
+        self._scale_spin.valueChanged.connect(lambda _v: self._mark_set({"scale"}))
+        self._fit_len_spin.valueChanged.connect(self.physical_params_changed)
+        self._show_unset()
 
     # -- construction ------------------------------------------------------ #
 
@@ -93,7 +108,7 @@ class ExportDialog(QDialog):
         for button in (self._physical, self._pixel):
             self._units.addButton(button)
             rows.addWidget(button)
-        self._units.buttonToggled.connect(lambda _b, on: on and self._refresh_path())
+        self._units.buttonToggled.connect(lambda _b, on: on and self._on_units_changed())
         return box
 
     def _build_recording(self) -> QGroupBox:
@@ -116,15 +131,37 @@ class ExportDialog(QDialog):
         grid.addWidget(QLabel("Scale:"), 1, 0)
         grid.addWidget(self._scale_spin, 1, 1, 1, 2)
         grid.addWidget(QLabel("µm/px"), 1, 3)
+        grid.addWidget(self._build_unset_line(), 2, 1, 1, 3)
         self._fit_len_spin = QSpinBox()
         self._fit_len_spin.setRange(3, 999)
         self._fit_len_spin.setSingleStep(2)
-        self._fit_len_spin.setToolTip("Frames around the maximum used to fit Rmax and its time.")
-        grid.addWidget(QLabel("Rmax fit:"), 2, 0)
-        grid.addWidget(self._fit_len_spin, 2, 1, 1, 2)
-        grid.addWidget(QLabel("frames"), 2, 3)
+        self._fit_len_spin.setToolTip("Frames around the largest radius used to fit Rmax\n"
+                                      "and its time, the zero of the exported time axis.")
+        grid.addWidget(QLabel("Rmax fit:"), 3, 0)
+        grid.addWidget(self._fit_len_spin, 3, 1, 1, 2)
+        grid.addWidget(QLabel("frames"), 3, 3)
+        rmax_note = QLabel(RMAX_FIT_TEXT)
+        rmax_note.setObjectName("dimText")
+        rmax_note.setWordWrap(True)
+        grid.addWidget(rmax_note, 4, 1, 1, 3)
         grid.setColumnStretch(1, 1)
         return box
+
+    def _build_unset_line(self) -> QWidget:
+        """'⚠ Not set for this recording — check  [These are right]'."""
+        self._unset_line = QWidget()
+        row = QHBoxLayout(self._unset_line)
+        row.setContentsMargins(0, 0, 0, 0)
+        self._unset_label = QLabel(NOT_SET_TEXT)
+        self._unset_label.setStyleSheet(f"color:{_WARN};")
+        self._unset_label.setWordWrap(True)
+        self._confirm = QPushButton("These are right")
+        self._confirm.setObjectName("secondaryBtn")
+        self._confirm.setToolTip("Keep the frame rate and scale shown for this recording")
+        self._confirm.clicked.connect(self.confirm_values)
+        row.addWidget(self._unset_label, 1)
+        row.addWidget(self._confirm)
+        return self._unset_line
 
     def _build_output(self) -> QGridLayout:
         grid = QGridLayout()
@@ -203,6 +240,43 @@ class ExportDialog(QDialog):
         finally:
             for control in controls:
                 control.blockSignals(False)
+
+    # -- frame rate and scale set for this recording? ------------------------ #
+
+    def unset_fields(self) -> frozenset[str]:
+        """'fps' / 'scale' not yet set for this recording."""
+        return self._unset
+
+    def confirm_values(self) -> None:
+        """'These are right': the values shown are this recording's."""
+        self._mark_set(PHYSICAL_FIELDS)
+
+    def physical_ready(self) -> bool:
+        return not self._unset
+
+    def _mark_set(self, fields: set[str] | frozenset[str]) -> None:
+        self._unset = self._unset - frozenset(fields)
+        self._show_unset()
+        self.physical_params_changed.emit()
+
+    def _show_unset(self) -> None:
+        """Mark the unset fields; physical export waits for them."""
+        for field_name, spin in (("fps", self._fps_spin), ("scale", self._scale_spin)):
+            spin.setStyleSheet(_MARK_STYLE if field_name in self._unset else "")
+        self._unset_line.setVisible(bool(self._unset))
+        self._refresh_export_button()
+
+    def _on_units_changed(self) -> None:
+        self._refresh_path()
+        self._refresh_export_button()
+
+    def _refresh_export_button(self) -> None:
+        blocked = self.get_units() == "physical" and bool(self._unset)
+        self.export_button.setEnabled(not blocked)
+        if blocked:
+            self.set_status(BLOCKED_TEXT, colour=_WARN)
+        elif self.status_text() == BLOCKED_TEXT:
+            self.set_status("")
 
     def report_enabled(self) -> bool:
         return self._report.isChecked()

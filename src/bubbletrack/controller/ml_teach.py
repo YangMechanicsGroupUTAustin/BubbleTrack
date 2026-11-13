@@ -31,6 +31,7 @@ from bubbletrack.ui.image_compare import CompareMode
 from bubbletrack.ui.ml_images import BACKGROUND_COLOUR, BUBBLE_COLOUR
 from bubbletrack.ui.ml_teach_panel import TOOL_KEYS, TOOLS
 from bubbletrack.ui.shortcuts import text_input_has_focus
+from bubbletrack.ui.wording import plural
 
 logger = logging.getLogger(__name__)
 
@@ -308,7 +309,7 @@ class TeachingMode:
         self._previews.clear()
         info = model.info
         self.panel.set_quality_tip(f"Trained on {info.n_bubble + info.n_background:,} pixels of "
-                                   f"{len(info.frames)} frame(s) in {ms / 1000:.1f} s")
+                                   f"{plural(len(info.frames), 'frame')} in {ms / 1000:.1f} s")
 
     def _on_failed(self, req: PreviewRequest, message: str) -> None:
         if req.version in (self._version, self._model_version):

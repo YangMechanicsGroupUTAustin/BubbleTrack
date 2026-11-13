@@ -5,6 +5,12 @@ The folder and format of the last successful export are remembered in
 config.json: the next dialog proposes a file in that folder, in that format.
 The dialog's frame rate, scale and Rmax fit length go straight into the
 state, so sessions, the config and reports record the values exported with.
+
+Frame rate and scale count as set for a recording only once the user typed or
+confirmed them in the dialog, or a session file restored them: the values in
+the config belong to whatever recording came before.  Until then the dialog
+marks them and physical export waits; pixel exports record them as unknown,
+and the status bar says "Scale: not set".
 """
 
 from __future__ import annotations
@@ -18,6 +24,7 @@ from pathlib import Path
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
+from bubbletrack.controller.session_controller import SESSION_RESTORED
 from bubbletrack.model import config
 from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import (
@@ -29,7 +36,9 @@ from bubbletrack.model.export import (
     fit_result_arrays,
 )
 from bubbletrack.model.report import generate_report
-from bubbletrack.ui.export_dialog import FORMAT_EXT, ExportDialog, report_path_for
+from bubbletrack.ui.export_dialog import (
+    FORMAT_EXT, PHYSICAL_FIELDS, ExportDialog, report_path_for,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -123,6 +132,21 @@ class ExportController(BaseController):
     def __init__(self, bus, get_state, set_state, window) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._units = "physical"  # the last export's choice, offered next time
+        self._set_fields: frozenset[str] = frozenset()  # 'fps' / 'scale' set for this recording
+        bus.subscribe("source_loaded", lambda _n: self._set_physical(frozenset()))
+        bus.subscribe(SESSION_RESTORED, lambda: self._set_physical(PHYSICAL_FIELDS))
+
+    # -- frame rate and scale of this recording ------------------------------ #
+
+    def physical_set(self) -> bool:
+        """Frame rate and scale were set (or restored) for the loaded recording."""
+        return self._set_fields == PHYSICAL_FIELDS
+
+    def _set_physical(self, fields: frozenset[str]) -> None:
+        self._set_fields = frozenset(fields) & PHYSICAL_FIELDS
+        status_bar = getattr(self.w, "status_bar", None)
+        if status_bar is not None:
+            status_bar.update_scale(self.state.um2px if "scale" in self._set_fields else None)
 
     # -- the dialog ---------------------------------------------------------- #
 
@@ -131,7 +155,8 @@ class ExportController(BaseController):
         dialog = ExportDialog(
             fps=state.fps, um2px=state.um2px, fit_length=state.rmax_fit_length,
             fmt=config.get_meta("last_export_format") or "mat", units=self._units,
-            default_path=self.default_path, parent=self.w,
+            default_path=self.default_path, unset=PHYSICAL_FIELDS - self._set_fields,
+            parent=self.w,
         )
         dialog.physical_params_changed.connect(lambda: self.on_physical_params_changed(dialog))
         dialog.export_clicked.connect(lambda: self.export_from(dialog))
@@ -143,6 +168,7 @@ class ExportController(BaseController):
     def on_physical_params_changed(self, panel) -> None:
         self._update(fps=panel.get_fps(), um2px=panel.get_scale(),
                      rmax_fit_length=panel.get_fit_length())
+        self._set_physical(PHYSICAL_FIELDS - panel.unset_fields())
 
     def export_from(self, dialog: ExportDialog) -> bool:
         """Export what the dialog says; close it on success, else show why not."""
@@ -153,10 +179,14 @@ class ExportController(BaseController):
         if not path:
             dialog.set_status("Choose where to save the file", False)
             return False
+        units = dialog.get_units()
+        if units == "physical" and not dialog.physical_ready():
+            dialog.set_status("Check the frame rate and scale of this recording first "
+                              "(or choose Pixels).", False)
+            return False
         report = report_path_for(path) if dialog.report_enabled() else ""
         if not dialog.confirm_overwrite([path, report]):
             return False
-        units = dialog.get_units()
         self._units = units
         export = self.export_pixel if units == "pixel" else self.export_physical
         outcome = export(dialog, path)
@@ -190,7 +220,8 @@ class ExportController(BaseController):
             return None
         fmt = panel.get_format()
         try:
-            warning = self._do_export_r_data(path, fmt, metadata=self._export_metadata(panel))
+            warning = self._do_export_r_data(
+                path, fmt, metadata=self._export_metadata(panel, physical=False))
         except Exception as exc:
             panel.set_status(f"Error: {exc}", False)
             return None
@@ -205,7 +236,7 @@ class ExportController(BaseController):
             return None
         fmt = panel.get_format()
         try:
-            metadata = self._export_metadata(panel)
+            metadata = self._export_metadata(panel, physical=True)
             if fmt in ("csv", "xlsx"):
                 ok, msg = True, self._do_export_r_data(
                     path, fmt,
@@ -232,9 +263,6 @@ class ExportController(BaseController):
             return None
         logger.info("Export: %s", path)
         outcome = _show_export_success(panel, path, msg)
-        status_bar = getattr(self.w, "status_bar", None)
-        if status_bar is not None:
-            status_bar.update_scale(panel.get_scale())
         self._remember_export(path, fmt)
         return outcome
 
@@ -247,6 +275,7 @@ class ExportController(BaseController):
             generate_report(
                 path, self.state, chart_image_path=chart_path,
                 fps=panel.get_fps(), um2px=panel.get_scale(),
+                physical_set=self.physical_set(),
             )
         except Exception as exc:
             panel.set_status(f"Report error: {exc}", False)
@@ -324,12 +353,17 @@ class ExportController(BaseController):
         )
         return ""
 
-    def _export_metadata(self, panel) -> dict:
-        """Provenance for an export: current state plus the dialog values."""
+    def _export_metadata(self, panel, *, physical: bool) -> dict:
+        """Provenance for an export: current state plus the dialog values.
+
+        A pixel export records frame rate and scale only when they were set for
+        this recording (None: unknown).
+        """
+        known = physical or self.physical_set()
         return build_export_metadata(
             self.state,
-            fps=panel.get_fps(),
-            um2px=panel.get_scale(),
+            fps=panel.get_fps() if known else None,
+            um2px=panel.get_scale() if known else None,
             rmax_fit_length=panel.get_fit_length(),
             reference_index=self._edge_reference_index(),
         )

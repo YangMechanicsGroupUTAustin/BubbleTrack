@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
     QSplitter, QVBoxLayout, QWidget,
 )
 
+from bubbletrack import APP_TITLE
 from bubbletrack.ui.frame_scrubber import FrameScrubber
 from bubbletrack.ui.header_bar import HeaderBar
 from bubbletrack.ui.image_compare import CompareMode, CompareToolbar
@@ -52,7 +53,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Bubble Radius Fitting")
+        self.setWindowTitle(APP_TITLE)
         self.setMinimumSize(*MIN_WINDOW_SIZE)
         self._size_to_screen()
 

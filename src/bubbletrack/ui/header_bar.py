@@ -1,9 +1,11 @@
-"""Dark top navigation bar."""
+"""Dark top bar: the product name and the one status line users read first."""
 
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
+
+from bubbletrack import APP_NAME
 
 
 class HeaderBar(QWidget):
@@ -15,14 +17,14 @@ class HeaderBar(QWidget):
         layout = QHBoxLayout(self)
         layout.setContentsMargins(16, 0, 16, 0)
 
-        # App title
-        title = QLabel("Bubble Radius Fitting")
+        title = QLabel(APP_NAME)
         title.setStyleSheet("font-size:15px; font-weight:bold;")
         layout.addWidget(title)
 
         # Status indicator
         self._status_colour = "#10b981"
-        self._status_dot = QLabel("\u25CF")
+        self._details: tuple[str, str] = ("", "")  # (status text, its details)
+        self._status_dot = QLabel("●")
         self._status_dot.setStyleSheet("color:#10b981; font-size:10px;")
         layout.addWidget(self._status_dot)
         self._status_label = QLabel("Ready")
@@ -31,13 +33,25 @@ class HeaderBar(QWidget):
 
         layout.addStretch()
 
-    def set_status(self, text: str, colour: str = "#10b981"):
+    def set_status(self, text: str, colour: str = "#10b981", details: str | None = None):
+        """Show *text*; *details* (routine notes) go to its tooltip.
+
+        Without *details*, a message shown again keeps the details it had.
+        """
+        if details is not None:
+            self._details = (text, details)
+        tip = self._details[1] if self._details[0] == text else ""
         self._status_label.setText(text)
+        self._status_label.setToolTip(tip)
         self._status_colour = colour
         self._status_dot.setStyleSheet(f"color:{colour}; font-size:10px;")
 
     def status_text(self) -> str:
         return self._status_label.text()
+
+    def status_details(self) -> str:
+        """The routine notes behind the status line (its tooltip)."""
+        return self._status_label.toolTip()
 
     def status(self) -> tuple[str, str]:
         """(text, colour) on show, e.g. to put a run's summary back."""

@@ -18,15 +18,14 @@ from bubbletrack.controller.display_mixin import (
 )
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
 from bubbletrack.controller import edge_support, suggestion_view
+from bubbletrack.controller.edge_setup import EdgeSetup
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.quality import compute_fit_quality
 from bubbletrack.model.removing_factor import compute_removing_factor
-from bubbletrack.model.state import update_state
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +48,7 @@ class PretuneController(BaseController):
 
         # Auto-tune worker (lazy import to avoid circular dependency)
         self._autotune_worker = None
+        self.edge_setup = EdgeSetup(bus, get_state, set_state, window)
 
     # -- public handlers -------------------------------------------------- #
 
@@ -186,48 +186,25 @@ class PretuneController(BaseController):
             self._cache,
         )
 
-    # -- Edge engine: reference frame and seed -------------------------- #
+    # -- Edge engine: reference frame and bubble position (see edge_setup) - #
 
     def refresh_edge_labels(self) -> None:
-        box = self.w.left_panel.measure_panel.edge_box
-        if self.state.detection_mode != "edge":
-            return
-        try:
-            box.set_reference_text(edge_support.reference_text(self.state))
-        except Exception as exc:  # unreadable frames while auto-selecting
-            box.set_reference_text(f"Error: {exc}")
-        box.set_seed_text(edge_support.seed_text(self.state))
+        self.edge_setup.refresh_labels()
 
     def on_use_current_as_reference(self) -> None:
-        if self.state.images:
-            self._update(reference_frame=self.state.image_no)
-            self.refresh_edge_labels()
+        self.edge_setup.use_current()
 
     def on_auto_reference(self) -> None:
-        self._update(reference_frame=None)
-        self.refresh_edge_labels()
+        self.edge_setup.use_auto()
 
     def on_pick_seed(self) -> None:
-        if not self.state.images:
-            return
-        self._picking_seed = True
-        self.w.original_panel.set_mode("point")
-        self.w.header.set_status("Click once on the bubble", "#f59e0b")
+        self.edge_setup.pick()
 
     def on_point_clicked(self, x: float, y: float) -> None:
-        """Scene click (x = col, y = row, 0-based scene); used while picking a seed."""
-        if not getattr(self, "_picking_seed", False):
-            return
-        self._picking_seed = False
-        self.w.original_panel.set_mode("normal")
-        # Scene pixel i spans [i, i+1); its 1-based index coordinate is i + 1.
-        self._update(edge_seed=(y + 0.5, x + 0.5))
-        self.refresh_edge_labels()
-        self.w.header.set_status("Seed set", "#10b981")
+        self.edge_setup.on_point_clicked(x, y)
 
     def on_clear_seed(self) -> None:
-        self._update(edge_seed=None)
-        self.refresh_edge_labels()
+        self.edge_setup.clear()
 
     def _fit_current_edge(self, idx: int) -> None:
         try:
@@ -242,7 +219,7 @@ class PretuneController(BaseController):
         if fit.radius > 0:
             self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1",
                                               legend=EQUAL_AREA_CIRCLE)
-            self.w.original_panel.draw_points(fit.edge_xy, "#ef4444", 2.0)
+            self.w.original_panel.draw_fit_outline(fit.edge_xy, "#ef4444")
         else:  # rejected: its guess, if any, dashed
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
         refresh_chart(self.state, self.w)
@@ -421,7 +398,7 @@ class PretuneController(BaseController):
         # Overwrite per-frame status with autotune summary
         self.w.header.set_status(
             f"Auto-tuned: thr={result.threshold:.2f}, RF={result.removing_factor}"
-            f" \u2014 confidence {int(q.score * 100)}%"
+            f" \u2014 fit quality {q.score:.2f}"
             f" ({result.candidates_evaluated} tested)",
             "#10b981",
         )

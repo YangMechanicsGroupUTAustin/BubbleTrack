@@ -81,7 +81,7 @@ def test_mark_no_bubble_clears_and_locks_empty_frames(app):
     assert state.radius[5] == -1.0 and state.radius[7] == -1.0
     assert state.fit_locked[5] and state.fit_locked[7]
     assert state.radius[6] > 0 and state.fit_locked[6]
-    assert "Marked 2 frame(s) as no bubble (1 locked kept)" in window.header._status_label.text()
+    assert "Marked 2 frames as no bubble (1 locked kept)" in window.header._status_label.text()
     assert len(events) == 1
 
 

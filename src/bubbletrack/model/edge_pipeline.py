@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from bubbletrack.model.image_io import ImageLoadError, imread_unicode
+from bubbletrack.model.image_io import ImageLoadError, imread_unicode, read_failure
 from bubbletrack.model.suggestion import Suggestion, make_suggestion
 
 
@@ -65,8 +65,21 @@ def read_raw(source) -> np.ndarray:
         return source
     raw = imread_unicode(source, cv2.IMREAD_UNCHANGED)
     if raw is None:
-        raise ImageLoadError(f"Cannot read image (file may be missing or corrupted): {source}")
+        raise ImageLoadError(read_failure(source))
     return raw
+
+
+def frame_has_bubble(raw: np.ndarray) -> bool:
+    """True when *raw* seems to contain a bubble, so it cannot be a reference.
+
+    The test the automatic reference choice applies to its candidates
+    (``model.edge.reference``): the engine, without a reference, finds a
+    confident circle of a plausible size on the full frame.
+    """
+    from bubbletrack.model.edge.config import DEFAULT_CONFIG
+    from bubbletrack.model.edge.reference import _has_bubble
+
+    return bool(_has_bubble(raw, DEFAULT_CONFIG))
 
 
 def resolve_reference_index(read_frame: Callable[[int], np.ndarray], n_frames: int,

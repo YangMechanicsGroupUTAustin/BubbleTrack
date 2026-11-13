@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable
 
 import numpy as np
 
@@ -13,6 +14,7 @@ from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.frame_source import open_recording
+from bubbletrack.model.hpvx2_dat import DAT_EXTS
 from bubbletrack.model.image_io import (
     detect_bit_depth,
     load_and_normalize,
@@ -22,6 +24,13 @@ from bubbletrack.model.image_io import (
 from bubbletrack.ui.frame_scrubber import frame_file_labels
 
 logger = logging.getLogger(__name__)
+
+NOT_LOADED = "Nothing loaded: the current recording is still open"
+
+
+def recording_kind(path: str) -> str:
+    """'HPV-X2 recording' for a raw .dat file, else 'video'."""
+    return "HPV-X2 recording" if os.path.splitext(path)[1].lower() in DAT_EXTS else "video"
 
 
 class FileController(BaseController):
@@ -34,6 +43,9 @@ class FileController(BaseController):
         self._set_max_radius = set_max_radius
         self._cache = cache
         self._is_busy = is_busy
+        # Before another recording replaces this one: False keeps it (the
+        # session controller asks about unsaved review decisions).
+        self.confirm_leave: Callable[[], bool] = lambda: True
 
     def _refuse_while_busy(self) -> bool:
         """A running fit writes into the current arrays: never swap them out."""
@@ -46,14 +58,10 @@ class FileController(BaseController):
 
     # -- public handlers -------------------------------------------------- #
 
-    def on_folder_selected(self, folder: str) -> None:
+    def on_folder_selected(self, folder: str, *, ask: bool = True) -> None:
+        """Load an image folder; with *ask*, unsaved review decisions are asked about."""
         if self._refuse_while_busy():
             return
-        # Close any previous video reader
-        if self.state.video_reader is not None:
-            self.state.video_reader.close()
-            self._update(video_reader=None, video_path="")
-
         images = scan_folder(folder)
         if not images:
             self.w.header.set_status("No images found", "#ef4444")
@@ -72,6 +80,12 @@ class FileController(BaseController):
                 f"Cannot read {os.path.basename(images[0])}: {exc}", "#ef4444",
             )
             return
+        if ask and not self.confirm_leave():
+            self.w.header.set_status(NOT_LOADED, "#a1a1aa")
+            return
+        if self.state.video_reader is not None:  # the folder replaces the video
+            self.state.video_reader.close()
+            self._update(video_reader=None, video_path="")
 
         logger.info("Loaded %d images from %s", len(images), folder)
 
@@ -94,14 +108,13 @@ class FileController(BaseController):
 
         display_frame(self.state, self.w, 0, self._set_state, self._cache)
 
-    def on_video_selected(self, video_path: str) -> None:
-        """Open a video or HPV-X2 .dat recording and set up a virtual frame list."""
+    def on_video_selected(self, video_path: str, *, ask: bool = True) -> None:
+        """Open a video or HPV-X2 .dat recording and set up a virtual frame list.
+
+        With *ask*, unsaved review decisions of the current recording are asked about.
+        """
         if self._refuse_while_busy():
             return
-        # Close any previous video reader
-        if self.state.video_reader is not None:
-            self.state.video_reader.close()
-
         try:
             reader = open_recording(video_path)
         except Exception as exc:
@@ -113,6 +126,12 @@ class FileController(BaseController):
             self.w.header.set_status("Video has no frames", "#ef4444")
             reader.close()
             return
+        if ask and not self.confirm_leave():
+            reader.close()
+            self.w.header.set_status(NOT_LOADED, "#a1a1aa")
+            return
+        if self.state.video_reader is not None:  # the new recording replaces it
+            self.state.video_reader.close()
 
         logger.info("Opened video %s: %d frames, %.1f fps", video_path, n, reader.fps)
 
@@ -149,7 +168,7 @@ class FileController(BaseController):
 
         self.w.left_panel.image_source.set_video_loaded(video_path, n, reader.fps)
         self._reset_views(n, os.path.splitext(video_path)[1])
-        self.w.header.set_status("Ready (video)", "#10b981")
+        self.w.header.set_status(f"Ready ({recording_kind(video_path)})", "#10b981")
 
         display_frame(self.state, self.w, 0, self._set_state, self._cache)
 

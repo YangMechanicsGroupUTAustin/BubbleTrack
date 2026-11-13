@@ -19,12 +19,13 @@ import os
 from pathlib import Path
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent
+from PyQt6.QtGui import QDragEnterEvent, QDropEvent, QMouseEvent, QResizeEvent
 from PyQt6.QtWidgets import (
-    QFileDialog, QHBoxLayout, QLabel, QVBoxLayout, QWidget,
+    QFileDialog, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget,
 )
 
 from bubbletrack.model.frame_source import RECORDING_DIALOG_FILTER, is_recording_file
+from bubbletrack.model.long_paths import os_path
 
 
 def format_rate(fps: float) -> str:
@@ -71,35 +72,62 @@ class _DropZone(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("loaded", False)
         self.setMinimumHeight(80)
+        # No taller than its content (the centring stretches must not grow it).
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 10, 8, 10)
         layout.setSpacing(2)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
 
         self._icon_label = QLabel(icon)
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_label.setStyleSheet(
             "font-size: 22px; background: transparent; border: none;"
         )
-        layout.addWidget(self._icon_label)
+        layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._prompt_label = QLabel(prompt)
         self._prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._prompt_label.setWordWrap(True)
-        layout.addWidget(self._prompt_label)
+        # A long name must not widen the zone (it is elided to fit instead).
+        self._prompt_label.setSizePolicy(QSizePolicy.Policy.Ignored,
+                                         QSizePolicy.Policy.Preferred)
+        layout.addWidget(self._prompt_label)  # full width; the label centres its text
+        layout.addStretch(1)
+        self._summary: list[str] = []
 
     # -- Public state API --
 
-    def set_loaded(self, summary_lines: list[str]) -> None:
-        """Replace the prompt text and switch to the loaded visual style."""
-        self._prompt_label.setText("\n".join(summary_lines))
+    def set_loaded(self, summary_lines: list[str], tooltip: str = "") -> None:
+        """Show *summary_lines* (the first, the name, elided to fit) in the loaded style."""
+        self._summary = list(summary_lines)
+        self._prompt_label.setToolTip(tooltip)
+        self._show_summary()
         self._set_loaded_property(True)
+
+    def summary_text(self) -> str:
+        """The lines as shown (the name possibly elided)."""
+        return self._prompt_label.text()
 
     def reset(self) -> None:
         """Restore the original prompt and clear the loaded visual style."""
+        self._summary = []
+        self._prompt_label.setToolTip("")
         self._prompt_label.setText(self._original_prompt)
         self._set_loaded_property(False)
+
+    def _show_summary(self) -> None:
+        if not self._summary:
+            return
+        width = max(self._prompt_label.width(), self.width() - 16, 40)
+        metrics = self._prompt_label.fontMetrics()
+        first = metrics.elidedText(self._summary[0], Qt.TextElideMode.ElideMiddle, width)
+        self._prompt_label.setText("\n".join([first, *self._summary[1:]]))
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._show_summary()
 
     def _set_loaded_property(self, value: bool) -> None:
         self.setProperty("loaded", value)
@@ -141,13 +169,13 @@ class _DropZone(QWidget):
     def accept_path(self, path: str) -> None:
         """Emit *path* if this zone takes it (a dropped file selects its folder)."""
         if self._mode == "folder":
-            if os.path.isdir(path):
+            if os.path.isdir(os_path(path)):
                 self.path_selected.emit(path)
-            elif os.path.isfile(path):
+            elif os.path.isfile(os_path(path)):
                 # Fallback: use the file's parent directory
                 self.path_selected.emit(str(Path(path).parent))
         else:  # video or .dat recording
-            if os.path.isfile(path) and is_recording_file(path):
+            if os.path.isfile(os_path(path)) and is_recording_file(path):
                 self.path_selected.emit(path)
 
 
@@ -207,7 +235,8 @@ class ImageSource(QWidget):
         always clears any previously displayed video summary.
         """
         name = os.path.basename(folder.rstrip("/\\")) or folder
-        self._folder_zone.set_loaded([f"\u2713 {name}", f"{count} images"])
+        noun = "image" if count == 1 else "images"
+        self._folder_zone.set_loaded([f"\u2713 {name}", f"{count} {noun}"], tooltip=folder)
         self._video_zone.reset()
 
     def set_video_loaded(
@@ -216,6 +245,6 @@ class ImageSource(QWidget):
         """Show a loaded video in the video zone; reset the folder zone."""
         name = os.path.basename(video_path)
         self._video_zone.set_loaded(
-            [f"\u2713 {name}", f"{frames} fr  |  {format_rate(fps)}"],
+            [f"\u2713 {name}", f"{frames} fr  |  {format_rate(fps)}"], tooltip=video_path,
         )
         self._folder_zone.reset()

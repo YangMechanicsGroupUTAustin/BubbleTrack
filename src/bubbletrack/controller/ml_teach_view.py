@@ -14,10 +14,10 @@ from bubbletrack.ui.ml_images import (
     BACKGROUND_COLOUR, BUBBLE_COLOUR, OUTLINE_COLOUR, stroke_overlay, thumbnail, tint_image,
     view_grey,
 )
-from bubbletrack.ui.ml_teach_panel import THUMB_SIZE
+from bubbletrack.ui.ml_teach_panel import IN_REVIEW, THUMB_SIZE
 from bubbletrack.ui.overlay_legend import LegendEntry
 
-PREVIEW_TITLE = "ML assist: P(bubble)"
+PREVIEW_TITLE = "ML assist preview"
 # Colour key lines of the teaching pictures.
 PAINTED_BUBBLE_KEY = LegendEntry("painted: bubble", BUBBLE_COLOUR, "fill")
 PAINTED_BACKGROUND_KEY = LegendEntry("painted: background", BACKGROUND_COLOUR, "fill")
@@ -39,9 +39,9 @@ def describe(preview: FramePreview, protected: frozenset[int]) -> tuple[str, boo
         text = (f"Frame {frame + 1}: {SOURCE_TEXT[fit.ml_source]}, R = {fit.fit.radius:.1f} px "
                 f"(confidence {fit.fit.confidence:.2f})")
         if fit.ml_source == "ml":
-            text += " — goes to Review"
+            text += f" — {IN_REVIEW}"
         elif FLAG_DISAGREES in fit.fit.flags:
-            text += " — ML sees the bubble elsewhere (goes to Review)"
+            text += f" — ML sees the bubble elsewhere ({IN_REVIEW})"
     if frame in protected:
         text += " — your result here is kept"
     unfamiliar = FLAG_UNFAMILIAR in fit.fit.flags

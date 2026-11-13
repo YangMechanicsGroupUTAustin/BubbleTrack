@@ -1,6 +1,6 @@
 """ML assist through the real MainWindow + AppController offscreen: the Auto
 box's state line and button, the hint after a failing Auto run, the teaching
-mode (strokes, keys, wheel, undo, live preview, "Correct"), Apply, Fit All
+mode (strokes, keys, wheel, undo, live preview, "Looks right ✓"), Apply, Fit All
 while it is on, the switch, the run lock and sessions."""
 
 from __future__ import annotations
@@ -84,10 +84,10 @@ def _wait_model(qapp, controller):
 def test_auto_box_shows_state_switch_and_button(app):
     window, controller = app
     box = _box(window)
-    assert box.ml_button.text() == "ML assist…" and box.ml_button.isEnabled()
-    assert box.ml_state_label.text() == "Off" and not box.ml_switch.isEnabled()
+    assert box.ml_button.text() == "Teach…" and box.ml_button.isEnabled()
+    assert box.ml_switch.text() == "Off · not taught yet" and not box.ml_switch.isEnabled()
     _verify(controller, (3,))
-    assert box.ml_state_label.text() == "Off (1 example)" and box.ml_switch.isEnabled()
+    assert box.ml_switch.text() == "Off · 1 example" and box.ml_switch.isEnabled()
 
 
 def test_without_scikit_learn_the_button_is_disabled_with_a_reason(qapp, isolated_config, monkeypatch):
@@ -113,8 +113,8 @@ def test_hint_after_an_auto_run_where_many_frames_fail(app, qapp, monkeypatch):
     assert hint.isHidden()                     # fewer than HINT_MIN_FRAMES: quiet
     monkeypatch.setattr(ml_assist, "HINT_MIN_FRAMES", 2)
     _fit_all(qapp, controller)
-    assert not hint.isHidden() and hint.text().startswith("2 frames (22%) inside the bubble's lifetime")
-    assert "try ML assist" in window.header.status_text()
+    assert not hint.isHidden() and hint.text() == "22% of the bubble's frames have no result."
+    assert window.header.status_text().endswith("· ML assist can help")
     hint.open_clicked.emit()
     assert _teach(controller).active and hint.isHidden()
 
@@ -166,7 +166,7 @@ def test_live_preview_after_verified_frames(app, qapp):
     teach = _teach(controller)
     assert teach.panel.quality_text() == "2 verified frames, 0 strokes — ready"
     _wait_model(qapp, controller)
-    assert window.binary_panel._title_label.text() == "ML assist: P(bubble)"
+    assert window.binary_panel._title_label.text() == "ML assist preview"
     assert teach.panel.preview_text().startswith(f"Frame {controller._get_state().image_no + 1}: ")
     _wait(qapp, lambda: all(f in teach._previews for f in teach._suggested))
     for f in teach._suggested:
@@ -223,8 +223,9 @@ def test_apply_measures_unconfirmed_frames_and_lists_ml_outlines(app, qapp):
     assert any("ml_guided" in state.fit_flags[f] for f in (1, 2, 4))
     assert any("Outline from ML assist" in text for text in controller.review.panel.texts())
     assert state.ml_assist and _box(window).ml_switch.isChecked()
-    assert _box(window).ml_state_label.text().startswith("On (")
-    assert "ML assist:" in window.header.status_text()
+    assert _box(window).ml_switch.text().startswith("On · ")
+    assert window.header.status_text().startswith("Done with ML assist: ")
+    assert "ML assist:" in window.header.status_details()  # its counts, in the tooltip
 
 
 def test_fit_all_uses_ml_assist_while_on_and_plain_auto_when_off(app, qapp):
@@ -259,4 +260,4 @@ def test_session_keeps_ml_assist_and_a_new_source_clears_it(app, qapp, tmp_path)
     assert controller.load_session_file(str(path))
     state = controller._get_state()
     assert state.ml_assist and state.ml_examples.strokes == examples.strokes
-    assert _box(window).ml_switch.isChecked() and _box(window).ml_state_label.text().startswith("On")
+    assert _box(window).ml_switch.isChecked() and _box(window).ml_switch.text().startswith("On")

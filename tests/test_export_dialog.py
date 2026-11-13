@@ -134,6 +134,7 @@ class TestExportFromTheDialog:
         reports = []
         monkeypatch.setattr(ec, "generate_report", lambda path, *a, **k: reports.append(path))
         dialog = controller.export_ctrl.make_dialog()
+        dialog.confirm_values()  # "These are right"
         out = tmp_path / "run.mat"
         dialog.set_path(str(out))
         dialog.set_report_enabled(True)
