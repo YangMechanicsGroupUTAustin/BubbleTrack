@@ -4,9 +4,11 @@ The labels are the frames the user fixed:
 
 * a manual fit, or a result accepted / locked in review or on the chart:
   that circle is the right answer;
-* a frame accepted (locked) without a result, or whose result the user
-  deleted: the right answer is "no bubble here";
-* anything else is unlabelled: nobody checked it.
+* a frame accepted (locked) without a result: the right answer is "no
+  bubble here";
+* anything else is unlabelled: nobody checked it.  That includes a frame
+  whose result the user deleted: users delete wrong results, often with a
+  bubble present, so deleting alone says nothing about the right answer.
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ import math
 import numpy as np
 
 from bubbletrack.model.cases.schema import (
-    BY_ACCEPTED, BY_DELETED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, AppResult, Label,
+    BY_ACCEPTED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, AppResult, Label,
 )
 from bubbletrack.model.provenance import FitSource
 
@@ -59,8 +61,8 @@ def app_result(state, idx: int) -> AppResult:
     )
 
 
-def frame_label(result: AppResult, *, deleted: bool = False) -> Label:
-    """The verified answer behind *result*; *deleted*: the user deleted its result."""
+def frame_label(result: AppResult) -> Label:
+    """The verified answer behind *result* (unlabelled if nobody verified it)."""
     if result.radius is not None:
         if result.source == _MANUAL:
             return Label(LABEL_BUBBLE, result.radius, result.center, BY_MANUAL)
@@ -69,6 +71,4 @@ def frame_label(result: AppResult, *, deleted: bool = False) -> Label:
         return Label()
     if result.locked:
         return Label(LABEL_NO_BUBBLE, by=BY_ACCEPTED)
-    if deleted:
-        return Label(LABEL_NO_BUBBLE, by=BY_DELETED)
     return Label()

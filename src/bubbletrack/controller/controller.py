@@ -20,7 +20,7 @@ from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
 from bubbletrack.controller.pretune_controller import PretuneController
 from bubbletrack.controller.session_controller import SessionController
-from bubbletrack.event_bus import FRAMES_DELETED, RESULTS_CHANGED, EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
@@ -333,7 +333,6 @@ class AppController:
             )
 
         self.w.header.set_status(f"Deleted result for frame {idx + 1}", "#10b981")
-        self.bus.emit(FRAMES_DELETED, (idx,))
         self.bus.emit(RESULTS_CHANGED)
         logger.info("Deleted result for frame %d", idx + 1)
 
@@ -364,7 +363,6 @@ class AppController:
         text = f"Deleted frames {start + 1}-{end + 1}"
         self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
         logger.info("%s, %d locked kept", text, kept)
-        self.bus.emit(FRAMES_DELETED, tuple(targets))
         self.bus.emit(RESULTS_CHANGED)
 
     def _on_lock_range(self, start: int, end: int, *, locked: bool) -> None:

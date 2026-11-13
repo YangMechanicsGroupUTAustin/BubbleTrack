@@ -21,7 +21,7 @@ from bubbletrack.model.cases.scoring import (
 
 TOL = Tolerance()
 BUBBLE = Label(LABEL_BUBBLE, 50.0, (100.0, 100.0), "manual")
-NONE = Label(LABEL_NO_BUBBLE, by="deleted")
+NONE = Label(LABEL_NO_BUBBLE, by="accepted")
 
 
 class TestJudge:

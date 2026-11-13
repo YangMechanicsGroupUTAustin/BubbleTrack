@@ -4,8 +4,7 @@ Entry points: File > Export Hard Case... (the chart's brushed range if any,
 else the selected Review row, else the shown frame; the dialog lets the
 user change it) and "Export as hard case..." on a Review row's right-click
 menu.  The model layer (``model.cases``) builds and writes the bundle; this
-controller adds the dialogs and remembers which frames the user deleted,
-because a deleted result is the label "no bubble here".
+controller adds the dialogs.
 """
 
 from __future__ import annotations
@@ -20,7 +19,6 @@ from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.display_mixin import current_source
-from bubbletrack.event_bus import FRAMES_DELETED, RESULTS_CHANGED
 from bubbletrack.model import config, edge_pipeline
 from bubbletrack.model.cases.build import (
     SIZE_WARN_BYTES, CaseRequest, clip_range, default_file_name, estimate_bytes, make_case,
@@ -47,41 +45,15 @@ class HardCaseController:
     def __init__(self, window, app) -> None:
         self.w = window
         self._app = app
-        self._deleted: set[int] = set()  # frames whose result the user deleted ...
-        self._deleted_from = None  # ... in this result array (Clear / load: a new one)
         self._sample: tuple[tuple, np.ndarray] | None = None  # (source key, one raw frame)
-        bus = app.bus
-        bus.subscribe(FRAMES_DELETED, self._on_frames_deleted)
-        bus.subscribe(RESULTS_CHANGED, lambda *_: self._prune_deleted())
-        bus.subscribe("source_loaded", lambda *_: self._forget())
-        bus.subscribe("run_state_changed", self._on_run_state)
+        app.bus.subscribe("source_loaded", lambda *_: self._forget_sample())
+        app.bus.subscribe("run_state_changed", self._on_run_state)
         window.export_hard_case_requested.connect(self.on_export_requested)
         app.review.panel.export_case_requested.connect(
             lambda segment: self.ask_and_export(segment.start, segment.end))
 
-    # -- deleted frames ------------------------------------------------------ #
-
-    def deleted_frames(self) -> frozenset[int]:
-        """Frames the user deleted that still have no result."""
-        self._prune_deleted()
-        return frozenset(self._deleted)
-
-    def _on_frames_deleted(self, frames) -> None:
-        state = self._state()
-        if state.radius is not self._deleted_from:
-            self._forget()
-            self._deleted_from = state.radius
-        self._deleted.update(int(i) for i in frames)
-
-    def _prune_deleted(self) -> None:
-        radius = self._state().radius
-        if radius is not self._deleted_from:  # results were cleared or replaced
-            self._forget()
-            return
-        self._deleted = {i for i in self._deleted if i < len(radius) and not radius[i] > 0}
-
-    def _forget(self) -> None:
-        self._deleted, self._deleted_from, self._sample = set(), None, None
+    def _forget_sample(self) -> None:
+        self._sample = None
 
     # -- entry points ---------------------------------------------------------- #
 
@@ -129,7 +101,7 @@ class HardCaseController:
             start=values.start, end=values.end, note=values.note, reporter=values.reporter,
             reference_index=self._reference_index() if edge else None,
             tracking=edge and self.w.left_panel.pretune_tab.edge_box.tracking_enabled(),
-            max_radius=self._app._get_max_radius(), deleted=self.deleted_frames(),
+            max_radius=self._app._get_max_radius(),
         )
 
     def export(self, request: CaseRequest, path: str) -> tuple[HardCase, int] | None:
@@ -167,12 +139,11 @@ class HardCaseController:
         if ROLE_REFERENCE in roles:
             parts.append(f"reference frame {next(i for i, r in plan if r == ROLE_REFERENCE) + 1}")
         size = self._estimate(len(plan))
-        deleted = self.deleted_frames()
-        labels = sum(frame_label(app_result(state, i), deleted=i in deleted).is_labelled
+        labels = sum(frame_label(app_result(state, i)).is_labelled
                      for i, role in plan if role != ROLE_REFERENCE)
         text = " + ".join(parts) + (f" · up to {_megabytes(size)}" if size else "")
         if labels:
-            return text + f"\n{labels} frame(s) fixed by you (manual, accepted or deleted)"
+            return text + f"\n{labels} frame(s) fixed by you (manual fits or accepted)"
         return text + ("\nNo frame here is fixed yet: fix or accept the right frames first "
                        "so the case can be scored (it is still worth sending).")
 

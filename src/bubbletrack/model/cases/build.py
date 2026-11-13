@@ -11,7 +11,7 @@ from __future__ import annotations
 import os
 import re
 import uuid
-from collections.abc import Callable, Collection
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -45,7 +45,6 @@ class CaseRequest:
     reference_index: int | None = None  # Auto mode's reference frame (resolved)
     tracking: bool = False  # Auto mode: tracking after Fit All was on
     max_radius: float = float("inf")
-    deleted: Collection[int] = ()  # frames whose result the user deleted
 
 
 def clip_range(start: int, end: int, n_frames: int) -> tuple[int, int]:
@@ -134,13 +133,12 @@ def make_case(state, request: CaseRequest, frame_shape: tuple[int, ...], *,
     mode = state.detection_mode
     reference = _reference(request.reference_index, n) if mode == "edge" else None
     plan = plan_frames(start, end, n, reference=reference)
-    deleted = frozenset(int(i) for i in request.deleted)
     frames = []
     for idx, role in plan:
         result = app_result(state, idx)
         frames.append(CaseFrame(index=idx, role=role, file=frame_file_name(idx),
                                 source_file=_source_file(state, idx),
-                                result=result, label=frame_label(result, deleted=idx in deleted)))
+                                result=result, label=frame_label(result)))
     source = source_info(state, frame_shape)
     return HardCase(
         case_id=f"{_stem(source['name'])}_f{start + 1}-{end + 1}"

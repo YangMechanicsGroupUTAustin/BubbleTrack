@@ -27,19 +27,19 @@ def cases(tmp_path):
     edge = fit_all(folder_state(write_sequence(tmp_path / "edge", [0.0, 0.0, 20, 25, 30, 35]),
                                 roi=((31, 220), (61, 340)), mode="edge"), reference=0)
     assert edge.radius[1] < 0 and edge.fit_source[1] == FitSource.NONE
-    edge.fit_locked[2] = True  # accepted
+    edge.fit_locked[1:3] = True  # accepted: frame 2 "no bubble", frame 3 its result
     set_manual(edge, 3, float(edge.radius[3]) + 0.4, *edge.circle_fit_par[3])
-    _export(edge, folder / "edge_case.zip", 1, 3, reference=0, deleted={1})
+    _export(edge, folder / "edge_case.zip", 1, 3, reference=0)
     legacy = fit_all(folder_state(write_sequence(tmp_path / "legacy", [20, 25, 30, 35]), **LEGACY))
     legacy.fit_locked[1:3] = True
     _export(legacy, folder / "sub" / "legacy_case.zip", 1, 2)
     return folder
 
 
-def _export(state, path, start, end, *, reference=None, deleted=()):
+def _export(state, path, start, end, *, reference=None):
     path.parent.mkdir(parents=True, exist_ok=True)
     case = make_case(state, CaseRequest(start=start, end=end, reference_index=reference,
-                                        deleted=deleted, max_radius=max_radius(state)),
+                                        max_radius=max_radius(state)),
                      imread_unicode(state.images[0]).shape)
     write_case(path, case, lambda i: imread_unicode(state.images[i]))
 
