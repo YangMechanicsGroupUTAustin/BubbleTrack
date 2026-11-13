@@ -54,6 +54,7 @@ class FakeParams:
     polarity: str = "dark"
     seed: tuple | None = None
     prior: tuple | None = None
+    non_round: bool = False
 
 
 @pytest.fixture

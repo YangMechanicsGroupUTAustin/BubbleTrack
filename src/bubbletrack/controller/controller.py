@@ -297,6 +297,7 @@ class AppController:
             "temporal_refine": self._state.temporal_refine,
             "edge_definition": self._state.edge_definition,
             "edge_polarity": self._state.edge_polarity,
+            "bubble_non_round": self._state.bubble_non_round,
         })
         self.pretune_ctrl.refresh_edge_labels()
         self.settings.apply_classic()  # a classic method keeps its controls in view

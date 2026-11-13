@@ -80,6 +80,9 @@ class AppState:
     edge_polarity: str = "dark"  # "dark" bubble on bright background | "bright"
     reference_frame: int | None = None  # bubble-free frame index; None = auto-select
     edge_seed: tuple[float, float] | None = None  # (row, col) 1-based, picks the bubble
+    # The radius definition ("Bubble may be non-round" in Advanced): False = the robust
+    # circle through the wall (default); True = the area-equivalent radius of the outline.
+    bubble_non_round: bool = False
 
     # ML assist (a helper of Auto, ``model.teach``), per recording: cleared when
     # another source is loaded, kept in sessions.  On: Fit All measures with it.

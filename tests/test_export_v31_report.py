@@ -34,6 +34,9 @@ class TestParameters:
         params = build_report_parameters(_state(detection_mode="edge"))
         assert params["Detection Mode"] == "Auto (reference frame)"  # user-facing name of "edge"
         assert params["Radius Definition"] == (
+            "circle through the bubble wall (robust fit, 50% steep edge)")
+        params = build_report_parameters(_state(detection_mode="edge", bubble_non_round=True))
+        assert params["Radius Definition"] == (
             "area-equivalent sqrt(A/pi) of the 50% iso-contour")
 
     def test_area_mode(self):
@@ -87,7 +90,7 @@ def plain_pdf(monkeypatch):
 
 
 def test_report_prints_the_new_sections(tmp_path, plain_pdf):
-    state = _state(detection_mode="edge")
+    state = _state(detection_mode="edge", bubble_non_round=True)
     state.fit_confidence[2:] = 0.8
     state.fit_locked[4] = True
     out = tmp_path / "report.pdf"

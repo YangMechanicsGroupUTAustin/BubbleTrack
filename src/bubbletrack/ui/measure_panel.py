@@ -40,7 +40,7 @@ METHOD_TIP = (
 # Preset keys that set_filter_params understands (besides threshold etc.).
 _FILTER_KEYS = (
     "gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius", "detection_mode",
-    "edge_polarity", "area_max_regions", "gradient_boundary", "temporal_refine",
+    "edge_polarity", "bubble_non_round", "area_max_regions", "gradient_boundary", "temporal_refine",
 )
 
 
@@ -133,6 +133,7 @@ class MeasurePanel(QWidget):
             "detection_mode": self.method(),
             "edge_definition": self.edge_box.edge_definition(),
             "edge_polarity": self.edge_box.polarity(),
+            "bubble_non_round": self.edge_box.non_round(),
         }
 
     def set_filter_params(self, params: dict) -> None:
@@ -142,7 +143,8 @@ class MeasurePanel(QWidget):
         self._method_combo.setCurrentIndex(max(index, 0))
         self._method_combo.blockSignals(False)
         self.edge_box.set_options(params.get("edge_definition", "steep"),
-                                  params.get("edge_polarity", "dark"))
+                                  params.get("edge_polarity", "dark"),
+                                  bool(params.get("bubble_non_round", False)))
         self.classic.set_filter_values(params)
         self._apply_visibility()
 

@@ -12,13 +12,17 @@ from pathlib import Path
 
 import numpy as np
 
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource
 from bubbletrack.model.suggestion import from_json as suggestions_from_json
 from bubbletrack.model.suggestion import to_json as suggestion_json
 
 logger = logging.getLogger(__name__)
 
-SESSION_VERSION = "3.1"  # 3.1 adds circle_xy + fit_source; 3.0 files still load
+# 3.1 adds circle_xy + fit_source, 3.2 bubble_non_round (the radius definition); 3.0 files still load
+SESSION_VERSION = "3.2"
 MIN_SUPPORTED_VERSION = (3, 0)
+_ENGINE_SOURCES = frozenset({FitSource.AUTO, FitSource.REFIT, FitSource.NEIGHBOR, FitSource.TRACKED,
+                             FitSource.GUIDED, FitSource.ML})
 
 
 def _parse_version(value) -> tuple[int, ...]:
@@ -72,6 +76,7 @@ def session_parameters(state) -> dict:
         "temporal_refine": state.temporal_refine,
         "edge_definition": state.edge_definition,
         "edge_polarity": state.edge_polarity,
+        "bubble_non_round": bool(getattr(state, "bubble_non_round", False)),
         "reference_frame": state.reference_frame,
         "edge_seed": list(state.edge_seed) if state.edge_seed is not None else None,
         "um2px": state.um2px,
@@ -226,6 +231,9 @@ def load_session(filepath: str) -> dict:
     if "ml_assist" in data:
         data["ml_assist"] = data["ml_assist"] is True and data.get("ml_examples") is not None
 
+    if "bubble_non_round" not in data:
+        _legacy_radius_definition(data)
+
     # Reconstruct tuples from lists
     if "gridx" in data and isinstance(data["gridx"], list):
         data["gridx"] = tuple(data["gridx"])
@@ -236,3 +244,25 @@ def load_session(filepath: str) -> dict:
 
     logger.info("Session loaded from %s (version %s)", filepath, version)
     return data
+
+
+def _legacy_radius_definition(data: dict) -> None:
+    """A session saved before the radius definition was a setting (< 3.2): Auto measured
+    the area-equivalent radius then.  It loads with "Bubble may be non-round" on and its
+    engine results marked so (``area_radius``), as that mode would store them; frames whose
+    radius was the circle fit (``circle_fallback``) and manual fits stay circles."""
+    if data.get("detection_mode") != "edge":
+        return
+    data["bubble_non_round"] = True
+    flags, radius = data.get("fit_flags"), data.get("radius")
+    if flags is None or radius is None or len(flags) != len(radius):
+        return
+    sources = data.get("fit_source")
+    if sources is None or len(sources) != len(radius):
+        sources = [FitSource.AUTO] * len(radius)
+    data["fit_flags"] = [
+        frozenset(f) | {AREA_RADIUS_FLAG}
+        if radius[i] > 0 and int(sources[i]) in _ENGINE_SOURCES and "circle_fallback" not in f
+        else frozenset(f)
+        for i, f in enumerate(flags)
+    ]

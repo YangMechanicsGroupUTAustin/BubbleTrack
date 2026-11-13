@@ -9,7 +9,10 @@ E  candidate selection;  C  sub-pixel edges along ~2*pi*R rays;
 D  robust circle fit (``r_circle``) and the outer extent;
 G  the bubble as a region: outer iso-contour at the median ray-edge level,
    holes filled, thin necks split, the part hidden by the ROI border completed
-   with the circle fit, fragments counted;  F  confidence, flags, provenance.
+   with the circle fit, fragments counted;  F  the radius under the user's
+   definition (``definition``: the circle, or the area when the bubble may be
+   non-round) with its independent check (``shape_check``), confidence, flags,
+   provenance.
 """
 
 from __future__ import annotations
@@ -21,17 +24,11 @@ import numpy as np
 
 from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge.config import DEFAULT_CONFIG, EdgeConfig
+from bubbletrack.model.edge.definition import FrameStats, measure
 from bubbletrack.model.edge.fit import CircleFit, fit_circle
 from bubbletrack.model.edge.normalize import GrayFrame, Normalized, normalize_roi, saturation_mask, to_gray_frame
 from bubbletrack.model.edge.outline import Outline, RayPoints, background_noise, measure_outline
-from bubbletrack.model.edge.quality import (
-    FitStats,
-    confidence,
-    confidence_terms,
-    fit_stats,
-    is_non_circular,
-    measurement_flags,
-)
+from bubbletrack.model.edge.quality import FitStats, confidence, fit_stats, measurement_flags
 from bubbletrack.model.edge.rays import (
     RayEdges,
     edge_image,
@@ -39,12 +36,14 @@ from bubbletrack.model.edge.rays import (
     outer_image,
     ray_edges,
     refine_window,
+    without_points_near,
 )
 from bubbletrack.model.edge.region import own_cell
 from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
+from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.1.1"
+ENGINE_VERSION = "edge-1.2.0"
 
 __all__ = ["ENGINE_VERSION", "EdgeParams", "EdgeResult", "detect_edge", "detect_edge_with_config"]
 
@@ -84,8 +83,9 @@ def detect_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     Returns
     -------
     EdgeResult
-        ``radius`` is the area-equivalent radius of the bubble region (NaN when
-        nothing was found; ``flags`` then names why).
+        ``radius`` is the robust circle through the bubble wall, or with
+        ``params.non_round`` the area-equivalent radius of the bubble region
+        (NaN when nothing was found; ``flags`` then names why).
 
     Raises
     ------
@@ -134,7 +134,7 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
 
     rng = np.random.default_rng(config.fit.rng_seed)
     e = edge_image(image, exclude, coarse.smooth_sigma, config.rays)
-    edges, steep_fit = _steep_edges(e, norm.invalid, coarse, sel, params, config, rng)
+    edges, steep_fit = _steep_edges(e, norm.invalid, exclude, coarse, sel, params, config, rng)
     prov.update(edges=f"rays(choice={params.edge_choice},level={params.level:g},"
                       f"passes={1 + config.rays.refine_passes})",
                 n_rays=edges.n_rays, n_edges=len(edges.points), n_clipped=edges.n_clipped,
@@ -158,12 +158,13 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
         return _fail(coarse.mask, flags, prov, "outer_undefined", params, watch)
     outer_radius = _outer_radius(outer, outer_line)
     shoulder = _shoulder(steep_line, outer_line, steep, outer_radius)
-    region = chosen.region
-    non_circular = is_non_circular(chosen.stats.fit.radius, region.radius, region.solidity, config.quality)
-    flags |= measurement_flags(region=region, non_circular=non_circular, multi_fraction=edges.multi_fraction,
+    flags |= measurement_flags(region=chosen.region, multi_fraction=edges.multi_fraction,
                                runner_up=sel.runner_up, contrast=coarse.contrast, noise=coarse.noise,
                                saturated=bool(sat.any()), shoulder_width=shoulder, cfg=config.quality)
-    return _build(chosen, outer_radius, shoulder, edges, coarse, sel, flags, prov, origin, params, config, watch)
+    check = circle_check(chosen.region, chosen.stats.fit.radius, exclude,
+                         config.quality.clipped_check_hidden)
+    return _build(chosen, check, outer_radius, shoulder, edges, coarse, sel, flags, prov, origin, params,
+                  config, watch)
 
 
 def _parse_roi(gridx, gridy, shape: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int], bool]:
@@ -221,13 +222,15 @@ def _normalize(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slice, slice]
     return norm, sat, image, sat_excl | norm.invalid
 
 
-def _steep_edges(e: np.ndarray, invalid: np.ndarray, coarse: CoarseMask, sel: Selection,
-                 params: EdgeParams, cfg: EdgeConfig,
+def _steep_edges(e: np.ndarray, invalid: np.ndarray, exclude: np.ndarray, coarse: CoarseMask,
+                 sel: Selection, params: EdgeParams, cfg: EdgeConfig,
                  rng: np.random.Generator) -> tuple[RayEdges, CircleFit | None]:
     """Ray passes around the candidate circle, each re-centred on the previous fit.
 
-    The reported fit is a final robust fit of the last pass's points (a fresh
-    RANSAC draw), exactly as in the prototype.
+    Only genuine wall points count: rays stop at *invalid* pixels and the ROI
+    border, and a point next to *exclude* pixels (a step at saturated glare) is
+    dropped.  The reported fit is a final robust fit of the last pass's points
+    (a fresh RANSAC draw), exactly as in the prototype.
     """
     circle, window = sel.best.circle, None
     edges = None
@@ -235,6 +238,7 @@ def _steep_edges(e: np.ndarray, invalid: np.ndarray, coarse: CoarseMask, sel: Se
         edges = ray_edges(e, circle, coarse.contrast, coarse.noise, cfg.rays,
                           edge_choice=params.edge_choice, level=params.level,
                           window=window, invalid=invalid)
+        edges = without_points_near(edges, exclude, cfg.region.invalid_touch_px)
         if len(edges.points) < cfg.quality.min_edge_points:
             return edges, None
         fit = fit_circle(edges.points, rng, cfg.fit)
@@ -323,7 +327,12 @@ def _describe(prov: dict, steep: Outline, outer: tuple[FitStats, RayPoints] | No
                 max_gap_deg=steep.stats.max_gap_deg, outer=outer_desc,
                 region={"level": round(steep.level, 4), "anchor": reg.anchor, "lobes": reg.n_lobes,
                         "clipped": reg.clipped, "hidden_fraction": round(reg.hidden_fraction, 4),
-                        "support": round(steep.evidence.support, 3)})
+                        "hidden_arc": round(reg.hidden_arc, 4), "support": round(steep.evidence.support, 3)})
+
+
+def _rounded(value: float, digits: int) -> float | None:
+    """A provenance number (None when not finite: provenance stays strict JSON)."""
+    return round(float(value), digits) if np.isfinite(value) else None
 
 
 def _empty_result(mask: np.ndarray, flags: set[str], prov: dict, gate: float) -> EdgeResult:
@@ -341,34 +350,28 @@ def _fail(mask: np.ndarray, flags: set[str], prov: dict, reason: str, params: Ed
     return _empty_result(mask, flags | {reason}, prov, params.confidence_gate)
 
 
-def _build(line: Outline, outer_radius: float, shoulder: float, edges: RayEdges, coarse: CoarseMask,
-           sel: Selection, flags: set[str], prov: dict, origin: tuple[int, int], params: EdgeParams,
-           config: EdgeConfig, watch: _Stopwatch) -> EdgeResult:
-    """Assemble the result of the chosen definition (shifted to 1-based full-image coords).
+def _build(line: Outline, check: CircleCheck, outer_radius: float, shoulder: float, edges: RayEdges,
+           coarse: CoarseMask, sel: Selection, flags: set[str], prov: dict, origin: tuple[int, int],
+           params: EdgeParams, config: EdgeConfig, watch: _Stopwatch) -> EdgeResult:
+    """Assemble the result of the chosen edge and radius definitions (1-based full-image coords).
 
-    A frame below the confidence gate reports the robust circle as its best guess
-    (``radius_kind == "circle"``, flag ``circle_fallback``): its region could not be
-    trusted, and on such frames (transparent or low-contrast bubbles, broken walls)
-    the circle through the edge points is the better estimate.  ``r_area`` keeps
-    the region's value.
+    A frame below the confidence gate keeps its definition, so its guess is what
+    Accept would store: the circle (default), or the area of the drawn outline.
     """
     region, stats = line.region, line.stats
-    terms = confidence_terms(region, line.evidence, line.sigma_r, coarse.contrast, coarse.noise, sel.runner_up,
-                             edges.multi_fraction, config.quality)
-    prov["confidence_terms"] = {k: round(v, 3) for k, v in terms.items()}
-    conf = confidence(terms)
+    frame = FrameStats(coarse.contrast, coarse.noise, sel.runner_up, edges.multi_fraction)
+    m = measure(line, check, frame, config.quality, non_round=params.non_round)
+    prov["confidence_terms"] = {k: round(v, 3) for k, v in m.terms.items()}
+    prov["circle_check"] = {"method": check.method, "r_estimate": _rounded(check.r_estimate, 3),
+                            "off": _rounded(m.check, 4)}
+    conf = confidence(m.terms)
     watch.stop()
     shift = np.array(origin, float)
-    fallback = conf < params.confidence_gate
-    rc, cc = (stats.fit.rc, stats.fit.cc) if region.clipped or fallback else region.visible.centroid
+    rc, cc = m.centre
     centroid = region.centroid
-    radius, sigma, kind = region.radius, line.sigma_r, "area+circle_completion" if region.completed else "area"
-    if fallback:
-        radius, sigma, kind = float(stats.fit.radius), stats.fit.radius_sigma, "circle"
-        flags = flags | {"circle_fallback"}
-    return EdgeResult(radius=radius, rc=float(rc + shift[0]), cc=float(cc + shift[1]),
-                      radius_sigma=sigma, edge_xy=region.edge + shift,
-                      confidence=conf, flags=frozenset(flags), r_area=region.radius,
+    return EdgeResult(radius=m.radius, rc=float(rc + shift[0]), cc=float(cc + shift[1]),
+                      radius_sigma=m.sigma, edge_xy=region.edge + shift,
+                      confidence=conf, flags=frozenset(flags | m.flags), r_area=region.radius,
                       outer_radius=float(outer_radius),
                       shoulder_width=float(shoulder), arc_coverage=stats.arc_coverage,
                       inlier_fraction=stats.inlier_fraction, mask=region.mask, provenance=prov,
@@ -376,5 +379,5 @@ def _build(line: Outline, outer_radius: float, shoulder: float, edges: RayEdges,
                       area_px=float(region.area), perimeter_px=float(region.perimeter),
                       circularity=region.circularity, solidity=region.solidity,
                       fragment_count=region.fragment_count, fragment_area_px=region.fragment_area,
-                      contour=region.contour + shift, radius_kind=kind,
+                      contour=region.contour + shift, radius_kind=m.kind,
                       centroid=(float(centroid[0] + shift[0]), float(centroid[1] + shift[1])))

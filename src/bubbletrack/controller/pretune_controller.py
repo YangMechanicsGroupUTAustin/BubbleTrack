@@ -8,8 +8,8 @@ import numpy as np
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
-    EQUAL_AREA_CIRCLE,
     FITTED_CIRCLE,
+    circle_legend,
     current_source,
     display_frame,
     redraw_original,
@@ -76,6 +76,8 @@ class PretuneController(BaseController):
     def on_filters_changed(self) -> None:
         p = self.w.left_panel.measure_panel.get_filter_params()
         method_changed = p["detection_mode"] != self.state.detection_mode
+        non_round = bool(p.get("bubble_non_round", self.state.bubble_non_round))
+        definition_changed = non_round != self.state.bubble_non_round
         self._update(
             gaussian_sigma=p["gaussian_sigma"],
             clahe_clip=p["clahe_clip"],
@@ -87,7 +89,10 @@ class PretuneController(BaseController):
             temporal_refine=p["temporal_refine"],
             edge_definition=p["edge_definition"],
             edge_polarity=p["edge_polarity"],
+            bubble_non_round=non_round,
         )
+        if definition_changed:
+            self.edge_setup.announce_definition()
         self.refresh_edge_labels()
         self._invalidate_binary_cache()
         if self._cache is not None:
@@ -218,7 +223,7 @@ class PretuneController(BaseController):
         redraw_original(self.state, self.w)
         if fit.radius > 0:
             self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1",
-                                              legend=EQUAL_AREA_CIRCLE)
+                                              legend=circle_legend(self.state, idx))
             self.w.original_panel.draw_fit_outline(fit.edge_xy, "#ef4444")
         else:  # rejected: its guess, if any, dashed
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)

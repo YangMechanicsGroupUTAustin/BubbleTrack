@@ -19,7 +19,7 @@ from bubbletrack.model.detection import detect_bubble_with_mode, measure_detecti
 from bubbletrack.model.export import locate_rmax
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.chart_legend import CONFIDENCE, FIT_QUALITY
@@ -244,8 +244,8 @@ ENGINE_VIEW_TIP = ("What Auto measures: this frame \u00f7 the reference frame (n
                    "blotches or texture mean it does not (moved sample, changed lighting).")
 _VIEW_WHITE = 1.25  # view value shown as white: background (1.0) is light grey
 MASK_TINT_KEY = LegendEntry("mask", PAINT_BUBBLE_COLOUR, "fill")  # the overlay view's green tint
-EQUAL_AREA_CIRCLE = "equal-area circle"  # Auto: R = sqrt(area / pi) of the outline
-FITTED_CIRCLE = "fitted circle"  # classic modes and clicked points: a circle fit
+EQUAL_AREA_CIRCLE = "equal-area circle"  # Auto, "Bubble may be non-round": R = sqrt(area / pi)
+FITTED_CIRCLE = "fitted circle"  # Auto's default, classic modes and clicked points: a circle fit
 
 
 def engine_view_or_none(state: AppState, idx: int) -> np.ndarray | None:
@@ -281,9 +281,10 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
 
 
 def circle_legend(state: AppState, idx: int) -> str:
-    """What frame *idx*'s drawn circle is: Auto's equal-area circle or a fitted one."""
-    manual = state.fit_source is not None and state.fit_source[idx] == FitSource.MANUAL
-    return EQUAL_AREA_CIRCLE if state.detection_mode == "edge" and not manual else FITTED_CIRCLE
+    """What frame *idx*'s drawn circle is: the equal-area circle of an outline measured with
+    "Bubble may be non-round" (flag ``area_radius``), else a fitted circle."""
+    flags = state.fit_flags[idx] if state.fit_flags is not None and idx < len(state.fit_flags) else ()
+    return EQUAL_AREA_CIRCLE if AREA_RADIUS_FLAG in (flags or ()) else FITTED_CIRCLE
 
 
 def draw_fit_overlay(state: AppState, panel, idx: int) -> None:

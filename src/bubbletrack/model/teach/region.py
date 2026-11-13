@@ -3,8 +3,10 @@
 Steps: smooth P lightly, threshold at ``level``, fill holes, choose the blob
 (the one holding the prior / seed, else the nearest, else the biggest
 confident one), score it (:mod:`.confidence`), optionally move its outline to
-the half-contrast wall of the engine view (:mod:`.refine`), and complete a
-region cut by the ROI border with its circle fit.
+the half-contrast wall of the engine view (:mod:`.refine`), and measure it as
+Auto does: by default the robust circle through its outline (the points on the
+ROI border left out); with "Bubble may be non-round" its area-equivalent radius,
+a region cut by the ROI border completed with its circle fit.
 """
 
 from __future__ import annotations
@@ -17,6 +19,8 @@ from scipy import ndimage
 from skimage.measure import find_contours
 
 from bubbletrack.model.circle_fit import circle_fit_taubin
+from bubbletrack.model.edge.config import FitConfig
+from bubbletrack.model.edge.fit import fit_circle
 from bubbletrack.model.teach.config import MeasureConfig
 from bubbletrack.model.teach.confidence import region_confidence, region_terms
 from bubbletrack.model.teach.refine import refine_outline
@@ -31,7 +35,8 @@ class MLRegion:
     """ML's bubble region.  Coordinates are 1-based full-image ``(row, col)``."""
 
     radius: float
-    """Area-equivalent radius (completed with the circle fit where the ROI border cuts it)."""
+    """The circle through the outline (default), or the area-equivalent radius completed with the
+    circle fit where the ROI border cuts it ("Bubble may be non-round", see ``r_area``)."""
     rc: float
     cc: float
     confidence: float
@@ -43,6 +48,14 @@ class MLRegion:
     terms: dict = field(default_factory=dict)
     contour: np.ndarray = field(default_factory=_empty_points)
     """(N, 2) closed outline of the visible region."""
+    r_area: float = float("nan")
+    """Area-equivalent radius (circle-completed when clipped), whatever ``radius`` is."""
+
+    @property
+    def area(self) -> float:
+        """Area (px^2) behind ``r_area``; falls back to ``radius``'s disk."""
+        r = self.r_area if math.isfinite(self.r_area) else self.radius
+        return math.pi * r ** 2
 
 
 def _local(point, origin: tuple[int, int]):
@@ -94,7 +107,7 @@ def _hidden_area(rc: float, cc: float, r: float, shape: tuple[int, int]) -> floa
 
 
 def _measure(mask: np.ndarray) -> tuple[float, float, float, bool]:
-    """(radius, rc, cc, clipped), 0-based ROI coordinates."""
+    """Area definition: (radius, rc, cc, clipped), 0-based ROI coordinates."""
     area = float(mask.sum())
     rc, cc = ndimage.center_of_mass(mask)
     radius = math.sqrt(area / math.pi)
@@ -112,6 +125,33 @@ def _measure(mask: np.ndarray) -> tuple[float, float, float, bool]:
     return math.sqrt(total / math.pi), float(fit_rc), float(fit_cc), True
 
 
+_MIN_WALL_POINTS = 10
+_FIT = FitConfig()
+
+
+def _wall_points(mask: np.ndarray) -> np.ndarray:
+    """Outline points of *mask* (0-based) that lie on its wall, not along the ROI border."""
+    edge = [c for c in find_contours(np.pad(mask.astype(np.float32), 1), 0.5) if len(c) >= 3]
+    if not edge:
+        return np.empty((0, 2))
+    pts = np.concatenate(edge) - 1.0
+    h, w = mask.shape
+    inside = (pts[:, 0] > 0) & (pts[:, 0] < h - 1) & (pts[:, 1] > 0) & (pts[:, 1] < w - 1)
+    return pts[inside]
+
+
+def _measure_circle(mask: np.ndarray, area: tuple[float, float, float, bool]) -> tuple[float, float, float]:
+    """Circle definition: (radius, rc, cc) of the robust circle through the wall points, or the
+    area values *area* when there are too few of them or the fit fails."""
+    pts = _wall_points(mask)
+    if len(pts) < _MIN_WALL_POINTS:
+        return area[:3]
+    fit = fit_circle(pts, np.random.default_rng(_FIT.rng_seed), _FIT)
+    if fit is None or not (np.isfinite(fit.radius) and 0 < fit.radius < 3 * area[0] + 10):
+        return area[:3]
+    return float(fit.radius), float(fit.rc), float(fit.cc)
+
+
 def _outline(mask: np.ndarray) -> np.ndarray:
     padded = np.pad(mask.astype(np.float32), 1)
     contours = find_contours(padded, 0.5)
@@ -119,7 +159,8 @@ def _outline(mask: np.ndarray) -> np.ndarray:
 
 
 def ml_region(prob: np.ndarray, view: np.ndarray | None = None, *, origin: tuple[int, int] = (1, 1),
-              seed=None, prior=None, config: MeasureConfig = MeasureConfig()) -> MLRegion | None:
+              seed=None, prior=None, config: MeasureConfig = MeasureConfig(),
+              non_round: bool = False) -> MLRegion | None:
     """ML's bubble region on the ROI probability map *prob* (None when there is none).
 
     Parameters
@@ -135,6 +176,9 @@ def ml_region(prob: np.ndarray, view: np.ndarray | None = None, *, origin: tuple
         The user's click (1-based full image): the blob holding it, else the nearest.
     prior : (rc, cc, R), optional
         Expected circle (1-based): the blob holding its centre, else the most similar.
+    non_round : bool
+        The radius definition, as Auto's: False = the circle through the outline,
+        True = its area-equivalent radius.
     """
     p = np.asarray(prob, np.float32)
     ps = ndimage.gaussian_filter(p, config.smooth_sigma) if config.smooth_sigma > 0 else p
@@ -158,7 +202,8 @@ def ml_region(prob: np.ndarray, view: np.ndarray | None = None, *, origin: tuple
         if new is not None:
             mask, refined = new.mask, True
             terms.update(new.diagnostics)
-    radius, rc, cc, clipped = _measure(mask)
+    area = _measure(mask)
+    radius, rc, cc = area[:3] if non_round else _measure_circle(mask, area)
     return MLRegion(radius=radius, rc=rc + origin[0], cc=cc + origin[1], confidence=region_confidence(terms),
-                    mask=mask, clipped=clipped, refined=refined, terms=terms,
-                    contour=_outline(mask) + np.array(origin, float))
+                    mask=mask, clipped=area[3], refined=refined, terms=terms,
+                    contour=_outline(mask) + np.array(origin, float), r_area=area[0])

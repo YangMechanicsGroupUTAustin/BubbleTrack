@@ -154,10 +154,13 @@ def test_no_bubble_frame_has_low_confidence(scene, use_ref):
 
 
 def test_a_frame_below_the_gate_reports_the_circle():
-    """An untrusted region (no-bubble texture here) falls back to the circle fit, still rejected."""
+    """An untrusted region (no-bubble texture here) reports the circle fit (the default
+    definition, below the gate too), still rejected.  Until edge-1.1.1 the area radius fell back
+    to the circle here (flag ``circle_fallback``); with "Bubble may be non-round" a guess now keeps
+    the area of its outline (``test_edge_non_round``)."""
     res = measure(Scene(static=1), ref=False)
     assert np.isfinite(res.radius) and not res.accepted
-    assert res.radius_kind == "circle" and "circle_fallback" in res.flags
+    assert res.radius_kind == "circle" and "circle_fallback" not in res.flags
     assert res.radius == res.r_circle and np.isfinite(res.r_area)
 
 
@@ -169,7 +172,7 @@ def test_reference_free_mode_is_flagged():
 
 
 def test_clean_bubble_has_no_shoulder():
-    res = measure(BASE)
+    res = measure(BASE, non_round=True)
     assert res.accepted and "shoulder" not in res.flags
     assert 1.0 < res.shoulder_width < 3.0
     assert res.outer_radius == pytest.approx(res.r_circle + res.shoulder_width)   # steep mode: circle fits
@@ -186,7 +189,8 @@ def test_two_step_edge_raises_the_shoulder_flag():
 def test_outer_definition_reports_the_outer_extent():
     """Outer mode measures the region at the outer-extent level (its area radius); steep mode
     reports B from the circle fit of the outer-extent points.  On a round bubble they agree."""
-    steep, outer = measure(HALO6), measure(HALO6, edge_definition="outer")
+    steep = measure(HALO6, non_round=True)
+    outer = measure(HALO6, edge_definition="outer", non_round=True)
     assert outer.radius == outer.outer_radius == pytest.approx(steep.outer_radius, abs=0.1)
     assert outer.shoulder_width == pytest.approx(steep.shoulder_width, abs=0.1)
     assert outer.provenance["steep_radius"] == pytest.approx(steep.radius, abs=1e-9)
@@ -201,7 +205,7 @@ def test_edge_choice_inner_takes_the_ring_nearest_the_core():
 
 
 def test_clipped_bubble_is_completed_with_its_circle():
-    res = measure(CLIPPED)
+    res = measure(CLIPPED, non_round=True)
     assert {"clipped", "clipped_completed"} <= res.flags and res.radius_kind == "area+circle_completion"
     assert res.r_area == res.radius == pytest.approx(res.r_circle, rel=0.005)
     assert rel_err(res, CLIPPED) < 0.01
@@ -239,7 +243,8 @@ def test_result_carries_mask_and_provenance():
     for key in ("normalize", "segment", "select", "edges", "fit", "outer", "params", "fallbacks"):
         assert key in prov
     assert set(prov["confidence_terms"]) == {"support", "precision", "completion", "snr", "selection",
-                                             "edge_unique"}
+                                             "edge_unique", "roundness"}
+    assert prov["circle_check"]["method"] == "area" and prov["circle_check"]["off"] < 0.01
     assert {"normalize", "segment_select", "edges_fit", "outer", "region", "total"} <= set(prov["timings_ms"])
     json.dumps(prov)                                         # storable in sessions / exports as is
     assert 0 < res.radius_sigma < 0.1 and 0.9 < res.arc_coverage <= 1 and res.inlier_fraction > 0.9

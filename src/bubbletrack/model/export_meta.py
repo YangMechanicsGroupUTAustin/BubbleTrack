@@ -29,28 +29,34 @@ META_SHEET_TITLE = "Metadata"
 META_SIDECAR_SUFFIX = ".meta.json"
 """Suffix of the JSON file written next to an exported CSV (``run.meta.json``)."""
 
-# What the exported ``Radius`` measures, per detection mode.  In Edge mode
-# the primary radius is the area-equivalent radius of the 50 % contour; the
-# circle-fit radius is exported separately as the ``r_circle`` metric.
+# What the exported ``Radius`` measures, per detection mode.  In Edge (Auto)
+# mode it follows "Bubble may be non-round": by default the robust circle
+# through the 50 % wall (the area-equivalent radius is exported as the
+# ``area_px`` metric), with the option the area-equivalent radius of the
+# outline (the circle as the ``r_circle`` metric).  Per frame, the flag
+# ``area_radius`` marks a radius measured by area.
 _CIRCLE_FIT = "circle fit (Taubin)"
-_RADIUS_DEFINITIONS: dict[tuple[str, str | None], str] = {
-    ("area", None): "area-equivalent (dark regions)",
-    ("edge", "steep"): "area-equivalent sqrt(A/pi) of the 50% iso-contour",
-    ("edge", "outer"): "area-equivalent sqrt(A/pi) of the outer extent contour (Edge definition B)",
+_RADIUS_DEFINITIONS: dict[tuple[str, str | None, bool], str] = {
+    ("area", None, False): "area-equivalent (dark regions)",
+    ("edge", "steep", False): "circle through the bubble wall (robust fit, 50% steep edge)",
+    ("edge", "outer", False): "circle through the outer extent of the wall (robust fit, Edge definition B)",
+    ("edge", "steep", True): "area-equivalent sqrt(A/pi) of the 50% iso-contour",
+    ("edge", "outer", True): "area-equivalent sqrt(A/pi) of the outer extent contour (Edge definition B)",
 }
 
 
-def radius_definition(detection_mode: str, edge_definition: str = "steep") -> str:
+def radius_definition(detection_mode: str, edge_definition: str = "steep",
+                      non_round: bool = False) -> str:
     """Describe what the exported radius measures for *detection_mode*.
 
-    *edge_definition* ("steep" or "outer") only matters in Edge mode.
-    Manual fixes are always circle fits; the per-frame ``Source`` says
-    which frames those are.
+    *edge_definition* ("steep" or "outer") and *non_round* ("Bubble may be
+    non-round") only matter in Edge mode.  Manual fixes are always circle
+    fits; the per-frame ``Source`` says which frames those are.
     """
     if detection_mode == "edge":
-        key = ("edge", edge_definition if edge_definition == "outer" else "steep")
+        key = ("edge", edge_definition if edge_definition == "outer" else "steep", bool(non_round))
     else:
-        key = (detection_mode, None)
+        key = (detection_mode, None, False)
     return _RADIUS_DEFINITIONS.get(key, _CIRCLE_FIT)
 
 
@@ -182,9 +188,11 @@ def build_export_metadata(
         "fps": fps,
         "um2px": um2px,
         "rmax_fit_length": rmax_fit_length,
-        "radius_definition": radius_definition(state.detection_mode, state.edge_definition),
+        "radius_definition": radius_definition(state.detection_mode, state.edge_definition,
+                                               getattr(state, "bubble_non_round", False)),
         "edge_definition": state.edge_definition,
         "edge_polarity": state.edge_polarity,
+        "bubble_non_round": bool(getattr(state, "bubble_non_round", False)),
         "reference_frame": None if reference is None else int(reference) + 1,
         "reference_frame_origin": "auto" if state.reference_frame is None else "set",
         "edge_seed_used": state.detection_mode == "edge" and state.edge_seed is not None,

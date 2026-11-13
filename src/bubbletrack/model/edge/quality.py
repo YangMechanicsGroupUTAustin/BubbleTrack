@@ -1,11 +1,14 @@
 """Stage F: circle-fit statistics, outline evidence, confidence terms and flags.
 
-Confidence is a product of six terms in [0, 1] that judge the OUTLINE, not the
-shape: how much of it is a real step (support), how precisely noise lets it be
-located (precision), how much of the region had to be extrapolated past the
-ROI border (completion), the frame SNR, a rival candidate (selection) and a
-double edge (edge_unique).  A clean kidney-shaped bubble is as confident as a
-round one.  Flags name the conditions a user should know about.
+Confidence is a product of terms in [0, 1] that judge the measurement: how much
+of the outline is a real step (support), how precisely the radius is located
+(precision), how much had to be extrapolated past the ROI border (completion),
+the frame SNR, a rival candidate (selection) and a double edge (edge_unique).
+With the area radius ("Bubble may be non-round") the terms judge the OUTLINE,
+not the shape: a clean kidney-shaped bubble is as confident as a round one.
+With the circle radius (default) a seventh term, roundness, lowers the
+confidence of a circle that does not describe the bubble.  Flags name the
+conditions a user should know about.
 """
 
 from __future__ import annotations
@@ -92,20 +95,59 @@ def radius_sigma(region: Region, evidence: OutlineEvidence, circle_sigma: float)
     return float(np.hypot(evidence.sigma_radius, extra))
 
 
-def confidence_terms(region: Region, evidence: OutlineEvidence, sigma_r: float, contrast: float,
-                     noise: float, runner_up: float, multi_fraction: float,
-                     cfg: QualityConfig) -> dict[str, float]:
-    """The six confidence terms, each in [0, 1]."""
-    rel = sigma_r / region.radius if np.isfinite(sigma_r) and region.radius > 0 else 1.0
-    hidden = region.hidden_fraction if region.completed else 0.0
+def _outline_terms(evidence: OutlineEvidence, sigma: float, radius: float, hidden: float,
+                   cfg: QualityConfig) -> dict[str, float]:
+    rel = sigma / radius if np.isfinite(sigma) and radius > 0 else 1.0
     return {
         "support": evidence.support ** 2,                                        # outline is a real edge
-        "precision": float(np.exp(-rel / cfg.precision_scale)),                 # noise along the outline
+        "precision": float(np.exp(-rel / cfg.precision_scale)),                 # how well R is located
         "completion": float(np.clip((1.0 - hidden) / (1.0 - cfg.completion_free), 0, 1)),  # extrapolation
+    }
+
+
+def _frame_terms(contrast: float, noise: float, runner_up: float, multi_fraction: float,
+                 cfg: QualityConfig) -> dict[str, float]:
+    return {
         "snr": float(np.clip((contrast / max(noise, 1e-4) - cfg.snr_floor) / cfg.snr_span, 0, 1)),
         "selection": float(np.sqrt(max(0.0, 1.0 - min(runner_up, 1.0)))),       # rival candidate
         "edge_unique": 1.0 - 0.5 * min(1.0, multi_fraction / cfg.multi_scale),  # halo / double ring
     }
+
+
+def area_terms(region: Region, evidence: OutlineEvidence, sigma_r: float, contrast: float,
+               noise: float, runner_up: float, multi_fraction: float,
+               cfg: QualityConfig) -> dict[str, float]:
+    """The six confidence terms of the area radius, each in [0, 1].
+
+    Precision from the noise along the outline (plus the extrapolated part), completion
+    from the share of the AREA taken from the circle fit.
+    """
+    hidden = region.hidden_fraction if region.completed else 0.0
+    return {**_outline_terms(evidence, sigma_r, region.radius, hidden, cfg),
+            **_frame_terms(contrast, noise, runner_up, multi_fraction, cfg)}
+
+
+def roundness_term(check: float, cfg: QualityConfig) -> float:
+    """1 for a circle check up to ``roundness_free``, down to ``roundness_floor`` (unknown: 1)."""
+    if not np.isfinite(check):
+        return 1.0
+    excess = float(np.clip((check - cfg.roundness_free) / cfg.roundness_span, 0.0, 1.0))
+    return 1.0 - (1.0 - cfg.roundness_floor) * excess
+
+
+def circle_terms(evidence: OutlineEvidence, radius: float, sigma: float, hidden_arc: float,
+                 check: float, contrast: float, noise: float, runner_up: float,
+                 multi_fraction: float, cfg: QualityConfig) -> dict[str, float]:
+    """The seven confidence terms of the circle radius, each in [0, 1].
+
+    The area definition's six, judged for the circle: precision from the circle fit's
+    radius sigma, completion from the share of its CIRCUMFERENCE hidden by the ROI border
+    or excluded pixels; and ``roundness``: how far the circle is off the area-equivalent
+    radius measured without it (:mod:`.shape_check`).
+    """
+    return {**_outline_terms(evidence, sigma, radius, hidden_arc, cfg),
+            **_frame_terms(contrast, noise, runner_up, multi_fraction, cfg),
+            "roundness": roundness_term(check, cfg)}
 
 
 def confidence(terms: dict[str, float]) -> float:
@@ -113,24 +155,22 @@ def confidence(terms: dict[str, float]) -> float:
 
 
 def is_non_circular(r_circle: float, r_area: float, solidity: float, cfg: QualityConfig) -> bool:
+    """The area definition's shape descriptor (the circle definition's check: ``definition``)."""
     off_circle = (np.isfinite(r_circle) and r_area > 0
                   and abs(r_circle - r_area) / r_area > cfg.non_circular_rel)
     return bool(off_circle or (np.isfinite(solidity) and solidity < cfg.non_circular_solidity))
 
 
-def measurement_flags(*, region: Region, non_circular: bool, multi_fraction: float, runner_up: float,
+def measurement_flags(*, region: Region, multi_fraction: float, runner_up: float,
                       contrast: float, noise: float, saturated: bool, shoulder_width: float,
                       cfg: QualityConfig) -> set[str]:
-    """Flags describing one successful measurement."""
+    """Flags describing one successful measurement, whatever the radius definition
+    (its own flags: ``definition``)."""
     flags: set[str] = set()
     if region.clipped:
         flags.add("clipped")
-    if region.completed:
-        flags.add("clipped_completed")
     if region.fragment_count > 0:
         flags.add("fragmented")
-    if non_circular:
-        flags.add("non_circular")
     if multi_fraction > cfg.multi_edge_flag:
         flags.add("multiple_edges")
     if runner_up > cfg.ambiguous_flag:

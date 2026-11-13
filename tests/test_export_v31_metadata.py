@@ -16,7 +16,8 @@ from bubbletrack.model.export import (
 )
 from bubbletrack.model.state import AppState
 
-EDGE_STEEP = "area-equivalent sqrt(A/pi) of the 50% iso-contour"
+EDGE_STEEP = "area-equivalent sqrt(A/pi) of the 50% iso-contour"  # "Bubble may be non-round"
+EDGE_CIRCLE = "circle through the bubble wall (robust fit, 50% steep edge)"  # the default
 
 
 def _meta(**state_fields) -> dict:
@@ -30,17 +31,28 @@ class TestRadiusDefinition:
         ("intensity", "circle fit (Taubin)"),
         ("gradient", "circle fit (Taubin)"),
         ("area", "area-equivalent (dark regions)"),
-        ("edge", EDGE_STEEP),
+        ("edge", EDGE_CIRCLE),
     ])
     def test_per_detection_mode(self, mode, expected):
         assert radius_definition(mode) == expected
         assert _meta(detection_mode=mode)["radius_definition"] == expected
 
+    def test_edge_non_round_is_the_area_of_the_outline(self):
+        assert radius_definition("edge", non_round=True) == EDGE_STEEP
+        meta = _meta(detection_mode="edge", bubble_non_round=True)
+        assert meta["radius_definition"] == EDGE_STEEP and meta["bubble_non_round"] is True
+        assert _meta(detection_mode="edge")["bubble_non_round"] is False
+
+    def test_non_round_only_matters_in_edge_mode(self):
+        assert radius_definition("intensity", non_round=True) == "circle fit (Taubin)"
+        assert radius_definition("area", non_round=True) == "area-equivalent (dark regions)"
+
     def test_edge_outer_extent(self):
-        text = radius_definition("edge", "outer")
-        assert "outer extent" in text
-        assert _meta(detection_mode="edge", edge_definition="outer")[
-            "radius_definition"] == text
+        for non_round in (False, True):
+            text = radius_definition("edge", "outer", non_round)
+            assert "outer extent" in text
+            assert _meta(detection_mode="edge", edge_definition="outer", bubble_non_round=non_round)[
+                "radius_definition"] == text
 
     def test_edge_definition_only_matters_in_edge_mode(self):
         assert radius_definition("intensity", "outer") == "circle fit (Taubin)"
@@ -78,21 +90,22 @@ class TestEdgeSettings:
         assert meta["edge_seed_used"] is False
 
     def test_all_values_survive_every_container(self, tmp_path):
-        meta = _meta(detection_mode="edge", reference_frame=0, edge_seed=(3.5, 4.5))
+        meta = _meta(detection_mode="edge", reference_frame=0, edge_seed=(3.5, 4.5),
+                     bubble_non_round=True)
         mat = str(tmp_path / "rt.mat")
         t = np.arange(1, 31, dtype=float)
         ok, _ = export_rof_t_data(mat, 100.0 - 0.05 * (t - 15) ** 2, 3.2, 1e6, 11,
                                   metadata=meta)
         assert ok
         stored = loadmat(mat, simplify_cells=True)["BubbleTrackMeta"]
-        assert stored["radius_definition"] == EDGE_STEEP
+        assert stored["radius_definition"] == EDGE_STEEP and stored["bubble_non_round"]
         assert stored["reference_frame"] == 1
         assert stored["edge_seed_used"]
 
         csv_path = tmp_path / "r.csv"
         export_csv(str(csv_path), np.array([1.0]), np.zeros((1, 2)), metadata=meta)
         sidecar = json.loads((tmp_path / "r.meta.json").read_text(encoding="utf-8"))
-        assert sidecar["radius_definition"] == EDGE_STEEP
+        assert sidecar["radius_definition"] == EDGE_STEEP and sidecar["bubble_non_round"] is True
         assert sidecar["edge_seed_used"] is True
 
 

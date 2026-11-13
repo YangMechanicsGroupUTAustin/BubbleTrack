@@ -27,7 +27,7 @@ FLAG_LOW_CONFIDENCE = "low_confidence"
 FLAG_JUMP = "jump"                    # accepted outside the tight gate (sudden change)
 FLAG_CLOUD = "cloud"                  # post-collapse fragment cloud: no bubble until one re-forms
 
-RAW_REVIEW_FLAGS = ("fragmented", "non_circular", "clipped_completed")
+RAW_REVIEW_FLAGS = ("fragmented", "non_circular", "clipped_not_round", "clipped_completed")
 CONTEXT_FLAGS = frozenset({"fragmented", "clipped_completed", "shoulder"})
 """Engine flags that describe a frame worth reviewing for another reason, but are
 routine on their own: any other dark region within ~2 R (static debris, satellite
@@ -35,7 +35,9 @@ bubbles) counts as a fragment, and bubbles cut by the frame edge are common."""
 """Single-frame (engine) flags that put a frame on the review list.  ``fragmented`` and
 ``clipped_completed`` belong to the shared per-frame result contract; edge-1.0.0 does not
 emit them yet (it emits ``non_circular``).  Plain ``clipped`` is deliberately not listed:
-a bubble cut by the frame edge is routine (example_1 is clipped on every frame)."""
+a bubble cut by the frame edge is routine (example_1 is clipped on every frame).
+``non_circular`` of a frame measured with "Bubble may be non-round" (flag ``area_radius``)
+describes the outline only and lists nothing."""
 
 
 def _as_float(value, name: str) -> float:

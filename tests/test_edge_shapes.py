@@ -1,5 +1,8 @@
 """Bubbles of any shape: the area-equivalent radius of the outer iso-contour (owner decision 1).
 
+Since edge-1.2.0 this is the "Bubble may be non-round" definition (``EdgeParams(non_round=True)``,
+which every test here uses); the default circle definition is tested in ``test_edge_non_round``.
+
 Shapes from ``_edge_shapes`` (exact area truth): circle, shallow bite, deep bite (kidney),
 jet slot, peanut, 5-lobe, crescent, mushroom with a re-entrant underside (rays cross the
 boundary 3+ times), and a disk with a saturated centre spot and a bright inner ring.
@@ -56,7 +59,7 @@ def _ref():
 def _measure(shape: Shape, *, seeded: bool):
     img, r_true = _frame(shape)
     seed = (shape.seed[0] + 1, shape.seed[1] + 1) if seeded else None
-    return detect_edge(img, *FULL, reference=_ref(), params=EdgeParams(seed=seed)), r_true
+    return detect_edge(img, *FULL, reference=_ref(), params=EdgeParams(seed=seed, non_round=True)), r_true
 
 
 @pytest.mark.parametrize("seeded", [True, False], ids=["seed", "no_seed"])
@@ -97,8 +100,8 @@ def test_outline_mask_and_centre_describe_the_region(shape):
 def test_outer_definition_measures_the_same_region_at_the_outer_level(name):
     shape = next(s for s in SHAPES if s.name == name)
     img, _ = _frame(shape)
-    steep = detect_edge(img, *FULL, reference=_ref())
-    outer = detect_edge(img, *FULL, reference=_ref(), params=EdgeParams(edge_definition="outer"))
+    steep = detect_edge(img, *FULL, reference=_ref(), params=EdgeParams(non_round=True))
+    outer = detect_edge(img, *FULL, reference=_ref(), params=EdgeParams(edge_definition="outer", non_round=True))
     assert outer.accepted and outer.radius_kind == "area" and "non_circular" in outer.flags
     assert 0.5 < outer.radius - steep.radius < 3.0          # the blurred edge's outer extent
     assert outer.shoulder_width == pytest.approx(outer.radius - steep.radius)

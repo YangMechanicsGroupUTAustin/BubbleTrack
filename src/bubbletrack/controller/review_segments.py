@@ -41,7 +41,9 @@ CATEGORIES: tuple[Category, ...] = (
     Category("jump", "Radius jumps", frozenset({"jump"})),
     Category("low_confidence", "Not sure: low confidence", frozenset({"low_confidence"})),
     Category("shape", "Outline not round", frozenset({
-        "non_circular", "multiple_edges", "fragmented", "clipped_completed", "shoulder"})),
+        "non_circular", "multiple_edges", "fragmented", "shoulder"})),
+    Category("clipped", "Cut by the image edge", frozenset({
+        "clipped_not_round", "clipped_unmeasurable", "clipped_completed"})),
     Category("collapse", "Near collapse: tiny bubble", frozenset({"collapse"})),
     Category("ml", "Outline from ML assist", frozenset({"ml_outline", "ml_disagrees"})),
     Category(BEFORE, "Before the bubble", frozenset({BEFORE})),
@@ -49,7 +51,10 @@ CATEGORIES: tuple[Category, ...] = (
 # A result's source decides its row whatever else is flagged: every ML assist
 # result to check (its own outline, or Auto's where ML saw the bubble elsewhere)
 # stays in one run instead of splitting by reason; the tooltip names the reason.
-SOURCE_CATEGORIES: tuple[tuple[str, str], ...] = (("ml_outline", "ml"), ("ml_disagrees", "ml"))
+# A frame Auto could not measure because the image edge cuts it is "Cut by the
+# image edge", not just "No result": the row says why.
+SOURCE_CATEGORIES: tuple[tuple[str, str], ...] = (
+    ("ml_outline", "ml"), ("ml_disagrees", "ml"), ("clipped_unmeasurable", "clipped"))
 OTHER = Category("other", "Worth a look", frozenset())
 _BY_REASON = {reason: c.key for c in CATEGORIES for reason in c.reasons}
 _LABELS = {c.key: c.label for c in (*CATEGORIES, OTHER)}

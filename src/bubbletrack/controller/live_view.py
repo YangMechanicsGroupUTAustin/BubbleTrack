@@ -1,8 +1,8 @@
 """Fit's live view: one frame drawn while the run goes on, as the result will look.
 
 ``show_live_frame`` draws the frame whose result the run just stored with the
-same overlays and names as after the run (``draw_fit_overlay``: "equal-area
-circle" in Auto, "fitted circle" in the classic methods, the measured outline),
+same overlays and names as after the run (``draw_fit_overlay``: "fitted circle",
+or "equal-area circle" with "Bubble may be non-round", and the measured outline),
 and fills the right panel with what it shows after the run: the Auto view in
 Auto mode, the method's binary mask otherwise.
 """

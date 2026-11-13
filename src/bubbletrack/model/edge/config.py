@@ -209,6 +209,29 @@ class QualityConfig:
     low_snr_ratio: float = 6.0
     non_circular_rel: float = 0.02
     non_circular_solidity: float = 0.95
+    """Area definition: ``non_circular`` describes an outline whose circle and area radii differ by
+    more than ``non_circular_rel`` or whose solidity is below this (information only)."""
+    circle_check_rel: float = 0.05
+    """Circle definition, bubble inside the ROI: ``non_circular`` (worth a check) when the circle
+    radius is more than this fraction off the outline's area-equivalent radius (owner, 2026-11-13)."""
+    clipped_check_rel: float = 0.06
+    clipped_check_px: float = 1.0
+    """A bubble cut by the ROI border: its radius and its visible area completed with an ellipse
+    (``shape_check``) must agree within max(rel * R, px), else ``clipped_not_round`` (circle) or
+    ``clipped_unmeasurable`` (area).  Calibrated on real round bubbles cut by the border (example_1,
+    LIC 01, 05, 06, 10, lic_hard 07): at most 0.04; synthetic round ones (R 10-100, cut up to 65 %)
+    at most 0.05; three lobes of 8 % cut at their phase 0 up to 50 %: 0.049; 1.5:1 ellipses: >= 0.12."""
+    clipped_check_hidden: float = 0.02
+    """A clipped region with at most this share of its area hidden (an outline that only touches
+    a glare blob or the ROI border) is checked by its area, like one inside the ROI."""
+    roundness_free: float = 0.05
+    roundness_span: float = 0.10
+    roundness_floor: float = 0.6
+    """Circle definition: the ``roundness`` confidence term falls linearly from 1 at a circle check
+    of ``roundness_free`` (the 5 % tolerance) to ``roundness_floor`` at ``free + span``: a misfit
+    lowers the confidence, but a clean non-round bubble keeps a result and goes to Review by its
+    flag.  Calibrated on the labelled LIC / lic_hard frames (417 bubble, 116 no-bubble frames):
+    accepted and correct 217 (219 without the term), wrong 18 (25), no-bubble rejected 109 (105)."""
     shoulder_flag_px: float = 3.5
     precision_scale: float = 0.02
     """Precision term = exp(-(sigma_R / R) / scale), sigma_R from the noise along the outline.
@@ -218,7 +241,8 @@ class QualityConfig:
     snr_span: float = 7.0
     multi_scale: float = 0.3
     completion_free: float = 0.5
-    """Hidden (extrapolated) area fractions up to this cost no confidence; beyond, linearly to 0 at 1."""
+    """Hidden (extrapolated) fractions up to this cost no confidence; beyond, linearly to 0 at 1.
+    The area definition counts the hidden area, the circle definition the hidden circumference."""
     min_roi_px: int = 8
 
 

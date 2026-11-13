@@ -1,5 +1,5 @@
-"""The app stores the region layer's answer: area-equivalent radius, shape
-metrics, flags and the true outline (drawn as a closed polyline)."""
+"""The app stores the region layer's answer: area-equivalent radius (with "Bubble may
+be non-round"), shape metrics, flags and the true outline (drawn as a closed polyline)."""
 
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ def _stored(shape):
     image, truth = render_shape(shape)
     ref = reference()
     h, w = image.shape
-    job = EdgeJob(make_params(), ref, max_radius=float(max(h, w)))
+    job = EdgeJob(make_params(non_round=True), ref, max_radius=float(max(h, w)))
     state = AppState().with_results_initialized(1)
     store_fit(state, 0, fit_edge(image, (1, h), (1, w), job), FitSource.AUTO)
     return state, truth

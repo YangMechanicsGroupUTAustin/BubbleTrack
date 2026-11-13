@@ -81,10 +81,19 @@ def _is_normal(c: int, event: int, thumbs: list, levels: list, cfg: ReferenceCon
     return abs(levels[c] / max(typical, 1e-6) - 1.0) <= tol
 
 
+_BUBBLE_TEST_PARAMS = EdgeParams(non_round=True)
+"""Whether a frame holds a bubble does not depend on the radius definition: the area
+definition's confidence (shape-agnostic) is the one this test was calibrated with."""
+
+
 def _has_bubble(raw: np.ndarray, config: EdgeConfig) -> bool:
+    """A confident bubble of a plausible size (one the area mode could not measure because
+    the image edge cuts it is still a bubble)."""
     h, w = raw.shape[:2]
-    res = detect_edge_with_config(raw, (1, h), (1, w), reference=None, params=EdgeParams(), config=config)
-    return res.accepted and res.radius >= config.reference.min_bubble_radius_px
+    res = detect_edge_with_config(raw, (1, h), (1, w), reference=None, params=_BUBBLE_TEST_PARAMS,
+                                  config=config)
+    confident = bool(np.isfinite(res.radius) and res.confidence >= res.confidence_gate)
+    return confident and res.radius >= config.reference.min_bubble_radius_px
 
 
 def choose_reference_frame(read_raw: Callable[[int], np.ndarray], n_frames: int, *,

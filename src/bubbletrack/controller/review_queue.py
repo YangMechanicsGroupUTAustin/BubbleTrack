@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from bubbletrack.model.provenance import FitSource, user_confirmed_mask
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource, user_confirmed_mask
 from bubbletrack.model.sequence import CONTEXT_FLAGS
 from bubbletrack.model.state import AppState
 from bubbletrack.model.suggestion import suggested_mask
@@ -32,7 +32,11 @@ REASON_WEIGHTS: dict[str, int] = {
     "ml_outline": 58,  # ML assist's own outline: always checked (see review_segments)
     "ml_disagrees": 56,  # plain Auto kept, but ML assist saw the bubble elsewhere
     "multiple_edges": 60,
-    "non_circular": 55,
+    "clipped_unmeasurable": 88,  # non-round mode: cut by the image edge, no result (comes with rejected)
+    # Circle mode: R may be off.  Above low_confidence of any accepted frame (<= 72), whose
+    # low confidence they explain, so the row names the shape and its advice says what to do.
+    "clipped_not_round": 74,  # cut by the image edge, the visible wall not round
+    "non_circular": 73,  # the circle is > 5 % off the outline's area radius (information in area mode)
     "fragmented": 50,
     "clipped_completed": 45,
     "reacquired": 40,
@@ -51,6 +55,9 @@ REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected", BEFORE}
 # Routine engine flags: they describe a listed frame and add to its rank, but
 # never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
 CONTEXT_REASONS = CONTEXT_FLAGS | {"ml_unfamiliar"}
+# With "Bubble may be non-round" (flag ``area_radius``) the user declared non-round
+# bubbles: an outline that is not round describes the frame, it is no reason to check it.
+AREA_INFORMATION = frozenset({"non_circular"})
 
 GUESS = "guess"
 """A "rejected" frame that shows Auto's guess (``model.suggestion``).  It only
@@ -178,7 +185,10 @@ def _frame_reasons(state: AppState, radius: np.ndarray, conf: np.ndarray,
         add(i, "low_confidence")
     for i, flags in enumerate((state.fit_flags or ())[:n]):
         if flags and not manual[i]:
-            for reason in sorted(flags & REVIEW_FLAGS):
+            listed = flags & REVIEW_FLAGS
+            if AREA_RADIUS_FLAG in flags:
+                listed -= AREA_INFORMATION
+            for reason in sorted(listed):
                 add(i, reason)
     unscored = ~np.isfinite(conf)  # legacy modes produce no flags of their own
     for i in jump_frames(radius):

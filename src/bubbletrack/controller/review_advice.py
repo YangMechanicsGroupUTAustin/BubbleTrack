@@ -34,12 +34,20 @@ NEIGHBOURHOOD = 3  # frames on each side that a guess is compared with
 GUESS_TOLERANCE = 0.3  # a guess within 30 % of the radius around it fits
 UNCERTAIN_GUESS = 0.3  # below this confidence a guess is not recommended
 _LIKELY_WRONG = ("lost", "jump")  # a result with these is more often wrong than right
+NON_CIRCULAR, CLIPPED_NOT_ROUND, UNMEASURABLE = "non_circular", "clipped_not_round", "clipped_unmeasurable"
 
 NOT_FLAGGED = "Not flagged — nothing to do here."
 ASK_EMPTY = "Is there a bubble? Fix it (F), or No bubble (N) if the frame is empty."
 LIKE_REFERENCE = ("It looks like the reference frame, without a bubble: "
                   "No bubble (N), or Fix it (F) if there is one.")
 BEFORE_TEXT = "Before the bubble: no result, and the frame looks like the reference frame."
+NOT_ROUND_TEXT = ("R comes from the circle that fits the wall, which may be off for this shape. "
+                  "If your bubbles are not round, tick \"Bubble may be non-round\" (Auto box, "
+                  "Advanced) and Fit again; otherwise accept it if the circle sits on the wall.")
+CLIPPED_NOT_ROUND_TEXT = ("The wall you can see is not round, so the circle may be off. Accept it "
+                          "only if the circle follows the wall; otherwise Fix it (F).")
+UNMEASURABLE_TEXT = ("Its area can't be measured: the wall you can see is not round. Fix it (F), "
+                     "or accept Auto's guess (dashed), which takes the hidden part as round.")
 
 LooksEmpty = Callable[[int], "bool | None"]  # frame -> looks like the reference? (None: unknown)
 
@@ -76,6 +84,9 @@ def advise(state: AppState, frame: int, item: ReviewItem | None,
     confidence = item.confidence if item is not None else float("nan")
     problem = problem_sentence(category, confidence)
     guess = shown_suggestion(state, frame)
+    if item is not None and UNMEASURABLE in item.reasons and not radius[frame] > 0:
+        return Advice(FIX, f"{problem} {UNMEASURABLE_TEXT}", guess=guess is not None,
+                      empty=guess is None)
     if guess is not None:
         return _advise_guess(state, frame, guess, problem)
     if not radius[frame] > 0:
@@ -84,6 +95,10 @@ def advise(state: AppState, frame: int, item: ReviewItem | None,
         return Advice(NONE, NOT_FLAGGED)
     if any(reason in item.reasons for reason in _LIKELY_WRONG):
         return Advice(FIX, f"{problem} Fix it if the outline is off the bubble wall.")
+    if category == "clipped" and CLIPPED_NOT_ROUND in item.reasons:
+        return Advice(ACCEPT, f"{problem} {CLIPPED_NOT_ROUND_TEXT}")
+    if category == "shape" and NON_CIRCULAR in item.reasons:
+        return Advice(ACCEPT, f"{problem} {NOT_ROUND_TEXT}")
     return Advice(ACCEPT, f"{problem} Accept it if the outline sits on the bubble wall.")
 
 
