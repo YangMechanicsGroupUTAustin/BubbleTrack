@@ -24,7 +24,7 @@ from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_T
 from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
-from bubbletrack.ui.wording import CONFIDENCE, plural
+from bubbletrack.ui.wording import plural, score_name
 
 logger = logging.getLogger(__name__)
 
@@ -475,7 +475,7 @@ class AutoController(BaseController):
         if scores is not None and state.radius is not None and not stopped:
             low = int(np.sum((state.radius > 0) & (scores < QUALITY_WARN_THRESHOLD)))
             if low:
-                details.append(f"{plural(low, 'fit')} with low {CONFIDENCE} "
+                details.append(f"{plural(low, 'fit')} with low {score_name(state.detection_mode)} "
                                f"(below {QUALITY_WARN_THRESHOLD:.2f})")
         for note in details:
             logger.info("Run note: %s", note)

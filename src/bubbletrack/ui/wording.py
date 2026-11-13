@@ -1,16 +1,16 @@
 """Shared wording of what users read: counts with proper plurals, the score's name.
 
-The per-frame score is called "confidence" everywhere the user sees it and
-shown on one scale, 0.00 (doubtful) to 1.00 (certain), see
-:func:`confidence_text`.
+Auto's per-frame score is called "confidence" everywhere the user sees it and
+shown on one scale, 0.00 (doubtful) to 1.00 (certain).  The classic methods
+have no confidence: their score (how well the edge points fit a circle) is the
+"fit quality", on the same scale.  The chart (``chart_legend.CONFIDENCE`` /
+``FIT_QUALITY``) uses the same words.
 """
 
 from __future__ import annotations
 
-import math
-
-CONFIDENCE = "confidence"  # the score's one name (chart legend, hover, header, Review)
-CONFIDENCE_LOW, CONFIDENCE_HIGH = "low", "high"  # the two ends of the chart's colour ramp
+CONFIDENCE = "confidence"  # Auto's score (chart legend, hover, header, Review)
+FIT_QUALITY = "fit quality"  # the classic methods' score
 
 
 def plural(n: int, word: str, many: str | None = None) -> str:
@@ -18,8 +18,6 @@ def plural(n: int, word: str, many: str | None = None) -> str:
     return f"{n} {word if n == 1 else (many or word + 's')}"
 
 
-def confidence_text(value: float) -> str:
-    """'confidence 0.87' (two decimals, 0 to 1), or '' when the fit is not scored."""
-    if value is None or not math.isfinite(float(value)):
-        return ""
-    return f"{CONFIDENCE} {float(value):.2f}"
+def score_name(detection_mode: str) -> str:
+    """'confidence' for Auto, 'fit quality' for the classic methods."""
+    return CONFIDENCE if detection_mode == "edge" else FIT_QUALITY

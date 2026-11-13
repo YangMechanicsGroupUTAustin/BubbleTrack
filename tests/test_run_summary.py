@@ -10,7 +10,7 @@ import time
 
 from bubbletrack.controller.run_summary import OK_COLOUR, WARN_COLOUR, RunOutcome, summary_line
 from bubbletrack.ui.header_bar import HeaderBar
-from bubbletrack.ui.wording import confidence_text, plural
+from bubbletrack.ui.wording import plural, score_name
 
 
 def test_done_is_green_with_the_review_count():
@@ -43,7 +43,7 @@ def test_stopped_and_ml_assist():
 def test_plurals_and_confidence_wording():
     assert plural(1, "frame") == "1 frame" and plural(2, "frame") == "2 frames"
     assert plural(3, "fix", "fixes") == "3 fixes"
-    assert confidence_text(0.871) == "confidence 0.87" and confidence_text(float("nan")) == ""
+    assert score_name("edge") == "confidence" and score_name("intensity") == "fit quality"
 
 
 def test_header_keeps_details_for_the_same_message(qapp):
