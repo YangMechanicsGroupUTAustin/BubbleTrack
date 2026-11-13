@@ -42,7 +42,8 @@ class RadiusChart(QWidget):
         neighbor_refit_requested(int): single-frame actions, as before.
         range_selected(int, int): a frame range was brushed (inclusive).
         delete_range_requested / refit_range_requested /
-        lock_range_requested / unlock_range_requested(int, int): chosen
+        lock_range_requested / unlock_range_requested /
+        no_bubble_range_requested(int, int): chosen
         from the selection's menu.
         data_changed(): emitted after :meth:`plot_all` (results changed).
     """
@@ -56,6 +57,7 @@ class RadiusChart(QWidget):
     refit_range_requested = pyqtSignal(int, int)
     lock_range_requested = pyqtSignal(int, int)
     unlock_range_requested = pyqtSignal(int, int)
+    no_bubble_range_requested = pyqtSignal(int, int)
     data_changed = pyqtSignal()  # plot_all() drew new results
 
     def __init__(self, parent: QWidget | None = None):

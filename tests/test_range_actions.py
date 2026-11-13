@@ -102,3 +102,24 @@ def test_refit_range_fits_only_that_range_and_keeps_from_to(qapp, app):
     assert state.radius[4] == 5.0  # locked: kept
     assert (state.radius[:3] == 5.0).all() and (state.radius[6:] == 5.0).all()
     assert tab.get_range() == before
+
+
+def test_mark_no_bubble_clears_and_locks_empty_frames(app):
+    """Unlike Delete, it says "no bubble": the frames stay empty and locked."""
+    window, _, state, events = app
+    state.fit_locked[6] = True  # locked WITH a result: kept
+    window.radius_chart.no_bubble_range_requested.emit(5, 7)
+    assert state.radius[5] == -1.0 and state.radius[7] == -1.0
+    assert state.fit_locked[5] and state.fit_locked[7]
+    assert state.radius[6] > 0 and state.fit_locked[6]
+    assert "Marked 2 frame(s) as no bubble (1 locked kept)" in window.header._status_label.text()
+    assert len(events) == 1
+
+
+def test_frames_marked_no_bubble_export_as_no_bubble_labels(app):
+    from bubbletrack.model.cases.labels import app_result, frame_label
+    from bubbletrack.model.cases.schema import LABEL_NO_BUBBLE
+
+    window, _, state, _ = app
+    window.radius_chart.no_bubble_range_requested.emit(2, 2)
+    assert frame_label(app_result(state, 2)).status == LABEL_NO_BUBBLE

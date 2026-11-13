@@ -241,6 +241,7 @@ class AppController:
         chart.refit_range_requested.connect(self.auto_ctrl.fit_range)
         chart.lock_range_requested.connect(partial(self._on_lock_range, locked=True))
         chart.unlock_range_requested.connect(partial(self._on_lock_range, locked=False))
+        chart.no_bubble_range_requested.connect(self._on_mark_no_bubble)
 
         # Compare mode change — refresh display immediately
         self.w.compare_mode_changed.connect(self._on_compare_mode_changed)
@@ -376,6 +377,33 @@ class AppController:
         self._refresh_chart()
         verb = "Locked" if locked else "Unlocked"
         self.w.header.set_status(f"{verb} {len(frames)} frame(s)", "#10b981")
+        self.bus.emit(RESULTS_CHANGED)
+
+    def _on_mark_no_bubble(self, start: int, end: int) -> None:
+        """Say "no bubble" for frames start..end: clear and lock them empty.
+
+        The explicit counterpart of Delete (which only removes a wrong result):
+        Fit All and tracking then leave the frames empty, and hard-case exports
+        label them "no bubble".  Frames locked with a result are kept.
+        """
+        locked = self._state.fit_locked
+        if locked is None:
+            return
+        frames = self._frames_in(start, end)
+        targets = [i for i in frames if not (locked[i] and self._state.radius[i] > 0)]
+        if not targets:
+            self.w.header.set_status("Nothing to mark: every frame is locked with a result", "#f59e0b")
+            return
+        for i in targets:
+            clear_frame_result(self._state, i)
+            locked[i] = True
+        self._refresh_chart()
+        if self._state.image_no in targets:
+            display_frame(self._state, self.w, self._state.image_no,
+                          self._set_state, self._image_cache)
+        kept = len(frames) - len(targets)
+        text = f"Marked {len(targets)} frame(s) as no bubble"
+        self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
         self.bus.emit(RESULTS_CHANGED)
 
     def _on_refit_point(self, idx: int) -> None:

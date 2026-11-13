@@ -98,6 +98,7 @@ def build_range_menu(chart, start: int, end: int) -> QMenu:
         (f"Refit range ({span})", lambda: chart.refit_range_requested.emit(start, end)),
         (f"Lock range ({span})", lambda: chart.lock_range_requested.emit(start, end)),
         (f"Unlock range ({span})", lambda: chart.unlock_range_requested.emit(start, end)),
+        (f"Mark as no bubble ({span})", lambda: chart.no_bubble_range_requested.emit(start, end)),
         (None, None),
         ("Clear selection", chart.clear_selection),
     ))

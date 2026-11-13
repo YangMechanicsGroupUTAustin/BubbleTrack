@@ -17,14 +17,13 @@ Only frames you fixed are scored. A fix is one of:
 | Manual fit (click edge points) | Manual tab, or Review > Manual (M) | this circle is right |
 | Accept / lock a result | Review > Accept (A), or chart: Shift+drag a range > right-click > Lock | this result is right |
 | Accept a frame without a result | Review > Accept (A) on a "No result" row | there is no bubble here |
+| Mark frames as no bubble | chart: Shift+drag a range > right-click > Mark as no bubble | there is no bubble here |
 
 **Deleting is not a fix.** Delete (D) only removes a wrong result: the frame
 is then sent *unlabelled*, because a wrong result is often deleted while a
-bubble is still there. "No bubble here" is said only by accepting (A) a
-frame that has no result, e.g. a "No result" row in Review. A frame whose
-result you deleted leaves the Review queue, so if the right answer is
-really "no bubble", write it in the note ("frames 12-15: no bubble") rather
-than relying on the deletion.
+bubble is still there. To say "no bubble here", accept (A) a frame that has
+no result (a "No result" row in Review) or select the frames on the chart
+and choose "Mark as no bubble".
 
 Frames you did not touch are sent as well (they show the context) but count
 as *unlabelled*. Fix a few frames where it goes wrong and, ideally, a few
