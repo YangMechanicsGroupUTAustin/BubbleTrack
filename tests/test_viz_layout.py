@@ -74,7 +74,9 @@ class TestSplitter:
         QSettings(temp_settings, QSettings.Format.IniFormat).setValue(
             mw.SPLITTER_SETTINGS_KEY, [500, 200])
         window, _ = gui
-        window.resize(1440, 900)
+        # Tall enough that the chart pane's minimum (chart 260 px + key-frame strip)
+        # does not override the saved split, as it does on a 900 px screen.
+        window.resize(1440, 1100)
         window.show()
         qapp.processEvents()
         images, chart_pane = window.content_splitter.sizes()
