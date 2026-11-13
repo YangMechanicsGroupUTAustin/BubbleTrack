@@ -11,6 +11,9 @@ logger = logging.getLogger(__name__)
 # Emitted (no arguments) after anything edits per-frame results in place:
 # autosave, the review queue and the filmstrip listen for it.
 RESULTS_CHANGED = "results_changed"
+
+# Emitted with (name, value) after a Settings switch changed (see config.UI_SETTINGS).
+UI_SETTING_CHANGED = "ui_setting_changed"
 # Emitted (frame index) after the "Drag a circle" tool stored a result.
 CIRCLE_FIXED = "circle_fixed"
 

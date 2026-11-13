@@ -314,6 +314,12 @@ def _as_name(value: Any) -> str:
     return text
 
 
+def _as_bool(value: Any) -> bool:
+    if not isinstance(value, bool):
+        raise ValueError("expected true or false")
+    return value
+
+
 def _as_timestamp(value: Any) -> float:
     """Seconds since the epoch (``time.time()``)."""
     number = _as_number(value)
@@ -327,7 +333,31 @@ _META_VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "last_export_format": _one_of(EXPORT_FORMATS),  # pre-selected Format combo
     "last_clean_exit": _as_timestamp,               # newer autosave => offer restore
     "hard_case_reporter": _as_name,                 # "Your name" in Export Hard Case
+    "show_classic_methods": _as_bool,               # Settings: Intensity/Gradient/Area + their controls
+    "show_all_view_modes": _as_bool,                # Settings: Image only / Overlay / Wipe views
 }
+
+# User settings (Settings dialog).  Off by default: the main window shows only
+# the Auto method and the Image + Mask view.  Classic methods will be retired.
+UI_SETTINGS: dict[str, bool] = {
+    "show_classic_methods": False,
+    "show_all_view_modes": False,
+}
+
+
+def ui_setting(name: str) -> bool:
+    """The saved value of a Settings switch, else its default."""
+    if name not in UI_SETTINGS:
+        raise ValueError(f"unknown UI setting {name!r}")
+    value = get_meta(name)
+    return UI_SETTINGS[name] if value is None else bool(value)
+
+
+def set_ui_setting(name: str, value: bool) -> bool:
+    """Save a Settings switch; returns False if the config could not be written."""
+    if name not in UI_SETTINGS:
+        raise ValueError(f"unknown UI setting {name!r}")
+    return set_meta(**{name: bool(value)})
 
 
 def _meta_validator(key: str) -> Callable[[Any], Any]:
