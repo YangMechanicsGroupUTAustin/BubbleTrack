@@ -101,7 +101,7 @@ class TestDefaultWindow:
         assert lp.fit_controls.fit_button.text() == "Fit"
         assert lp.export_button.text() == "Export…"
         assert lp.measure_panel.edge_box.title() == "Auto (reference frame)"
-        assert not lp.manual_section.isVisibleTo(lp)
+        assert not hasattr(lp, "manual_tab") and not hasattr(lp, "tab_bar")
         assert not any("Pre-tune" in t for t in _texts(lp, QLabel))
 
     def test_status_bar_mode_names_no_removed_tab(self, gui):
@@ -233,18 +233,3 @@ class TestClearAllResults:
         window, _ = gui
         monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: pytest.fail("asked"))
         window.clear_results_action.trigger()
-
-
-class TestManualFixShim:
-    """The Review panel still opens manual fixing through the hidden mode switch."""
-
-    def test_manual_mode_shows_the_fix_tools_and_back_returns(self, gui):
-        window, _ = gui
-        lp = window.left_panel
-        lp.tab_bar.select("Manual")
-        assert lp.manual_section.isVisibleTo(lp) and not lp.measure_panel.isVisibleTo(lp)
-        assert window.status_bar._mode_label.text() == "Mode: Manual"
-        lp.manual_back_button.click()
-        assert lp.tab_bar.current_name() == "Pre-tune"
-        assert not lp.manual_section.isVisibleTo(lp) and lp.measure_panel.isVisibleTo(lp)
-        assert window.status_bar._mode_label.text() == "Mode: Measure"

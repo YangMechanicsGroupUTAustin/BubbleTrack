@@ -137,15 +137,6 @@ class TestSidePanel:
         assert order.index(lp.image_source) < order.index(lp.measure_panel)
         assert not hasattr(lp, "automatic_tab") and not hasattr(lp, "post_processing")
 
-    def test_status_bar_shows_the_mode(self, gui):
-        window, _ = gui
-        lp = window.left_panel
-        assert window.status_bar._mode_label.text() == "Mode: Measure"
-        lp.tab_bar.select("Manual")
-        assert window.status_bar._mode_label.text() == "Mode: Manual"
-        lp.tab_bar.select("Pre-tune")
-        assert window.status_bar._mode_label.text() == "Mode: Measure"
-
     def test_footer_follows_the_run_lock(self, gui):
         window, controller = gui
         lp = window.left_panel

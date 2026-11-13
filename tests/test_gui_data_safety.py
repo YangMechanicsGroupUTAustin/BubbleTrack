@@ -166,7 +166,6 @@ class TestRunSafety:
         lp = window.left_panel
         assert not lp.image_source.isEnabled()
         assert not lp.measure_panel.isEnabled()
-        assert not lp.manual_tab.isEnabled()
         assert not lp.export_button.isEnabled()
         assert not window.load_session_action.isEnabled()
         _wait(qapp, lambda: lp.fit_controls.fit_button.isEnabled())
@@ -264,13 +263,6 @@ class TestManualProtection:
         controller.auto_ctrl.on_auto_fit()
         assert controller.auto_ctrl._worker is None
 
-    def test_delete_and_refit_update_source(self, gui, make_sequence):
-        _, controller = gui
-        _load(controller, make_sequence("A", 6))
-        controller._on_refit_point(2)
-        assert controller._get_state().fit_source[2] == FitSource.REFIT
-        controller._on_delete_point(2)
-        assert controller._get_state().fit_source[2] == FitSource.NONE
 
 
 # -- closing the window ------------------------------------------------------------------

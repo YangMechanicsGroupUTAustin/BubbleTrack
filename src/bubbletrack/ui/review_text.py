@@ -23,7 +23,7 @@ DASH = "–"  # en dash, for spans
 STEP_HINT = ("←/→ step through these frames, a click on the row goes back to "
              "its first one; J/K move between rows.")
 DETAIL_REASONS = 3  # the detail line names this many; the tooltip has them all
-NOT_A_BUBBLE_HINT = "Not a bubble? Shift+drag on the chart > Mark as no bubble"  # image tip
+NOT_A_BUBBLE_HINT = "Not a bubble? Press N in Review"  # the image's guess tip
 REVIEW_NO_BUBBLE_HINT = "Not a bubble? No bubble (N); Shift+N for the whole row"
 
 REASON_LABELS: dict[str, str] = {  # plain words; the flag names stay internal

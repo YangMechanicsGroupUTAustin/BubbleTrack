@@ -87,14 +87,6 @@ def test_fit_current_frame_on_video(gui, video):
     assert controller._get_state().radius[5] > 0, _status(window)
 
 
-def test_refit_point_on_video(gui, video):
-    window, controller = gui
-    controller.file_ctrl.on_video_selected(str(video))
-    _owner_params(controller)
-    controller._on_refit_point(4)
-    assert controller._get_state().radius[4] > 0, _status(window)
-
-
 def test_autotune_accepts_a_raw_frame():
     from bubbletrack.model.autotune import run_autotune
 

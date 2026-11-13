@@ -7,8 +7,8 @@ One fix at a time, on one frame, shown in the Review dock's fix strip:
   (``ManualController``).  The strip switches between the two.
 * A stored result (the measured wall, the user's own circle, or a circle
   through the clicked points) ends the fix and calls ``on_fixed(frame)``.
-* Cancel (Esc), another frame, another source, a left-panel tab or a
-  starting Fit All end it; the frame stays as it was.
+* Cancel (Esc), another frame, another source or a starting Fit All end
+  it; the frame stays as it was.
 
 Starting a fix cancels a pending or running re-track (it would redraw the
 frame under the user's points); storing the fix restarts its countdown.
@@ -22,7 +22,7 @@ from collections.abc import Callable
 from bubbletrack.event_bus import CIRCLE_FIXED
 from bubbletrack.ui.circle_tool import TOOL_CIRCLE, TOOL_POINTS
 from bubbletrack.ui.fix_strip import FixStrip
-from bubbletrack.ui.tab_bar import mode_label
+from bubbletrack.ui.status_bar import MEASURE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,6 @@ class FixMode:
         bus.subscribe(CIRCLE_FIXED, self._on_circle_fixed)
         bus.subscribe("frame_changed", self._on_frame_changed)
         bus.subscribe("source_loaded", lambda _n: self.end())
-        bus.subscribe("tab_changed", lambda _idx: self.end())
         bus.subscribe("run_state_changed", self._on_run_state)
 
     # -- state ------------------------------------------------------------- #
@@ -137,8 +136,7 @@ class FixMode:
         circle.discard_prompt()
         circle.set_active(False)
         self._app.manual_ctrl.cancel_selection()
-        w = self._app.w  # the fix tools said "Mode: Manual"
-        w.status_bar.update_mode(mode_label(w.left_panel.tab_bar.current_name()))
+        self._app.w.status_bar.update_mode(MEASURE_MODE)  # the fix tools said "Manual"
 
     def _finish(self, frame: int) -> None:
         self.end()

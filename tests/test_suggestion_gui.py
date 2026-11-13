@@ -96,12 +96,13 @@ def test_rejected_frame_shows_the_guess_dashed_on_both_panels(app):
         under = panel._overlay_items[panel._overlay_items.index(dashed[0]) - 1]
         assert under.pen().style() == Qt.PenStyle.SolidLine
         assert under.pen().color().name() == GUESS_GAP_COLOUR
-        assert "Auto's guess (confidence 0.20)" in panel.overlay_tip()
-        assert "press A in Review" in panel.overlay_tip()
-        assert "Not a bubble? Shift+drag on the chart > Mark as no bubble" in panel.overlay_tip()
+        assert "Auto's guess (not accepted, confidence 0.20) — see Review" \
+            in panel.overlay_tip()
+        assert "press A" not in panel.overlay_tip()  # the Review card may advise Fix
+        assert "Not a bubble? Press N in Review" in panel.overlay_tip()
         assert "Auto's guess (not accepted)" in panel.legend_texts()  # the corner key names it
         assert "outline (measured)" not in panel.legend_texts()
-    assert _status(window).startswith("Frame 4: Auto's guess (confidence 0.20)")
+    assert _status(window).startswith("Frame 4: Auto's guess (not accepted, confidence 0.20)")
     # the Auto view draws it in ROI coordinates: same place as the image panel
     assert window.binary_panel._overlay_items[0].path().boundingRect().center().x() == \
         pytest.approx(window.original_panel._overlay_items[-1].path().boundingRect().center().x()
@@ -130,17 +131,6 @@ def test_the_guess_is_display_only(app):
     assert not frame_label(app_result(state, 3)).is_labelled  # not a label
 
 
-def test_rejected_refit_replaces_the_guess_and_says_so(app):
-    window, controller = app
-    old = _reject(controller, 3).suggestion
-    _show(controller, 3)
-    controller._on_refit_point(3)
-    new = shown_suggestion(_state(controller), 3)
-    assert new is not None and new is not old
-    assert "Auto's guess is shown dashed" in _status(window)
-    assert len(_dashed(window.original_panel)) == 1
-
-
 def test_pretune_fit_current_frame_draws_the_guess(app):
     window, controller = app
     _show(controller, 3)
@@ -151,21 +141,14 @@ def test_pretune_fit_current_frame_draws_the_guess(app):
 
 # -- any new fit replaces or clears the guess --------------------------------------------
 
-@pytest.mark.parametrize("action", ["refit", "delete", "no_bubble", "manual_clear", "clear_all",
-                                    "circle", "manual_points"])
+@pytest.mark.parametrize("action", ["no_bubble", "clear_all", "circle", "manual_points"])
 def test_new_results_clear_the_guess(app, damp, action):
     window, controller = app
     _reject(controller, 3)
     _show(controller, 3)
     damp.clear()  # from now on Auto accepts the frame
-    if action == "refit":
-        controller._on_refit_point(3)
-    elif action == "delete":
-        controller._on_delete_point(3)
-    elif action == "no_bubble":
+    if action == "no_bubble":
         controller._on_mark_no_bubble(3, 3)
-    elif action == "manual_clear":
-        controller.manual_ctrl.on_manual_clear()
     elif action == "clear_all":
         controller.auto_ctrl.on_auto_clear()
     elif action == "circle":

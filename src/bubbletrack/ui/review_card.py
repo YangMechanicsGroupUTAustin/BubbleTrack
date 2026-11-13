@@ -44,8 +44,8 @@ _TIPS = {
            "the exact wall), or click edge points. Esc cancels.",
     "no_bubble": "There is no bubble on this frame: it stays empty and locked (exported as no "
                  "bubble). Ctrl+Z undoes.",
-    "accept_all": "Accept every frame of this row as it is, Auto's guesses included, and lock "
-                  "them. Ctrl+Z undoes.",
+    "accept_all": "Accept every frame of this row that has a result or Auto's guess, and "
+                  "lock them. Empty frames stay for you to fix or mark. Ctrl+Z undoes.",
     "skip": "Leave this row as it is (nothing is stored) and go to the next one.",
 }
 _DIM, _FAINT, _OK = "#a1a1aa", "#71717a", "#34d399"
@@ -92,6 +92,7 @@ class ReviewCard(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._row_count = 0  # frames of the selected row (0: none)
+        self._accept_count = 0  # of them, frames with something to accept
         self._fixing = False
         self._can_accept = True
         box = QVBoxLayout(self)
@@ -156,10 +157,11 @@ class ReviewCard(QWidget):
     # -- content ----------------------------------------------------------- #
 
     def show_frame(self, title: str, position: str, advice: CardAdvice, *, row_count: int,
-                   fix_label: str, why: str = "") -> None:
+                   accept_count: int, fix_label: str, why: str = "") -> None:
         """Fill the card for the frame on screen (*advice.action*: the filled button).
 
-        *row_count*: frames of the selected row (0 = no row: no row actions).
+        *row_count*: frames of the selected row (0 = no row: no row actions);
+        *accept_count*: how many of them Accept all would store.
         """
         self.title.setText(title)
         self.position.setText(position)
@@ -170,9 +172,11 @@ class ReviewCard(QWidget):
         self.buttons["fix"].setText(fix_label)
         self.buttons["no_bubble"].setText("No bubble here")
         self._can_accept = advice.can_accept
-        self._row_count = row_count
+        self._row_count, self._accept_count = row_count, accept_count
         recommended = advice.action
-        self.buttons["accept_all"].setText(f"Accept all {row_count}")
+        self.buttons["accept_all"].setText(
+            f"Accept all {row_count}" if accept_count == row_count
+            else f"Accept {accept_count} of {row_count}")
         self.buttons["skip"].setText("Skip row" if row_count > 1 else "Skip")
         self._no_bubble_all.setText(f"No bubble on all {row_count} frames\tShift+N")
         self._no_bubble_all.setVisible(row_count > 1)
@@ -189,9 +193,9 @@ class ReviewCard(QWidget):
         on, rows = not self._fixing, self._row_count
         for action in FRAME_ACTIONS:
             self.buttons[action].setVisible(on)
-        # Nothing to accept on an empty frame (its A key means "no bubble", like N).
+        # Nothing to accept on an empty frame (A only says so: Fix or No bubble decide).
         self.buttons["accept"].setVisible(on and self._can_accept)
-        self.buttons["accept_all"].setVisible(on and rows > 1)
+        self.buttons["accept_all"].setVisible(on and rows > 1 and self._accept_count > 0)
         self.buttons["skip"].setVisible(on and rows > 0)
         self.more.setVisible(on and rows > 0)
 
@@ -223,8 +227,16 @@ class FeedbackLine(QWidget):
         self.clear()
 
     def show_text(self, text: str, *, undo: bool = True) -> None:
+        self._text.setStyleSheet(f"color:{_OK}; font-size:11px;")
         self._text.setText(f"✓ {text}")
         self._undo.setVisible(undo)
+        self.show()
+
+    def show_hint(self, text: str) -> None:
+        """A note, not a result: nothing was done, nothing to undo."""
+        self._text.setStyleSheet(f"color:{_DIM}; font-size:11px;")
+        self._text.setText(text)
+        self._undo.hide()
         self.show()
 
     def clear(self) -> None:

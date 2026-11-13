@@ -6,16 +6,12 @@ import logging
 import os
 from functools import partial
 
-import numpy as np
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QFileDialog, QMessageBox
 
-from bubbletrack.controller import edge_support
 from bubbletrack.controller.auto_controller import AutoController
 from bubbletrack.controller.circle_controller import CircleController
-from bubbletrack.controller.display_mixin import (
-    current_source, display_frame, refresh_chart,
-)
+from bubbletrack.controller.display_mixin import display_frame, refresh_chart
 from bubbletrack.controller.export_controller import ExportController
 from bubbletrack.controller.file_controller import FileController
 from bubbletrack.controller.manual_controller import ManualController
@@ -25,15 +21,8 @@ from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.controller.settings_controller import SettingsController
 from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
 from bubbletrack.model.config import load_config, ui_setting
-from bubbletrack.model.detection import (
-    detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
-)
-from bubbletrack.model.frame_source import normalize_source
-from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.result_history import ResultHistory
 from bubbletrack.model.state import AppState, clear_frame_result, update_state
 from bubbletrack.ui.edge_options import STEEP_EDGE
@@ -137,9 +126,6 @@ class AppController:
         # Wire preview timer to pretune handler
         self._preview_timer.timeout.connect(self.pretune_ctrl.preview_detection)
 
-        # Clear manual points when the side panel leaves manual fixing
-        self.bus.subscribe("tab_changed", lambda idx: self.manual_ctrl.clear_points())
-
         # File > Settings: classic methods, image views (applied live)
         self.settings = SettingsController(self.w, self)
 
@@ -232,12 +218,7 @@ class AppController:
         mp.autotune_clicked.connect(self.pretune_ctrl.on_autotune)
         mp.filters_changed.connect(self.pretune_ctrl.on_filters_changed)
 
-        # Manual fixing (opened from the Review panel)
-        mt = lp.manual_tab
-        mt.select_clicked.connect(self.manual_ctrl.on_manual_select)
-        mt.done_clicked.connect(self.manual_ctrl.on_manual_done)
-        mt.clear_clicked.connect(self.manual_ctrl.on_manual_clear)
-        mt.frame_selected.connect(self.file_ctrl.on_tab_frame_selected)
+        # Clicks on the image: edge points of Review's Fix, or the seed pick
         self.w.original_panel.point_clicked.connect(self.manual_ctrl.on_point_clicked)
         self.w.original_panel.point_clicked.connect(self.pretune_ctrl.on_point_clicked)
         eb = mp.edge_box
@@ -246,9 +227,6 @@ class AppController:
         eb.pick_seed_clicked.connect(self.pretune_ctrl.on_pick_seed)
         eb.clear_seed_clicked.connect(self.pretune_ctrl.on_clear_seed)
         self.bus.subscribe("source_loaded", lambda _n: self.pretune_ctrl.refresh_edge_labels())
-
-        # Side-panel mode (measure / manual fix)
-        lp.tab_bar.tab_changed.connect(self.file_ctrl.on_tab_changed)
 
         # Fit (every frame) and Stop
         lp.fit_controls.fit_clicked.connect(self.auto_ctrl.on_auto_fit)
@@ -266,16 +244,9 @@ class AppController:
         # R-t chart click-to-jump
         self.w.radius_chart.point_clicked.connect(self.file_ctrl.on_frame_changed)
 
-        # R-t chart right-click: delete / refit
-        self.w.radius_chart.delete_requested.connect(self._on_delete_point)
-        self.w.radius_chart.refit_requested.connect(self._on_refit_point)
-        self.w.radius_chart.neighbor_refit_requested.connect(
-            self._on_refit_point_with_neighbors,
-        )
-
-        # R-t chart brushed range: delete / refit / lock / unlock
+        # R-t chart brushed range: refit / lock / unlock / no bubble (a point's
+        # "Fix frame N..." is wired by the Review dock)
         chart = self.w.radius_chart
-        chart.delete_range_requested.connect(self._on_delete_range)
         chart.refit_range_requested.connect(self.auto_ctrl.fit_range)
         chart.lock_range_requested.connect(partial(self._on_lock_range, locked=True))
         chart.unlock_range_requested.connect(partial(self._on_lock_range, locked=False))
@@ -292,14 +263,9 @@ class AppController:
         self._connect_circle_tool()
 
     def _connect_circle_tool(self) -> None:
-        """Manual tab's Drag a circle tool and the automatic re-track."""
+        """Review's "Drag a circle" tool and the automatic re-track."""
         lp, circle = self.w.left_panel, self.circle_ctrl
-        mt = lp.manual_tab
         self.w.original_panel.circle_drawn.connect(circle.on_circle_drawn)
-        mt.tool_changed.connect(self.manual_ctrl.on_tool_changed)
-        mt.tool_changed.connect(circle.on_tool_changed)
-        mt.use_circle_clicked.connect(circle.use_circle_as_manual)
-        mt.cancel_circle_clicked.connect(circle.cancel_prompt)
         # After the measuring handlers stored the new detection mode / ROI:
         lp.measure_panel.filters_changed.connect(circle.sync_tool)
         self.w.original_panel.roi_selected.connect(lambda *_roi: circle.sync_tool())
@@ -340,7 +306,7 @@ class AppController:
         """
         enabled = not running
         lp = self.w.left_panel
-        for widget in (lp.image_source, lp.measure_panel, lp.manual_tab, lp.export_button):
+        for widget in (lp.image_source, lp.measure_panel, lp.export_button):
             widget.setEnabled(enabled)
         for action in (self.w.export_action, self.w.clear_results_action):
             action.setEnabled(enabled)
@@ -377,55 +343,13 @@ class AppController:
             )
 
     # ------------------------------------------------------------------ #
-    #  Result editing (delete / refit single frame)
+    #  Result editing (the chart's brushed range)
     # ------------------------------------------------------------------ #
-
-    def _on_delete_point(self, idx: int) -> None:
-        """Delete the fitted result at frame *idx* (0-based)."""
-        if self._state.radius is None or idx < 0 or idx >= len(self._state.radius):
-            return
-
-        clear_frame_result(self._state, idx)
-        self._refresh_chart()
-
-        # Refresh display if we are viewing the deleted frame
-        if self._state.image_no == idx:
-            display_frame(
-                self._state, self.w, idx, self._set_state, self._image_cache,
-            )
-
-        self.w.header.set_status(f"Deleted result for frame {idx + 1}", "#10b981")
-        self.bus.emit(RESULTS_CHANGED)
-        logger.info("Deleted result for frame %d", idx + 1)
 
     def _frames_in(self, start: int, end: int) -> range:
         """0-based frames start..end (inclusive), clipped to the loaded results."""
         n = 0 if self._state.radius is None else len(self._state.radius)
         return range(max(start, 0), min(end, n - 1) + 1)
-
-    def _on_delete_range(self, start: int, end: int) -> None:
-        """Delete the results of frames start..end; locked frames are kept.
-
-        A lock protects a result from bulk edits, as in Fit All (Unlock the
-        range, or delete the single point, to remove a locked result).
-        """
-        locked = self._state.fit_locked
-        frames = self._frames_in(start, end)
-        targets = [i for i in frames if locked is None or not locked[i]]
-        if not targets:
-            self.w.header.set_status("Nothing to delete: every frame is locked", "#f59e0b")
-            return
-        for i in targets:
-            clear_frame_result(self._state, i)
-        self._refresh_chart()
-        if self._state.image_no in targets:
-            display_frame(self._state, self.w, self._state.image_no,
-                          self._set_state, self._image_cache)
-        kept = len(frames) - len(targets)
-        text = f"Deleted frames {start + 1}-{end + 1}"
-        self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
-        logger.info("%s, %d locked kept", text, kept)
-        self.bus.emit(RESULTS_CHANGED)
 
     def _on_lock_range(self, start: int, end: int, *, locked: bool) -> None:
         """Lock the fitted frames of start..end (or unlock the whole range)."""
@@ -443,7 +367,7 @@ class AppController:
     def _on_mark_no_bubble(self, start: int, end: int) -> None:
         """Say "no bubble" for frames start..end: clear and lock them empty.
 
-        The explicit counterpart of Delete (which only removes a wrong result):
+        The only way to say a frame is empty (nothing deletes a result):
         Fit All and tracking then leave the frames empty, and hard-case exports
         label them "no bubble".  Frames locked with a result are kept.
         """
@@ -466,241 +390,6 @@ class AppController:
         text = f"Marked {len(targets)} frame(s) as no bubble"
         self.w.header.set_status(text + (f" ({kept} locked kept)" if kept else ""), "#10b981")
         self.bus.emit(RESULTS_CHANGED)
-
-    def _on_refit_point(self, idx: int) -> None:
-        """Re-run detection + circle fitting for a single frame *idx* (0-based)."""
-        if not self._state.images or idx < 0 or idx >= len(self._state.images):
-            return
-        if self._state.radius is None:
-            return
-        if self._state.detection_mode == "edge":
-            self._edge_refit(idx, FitSource.REFIT)
-            return
-
-        try:
-            _, _, cur_img_roi, binary_roi = normalize_source(
-                current_source(self._state, idx),
-                self._state.img_thr,
-                self._state.gridx,
-                self._state.gridy,
-                gaussian_sigma=self._state.gaussian_sigma,
-                clahe_clip=self._state.clahe_clip,
-            )
-
-            rf = compute_removing_factor(
-                self._state.removing_factor,
-                self._state.gridx,
-                self._state.gridy,
-            )
-
-            processed, edge_xy = detect_bubble_with_mode(
-                binary_roi,
-                cur_img_roi,
-                self._state.detection_mode,
-                self._state.img_thr,
-                list(self._state.bubble_cross_edges),
-                rf,
-                self._state.gridx,
-                self._state.gridy,
-                self._state.removing_obj_radius,
-                opening_radius=self._state.opening_radius,
-                closing_radius=self._state.closing_radius,
-                gaussian_sigma=self._state.gaussian_sigma,
-                gradient_boundary=self._state.gradient_boundary,
-                area_max_regions=self._state.area_max_regions,
-            )
-
-            fit = None
-            if edge_xy.shape[0] >= 3:
-                r, rc, cc, count = measure_detection(
-                    processed, edge_xy, self._state.detection_mode,
-                    self._state.gridx, self._state.gridy,
-                )
-                # Reject fits that exceed max radius
-                if np.isfinite(r) and r > 0 and r <= self._max_radius:
-                    fit = (r, rc, cc, count)
-
-            # A failed refit must not destroy the existing (possibly manual) result.
-            previous = float(self._state.radius[idx])
-            if fit is not None:
-                r, rc, cc, count = fit
-                self._state.radius[idx] = r
-                self._state.circle_fit_par[idx] = [rc, cc]
-                if self._state.region_count is not None:
-                    self._state.region_count[idx] = count
-                if self._state.circle_xy is not None:
-                    self._state.circle_xy[idx] = edge_xy
-                if self._state.fit_source is not None:
-                    self._state.fit_source[idx] = FitSource.REFIT
-                self._refresh_chart()
-                self.bus.emit(RESULTS_CHANGED)
-                if self._state.image_no == idx:
-                    display_frame(
-                        self._state, self.w, idx, self._set_state, self._image_cache,
-                    )
-                self.w.header.set_status(
-                    f"Refit frame {idx + 1}: r = {r:.1f} px", "#10b981",
-                )
-            elif previous > 0:
-                self.w.header.set_status(
-                    f"Refit frame {idx + 1}: fit failed, kept previous result "
-                    f"(r = {previous:.1f} px)", "#f59e0b",
-                )
-            else:
-                self.w.header.set_status(
-                    f"Refit frame {idx + 1}: fit failed", "#f59e0b",
-                )
-            logger.info("Refit frame %d: %s", idx + 1,
-                        f"radius = {fit[0]:.3f}" if fit else "failed")
-
-        except Exception as exc:
-            logger.error("Refit frame %d failed: %s", idx + 1, exc)
-            self.w.header.set_status(f"Refit failed: {exc}", "#ef4444")
-
-    def _on_refit_point_with_neighbors(self, idx: int) -> None:
-        """Refit one frame using neighbouring fitted frames as a circle prior."""
-        if not self._state.images or idx < 0 or idx >= len(self._state.images):
-            return
-        if self._state.radius is None or self._state.circle_fit_par is None:
-            return
-
-        prior = self._neighbor_circle_prior(idx)
-        if prior is None:
-            self.w.header.set_status(
-                f"No neighbouring fits for frame {idx + 1}", "#f59e0b",
-            )
-            return
-        if self._state.detection_mode == "edge":
-            self._edge_refit(idx, FitSource.NEIGHBOR, prior=prior)
-            return
-
-        try:
-            _, _, cur_img_roi, _ = normalize_source(
-                current_source(self._state, idx),
-                self._state.img_thr,
-                self._state.gridx,
-                self._state.gridy,
-                gaussian_sigma=self._state.gaussian_sigma,
-                clahe_clip=self._state.clahe_clip,
-            )
-            processed, edge_xy = detect_bubble_gradient(
-                cur_img_roi,
-                self._state.img_thr,
-                self._state.gridx,
-                self._state.gridy,
-                boundary_bias=self._state.gradient_boundary,
-                prior_circle=prior,
-                gaussian_sigma=(
-                    self._state.gaussian_sigma
-                    if self._state.gaussian_sigma > 0 else 1.2
-                ),
-            )
-
-            if edge_xy.shape[0] < 3:
-                self.w.header.set_status(
-                    f"Neighbor refit frame {idx + 1}: no boundary", "#f59e0b",
-                )
-                return
-
-            rc, cc, r = circle_fit_taubin(edge_xy)
-            if not np.isfinite(r) or r <= 0 or r > self._max_radius:
-                self.w.header.set_status(
-                    f"Neighbor refit frame {idx + 1}: invalid radius", "#f59e0b",
-                )
-                return
-
-            self._state.radius[idx] = r
-            self._state.circle_fit_par[idx] = [rc, cc]
-            if self._state.region_count is not None:
-                self._state.region_count[idx] = 0
-            if self._state.circle_xy is not None:
-                self._state.circle_xy[idx] = edge_xy
-            if self._state.fit_source is not None:
-                self._state.fit_source[idx] = FitSource.NEIGHBOR
-
-            self._refresh_chart()
-            self.bus.emit(RESULTS_CHANGED)
-            if self._state.image_no == idx:
-                display_frame(
-                    self._state, self.w, idx, self._set_state, self._image_cache,
-                )
-            self.w.header.set_status(
-                f"Neighbor refit frame {idx + 1}: r = {r:.1f} px", "#10b981",
-            )
-            logger.info("Neighbor refit frame %d: radius = %.3f", idx + 1, r)
-
-        except Exception as exc:
-            logger.error("Neighbor refit frame %d failed: %s", idx + 1, exc)
-            self.w.header.set_status(f"Neighbor refit failed: {exc}", "#ef4444")
-
-    def _edge_refit(self, idx: int, source: FitSource, *,
-                    prior: tuple[float, float, float] | None = None) -> None:
-        """Refit one frame with the Edge engine; a rejected fit keeps the old result."""
-        try:
-            fit = edge_support.fit_frame(self._state, idx, self._max_radius, prior=prior)
-        except Exception as exc:
-            logger.error("Edge refit frame %d failed: %s", idx + 1, exc)
-            self.w.header.set_status(f"Refit failed: {exc}", "#ef4444")
-            return
-        if fit.radius > 0:
-            edge_support.store_fit(self._state, idx, fit, source)
-            self._refresh_chart()
-            if self._state.image_no == idx:
-                display_frame(self._state, self.w, idx, self._set_state, self._image_cache)
-        elif self._state.fit_confidence is not None:
-            self._state.fit_confidence[idx] = fit.confidence
-        if fit.radius <= 0 and self._state.radius[idx] <= 0:
-            # Nothing to keep: the new attempt's guess (or none) replaces the old one.
-            edge_support.store_meta(self._state, idx, {"flags": fit.flags, "metrics": fit.metrics,
-                                                       "suggestion": fit.suggestion})
-            if self._state.image_no == idx:
-                display_frame(self._state, self.w, idx, self._set_state, self._image_cache)
-        text, colour = edge_support.status_text(idx, fit)
-        if fit.radius <= 0 and self._state.radius[idx] > 0:
-            text += f"; kept previous result (r = {self._state.radius[idx]:.1f} px)"
-        self.w.header.set_status(text, colour)
-        self.bus.emit(RESULTS_CHANGED)  # a rejected fit still updates its confidence
-
-    def _neighbor_circle_prior(
-        self,
-        idx: int,
-    ) -> tuple[float, float, float] | None:
-        """Predict a circle for *idx* from nearest valid neighbouring frames."""
-        radius = self._state.radius
-        centers = self._state.circle_fit_par
-        n = len(radius)
-
-        def valid(i: int) -> bool:
-            return (
-                0 <= i < n
-                and radius[i] > 0
-                and np.isfinite(radius[i])
-                and np.isfinite(centers[i]).all()
-            )
-
-        prev_idx = next((i for i in range(idx - 1, -1, -1) if valid(i)), None)
-        next_idx = next((i for i in range(idx + 1, n) if valid(i)), None)
-
-        if prev_idx is None and next_idx is None:
-            return None
-        if prev_idx is None:
-            return (
-                float(centers[next_idx, 0]),
-                float(centers[next_idx, 1]),
-                float(radius[next_idx]),
-            )
-        if next_idx is None:
-            return (
-                float(centers[prev_idx, 0]),
-                float(centers[prev_idx, 1]),
-                float(radius[prev_idx]),
-            )
-
-        alpha = (idx - prev_idx) / (next_idx - prev_idx)
-        rc = (1 - alpha) * centers[prev_idx, 0] + alpha * centers[next_idx, 0]
-        cc = (1 - alpha) * centers[prev_idx, 1] + alpha * centers[next_idx, 1]
-        r = (1 - alpha) * radius[prev_idx] + alpha * radius[next_idx]
-        return float(rc), float(cc), float(r)
 
     def _refresh_chart(self) -> None:
         """Refresh the R-t chart with quality-based coloring."""

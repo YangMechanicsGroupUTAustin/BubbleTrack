@@ -115,10 +115,6 @@ class CircleController(BaseController):
         if not on:
             self._drop_prompt()
 
-    def on_tool_changed(self, _tool: str) -> None:
-        """Kept for older wiring (a tool selector's signal): re-check the tool."""
-        self.sync_tool()
-
     # -- the gesture -------------------------------------------------------- #
 
     def on_circle_drawn(self, x: float, y: float, radius: float, dragged: bool) -> None:
@@ -220,11 +216,6 @@ class CircleController(BaseController):
             text += " Drag from the centre to the wall to give its size."
         self._view.show_circle_prompt(text, offer_manual=circle.dragged)
         self.w.header.set_status(f"Frame {idx + 1}: {reason}", _WARN)
-
-    def cancel_prompt(self) -> None:
-        """Prompt choice: leave the frame as it was."""
-        if self.discard_prompt():
-            self.w.header.set_status("Circle discarded; the frame is unchanged", _OK)
 
     def discard_prompt(self) -> bool:
         """Drop a refused circle and its drawing (no message); False if none."""

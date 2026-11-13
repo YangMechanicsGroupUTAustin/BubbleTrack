@@ -24,7 +24,7 @@ from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
-from bubbletrack.ui.tab_bar import mode_label
+from bubbletrack.ui.status_bar import MEASURE_MODE
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +472,7 @@ class AutoController(BaseController):
         self._tracker = None
         self._set_run_state(False)
         self.w.left_panel.fit_controls.set_running(False)
-        self.w.status_bar.update_mode(mode_label(self.w.left_panel.tab_bar.current_name()))
+        self.w.status_bar.update_mode(MEASURE_MODE)
         self._write_autosave()  # final state, not just the last multiple of 50
 
         # Final full display update

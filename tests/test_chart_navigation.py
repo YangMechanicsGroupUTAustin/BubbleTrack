@@ -257,10 +257,10 @@ class TestMenusNeverDelete:
                          "Clear selection"]
         assert not any("Delete" in t for t in texts)
 
-    def test_old_signals_still_exist_for_the_wiring(self, chart):
+    def test_the_old_delete_and_refit_signals_are_gone(self, chart):
         for name in ("delete_requested", "refit_requested", "neighbor_refit_requested",
                      "delete_range_requested"):
-            assert hasattr(chart, name)
+            assert not hasattr(chart, name)
 
 
 class TestHeight:

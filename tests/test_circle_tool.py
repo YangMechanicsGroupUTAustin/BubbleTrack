@@ -95,12 +95,6 @@ def test_switching_between_the_tools(app):
     assert not controller.manual_ctrl.selecting
 
 
-def test_another_left_panel_tab_ends_the_fix(app):
-    window, controller, _ = app
-    window.left_panel.tab_bar.select("Pre-tune")
-    assert window.original_panel.mode == "normal" and not controller.review.fix.active
-
-
 # --------------------------------------------------------------------------- #
 #  Accepted circle
 # --------------------------------------------------------------------------- #
@@ -281,7 +275,7 @@ def test_ctrl_z_restores_the_previous_result_exactly(app):
 def test_ctrl_z_refuses_when_the_frame_changed_since(app):
     window, controller, _ = app
     _drag(window)
-    controller._on_delete_point(3)
+    controller._on_mark_no_bubble(3, 3)  # changed since (chart: Mark as no bubble)
     _ctrl_z(window)
     assert controller._get_state().radius[3] == -1.0
     assert "changed since" in _status(window)
@@ -310,17 +304,6 @@ def test_ctrl_z_after_a_point_fit_undoes_that_fit_not_an_older_circle(app):
     assert same_result(capture(state, 3), circle_fix)  # the older one is kept
     _ctrl_z(window)
     assert state.fit_source[3] == FitSource.NONE  # then the circle fix
-
-
-def test_ctrl_z_undoes_a_manual_clear(app):
-    window, controller, _ = app
-    state = controller._get_state()
-    _drag(window)
-    fixed = capture(state, 3)
-    controller.manual_ctrl.on_manual_clear()
-    assert state.radius[3] == -1.0
-    _ctrl_z(window)
-    assert same_result(capture(state, 3), fixed)
 
 
 def test_ctrl_z_still_undoes_a_clicked_point_first(app):

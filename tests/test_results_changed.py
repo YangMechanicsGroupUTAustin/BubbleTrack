@@ -9,7 +9,6 @@ import pytest
 from bubbletrack.controller.review_controller import install_review
 from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.state import update_state
 
 
 @pytest.fixture
@@ -31,20 +30,18 @@ def _circle_clicks(controller, r=30.0):
         controller.manual_ctrl.on_point_clicked(200 + r * np.cos(a), 125 + r * np.sin(a))
 
 
-def test_chart_delete(app):
+def test_chart_mark_no_bubble(app):
     _, controller, events = app
-    controller._on_delete_point(3)
+    controller._on_mark_no_bubble(3, 3)
     assert events == [()]
 
 
-def test_manual_done_and_clear(app):
+def test_manual_done(app):
     window, controller, events = app
     controller.manual_ctrl.on_manual_select()
     _circle_clicks(controller)
     controller.manual_ctrl.on_manual_done()
     assert len(events) == 1
-    controller.manual_ctrl.on_manual_clear()
-    assert len(events) == 2
 
 
 def test_manual_done_with_too_few_points_changes_nothing(app):
@@ -61,29 +58,11 @@ def test_clear_all(app):
     assert len(events) == 1
 
 
-def test_edge_refit_announces_even_a_rejected_fit(app):
-    _, controller, events = app
-    controller._state = update_state(controller._get_state(), detection_mode="edge")
-    controller._on_refit_point(2)
-    assert len(events) == 1
-
-
-def test_refit_that_fails_keeps_quiet(app, monkeypatch):
-    _, controller, events = app
-    import bubbletrack.controller.controller as module
-
-    monkeypatch.setattr(module, "detect_bubble_with_mode",
-                        lambda *a, **k: (np.zeros((2, 2), bool), np.empty((0, 2))))
-    controller._state = update_state(controller._get_state(), detection_mode="intensity")
-    controller._on_refit_point(2)
-    assert events == []
-
-
 def test_edit_schedules_an_autosave(app):
     _, controller, _ = app
     session = controller.session_ctrl
     session._autosave_dirty = False
-    controller._on_delete_point(1)
+    controller._on_lock_range(1, 1, locked=True)
     assert session._autosave_dirty
 
 

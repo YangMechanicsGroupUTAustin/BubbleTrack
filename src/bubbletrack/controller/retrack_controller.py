@@ -217,7 +217,6 @@ class RetrackController(BaseController):
         lp = self.w.left_panel
         lp.fit_controls.set_running(running)
         if running:
-            lp.manual_tab.setEnabled(True)  # fixes there cancel and restart the re-track
             lp.fit_controls.set_progress_text("Re-tracking after your edit...")
             self.w.header.set_status("Re-tracking the bubble after your edit... "
                                      "(Stop cancels)", _WARN)

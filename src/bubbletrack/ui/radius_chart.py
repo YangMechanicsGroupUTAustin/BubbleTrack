@@ -37,18 +37,11 @@ class RadiusChart(QWidget):
         refit_range_requested / lock_range_requested / unlock_range_requested /
         no_bubble_range_requested(int, int): chosen from the selection's menu.
         data_changed(): emitted after :meth:`plot_all` (results changed).
-        delete_requested(int), refit_requested(int), neighbor_refit_requested(int),
-        delete_range_requested(int, int): no longer emitted by the menus
-        (kept until the controller's wiring is updated).
     """
 
     point_clicked = pyqtSignal(int)
     fix_requested = pyqtSignal(int)
-    delete_requested = pyqtSignal(int)  # unused
-    refit_requested = pyqtSignal(int)  # unused
-    neighbor_refit_requested = pyqtSignal(int)  # unused
     range_selected = pyqtSignal(int, int)
-    delete_range_requested = pyqtSignal(int, int)  # unused
     refit_range_requested = pyqtSignal(int, int)
     lock_range_requested = pyqtSignal(int, int)
     unlock_range_requested = pyqtSignal(int, int)

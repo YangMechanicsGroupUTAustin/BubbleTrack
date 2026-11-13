@@ -8,7 +8,6 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bubbletrack.model.state import update_state
 from bubbletrack.ui.classic_controls import ClassicControls
 from bubbletrack.ui.widgets import SliderInput, ToggleSliderInput
 
@@ -115,17 +114,6 @@ def _click_circle(controller, center=(125.0, 200.0), r=30.0, n=6):
 
 
 class TestManual:
-    def test_clear_marks_frame_unprocessed(self, gui, make_sequence):
-        _, controller = gui
-        _load(controller, make_sequence("A", 5))
-        state = controller._get_state()
-        state.radius[0] = 40.0
-        state.circle_fit_par[0] = [100.0, 100.0]
-        controller.manual_ctrl.on_manual_clear()
-        state = controller._get_state()
-        assert state.radius[0] == -1.0
-        assert np.isnan(state.circle_fit_par[0]).all()
-
     def test_done_without_folder_does_not_crash(self, gui):
         window, controller = gui
         controller.manual_ctrl.on_manual_select()
@@ -154,28 +142,3 @@ class TestManual:
         controller.manual_ctrl.undo_last_point()
         assert controller.manual_ctrl._manual_points == []
         assert controller._get_state().radius[0] == fitted
-
-
-# -- single-frame refit ----------------------------------------------------------
-
-class TestRefit:
-    def test_failed_refit_keeps_previous_result(self, gui, make_sequence, monkeypatch):
-        window, controller = gui
-        _load(controller, make_sequence("A", 5))
-        controller._state = update_state(controller._get_state(), detection_mode="intensity")
-        state = controller._get_state()
-        state.radius[2] = 55.0
-        state.circle_fit_par[2] = [120.0, 190.0]
-        state.circle_xy[2] = np.array([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]])
-
-        from bubbletrack.controller import controller as controller_module
-
-        monkeypatch.setattr(
-            controller_module, "detect_bubble_with_mode",
-            lambda *a, **k: (np.zeros((10, 10), bool), np.empty((0, 2))),
-        )
-        controller._on_refit_point(2)
-        state = controller._get_state()
-        assert state.radius[2] == 55.0
-        np.testing.assert_array_equal(state.circle_fit_par[2], [120.0, 190.0])
-        assert "kept" in window.header._status_label.text().lower()

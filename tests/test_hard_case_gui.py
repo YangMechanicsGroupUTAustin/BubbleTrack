@@ -15,7 +15,7 @@ from bubbletrack.model.cases.schema import (
 )
 from bubbletrack.model.image_io import imread_unicode
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.state import update_state
+from bubbletrack.model.state import clear_frame_result, update_state
 from bubbletrack.ui.hard_case_dialog import HardCaseDialog, HardCaseInput
 
 N = 12
@@ -94,11 +94,12 @@ def test_export_records_the_user_fixes_as_labels(app, tmp_path):
     assert "Hard case saved: c.zip" in window.header._status_label.text()
 
 
-def test_a_deleted_frame_is_unlabelled(app, tmp_path):
-    """Users delete wrong results, often with a bubble present: never a label."""
+def test_a_frame_without_a_result_is_unlabelled(app, tmp_path):
+    """An empty frame (never fitted, or cleared) is not a "no bubble" label:
+    only "No bubble here" says that."""
     _, controller = app
-    controller._on_delete_point(3)  # chart: Delete point
-    controller._on_delete_range(5, 6)  # chart: Delete range
+    for i in (3, 5, 6):
+        clear_frame_result(controller._get_state(), i)
     case, _ = _export(controller, 3, 8, tmp_path / "d.zip")
     for idx in (3, 5, 6):
         frame = case.frame(idx)
