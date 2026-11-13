@@ -20,7 +20,7 @@ from bubbletrack.model.provenance import FitSource
 
 # Per-frame shape metrics shared by the engine, export, review and charts.
 FIT_METRIC_KEYS: tuple[str, ...] = (
-    "r_circle",          # robust circle-fit radius (px)
+    "r_circle",          # the default definition's circle (outline least squares, px)
     "area_px",           # area of the bubble region (px^2)
     "circularity",       # 4*pi*A / P^2
     "solidity",          # A / convex-hull area
@@ -80,8 +80,8 @@ class AppState:
     edge_polarity: str = "dark"  # "dark" bubble on bright background | "bright"
     reference_frame: int | None = None  # bubble-free frame index; None = auto-select
     edge_seed: tuple[float, float] | None = None  # (row, col) 1-based, picks the bubble
-    # The radius definition ("Bubble may be non-round" in Advanced): False = the robust
-    # circle through the wall (default); True = the area-equivalent radius of the outline.
+    # The radius definition ("Bubble may be non-round" in Advanced): False = the least-squares
+    # circle through the outline (default); True = the area-equivalent radius of the outline.
     bubble_non_round: bool = False
 
     # ML assist (a helper of Auto, ``model.teach``), per recording: cleared when

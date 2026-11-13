@@ -7,6 +7,10 @@ the per-ray crossing levels, smoothed by a running median over
 circle centre, form a level map; the outline is the zero crossing of
 ``image - level map``.  On a round bubble it runs through the ray edge points;
 where the wall is locally fainter it still follows the local 50 % point.
+
+The circle the default radius definition reports is fitted to this outline
+(:func:`outline_circle_of`), not to the ray points: on an elongated bubble the
+robust ray fit hugs one flank.
 """
 
 from __future__ import annotations
@@ -19,8 +23,9 @@ from numpy.lib.stride_tricks import sliding_window_view
 
 from bubbletrack.model.edge.body import edge_rim
 from bubbletrack.model.edge.config import EdgeConfig
+from bubbletrack.model.edge.fit import CircleFit, outline_circle
 from bubbletrack.model.edge.quality import FitStats, OutlineEvidence, outline_evidence, radius_sigma
-from bubbletrack.model.edge.region import Region, find_region
+from bubbletrack.model.edge.region import Region, find_region, hidden_arc
 
 _NOISE_SUBSAMPLE = 3
 _MIN_NOISE_PIXELS = 20
@@ -39,17 +44,39 @@ class RayPoints:
     n_rays: int
 
 
+FALLBACK_FEW_POINTS = "too few outline points"
+FALLBACK_FIT_FAILED = "outline fit failed"
+
+
+@dataclass(frozen=True)
+class OutlineCircle:
+    """The default radius definition's circle of one outline (``r_circle``)."""
+
+    fit: CircleFit
+    """Taubin + one trimming pass through the genuine outline points (``fit.outline_circle``),
+    or the robust ray fit when that is not possible (``fallback``)."""
+    hidden_arc: float
+    """Fraction of its circumference hidden by the ROI border or excluded pixels."""
+    n_points: int
+    """Genuine outline points it was fitted to (``Region.edge``)."""
+    fallback: str | None = None
+    """Why the robust ray fit stands in (None: the outline circle)."""
+
+
 @dataclass(frozen=True)
 class Outline:
-    """The bubble at one edge definition: its region, outline evidence and circle fit."""
+    """The bubble at one edge definition: its region, outline evidence and circle fits."""
 
     region: Region
     evidence: OutlineEvidence
     sigma_r: float
     stats: FitStats
-    """The robust circle fit of the same definition (``r_circle``; completes clipped regions)."""
+    """The robust circle fit of the ray edges of the same definition (finds the bubble, completes
+    clipped regions for the area definition, probes the circle of a clipped one)."""
     level: float
     """Median of the per-ray crossing levels."""
+    circle: OutlineCircle
+    """The circle the default definition reports (:func:`outline_circle_of`)."""
 
 
 def background_noise(img: np.ndarray, background: np.ndarray) -> float:
@@ -129,4 +156,17 @@ def measure_outline(img: np.ndarray, rays: RayPoints, exclude: np.ndarray,
         return None
     evidence = outline_evidence(img, region, min_step, noise, blur, config.region)
     return Outline(region, evidence, radius_sigma(region, evidence, fit.radius_sigma), stats,
-                   float(np.median(rays.levels)))
+                   float(np.median(rays.levels)), outline_circle_of(region, fit, exclude, config))
+
+
+def outline_circle_of(region: Region, ray_fit: CircleFit, exclude: np.ndarray,
+                      config: EdgeConfig) -> OutlineCircle:
+    """The default definition's circle of *region*: the least-squares circle through its genuine
+    outline points (``fit.outline_circle``), else the robust ray fit *ray_fit* (recorded)."""
+    points = region.edge
+    fit = outline_circle(points, config.fit)
+    if fit is None:
+        few = len(points) < config.fit.outline_min_points
+        return OutlineCircle(ray_fit, region.hidden_arc, len(points),
+                             FALLBACK_FEW_POINTS if few else FALLBACK_FIT_FAILED)
+    return OutlineCircle(fit, hidden_arc(fit.circle, region, exclude, config.region), len(points))

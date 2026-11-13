@@ -135,6 +135,19 @@ def _near(mask: np.ndarray, c: np.ndarray, k: int) -> np.ndarray:
     return grown[ri, ci]
 
 
+def _arc_outside(circle, closure: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
+    """*n* samples of the circle's circumference and which of them lie outside the valid
+    region (beyond the ROI box of *closure*'s shape, or on *closure* pixels)."""
+    h, w = closure.shape
+    rc, cc, radius = circle
+    th = np.linspace(0, 2 * np.pi, n, endpoint=False)
+    arc = np.column_stack([rc + radius * np.sin(th), cc + radius * np.cos(th)])
+    out = (arc[:, 0] < -0.5) | (arc[:, 0] > h - 0.5) | (arc[:, 1] < -0.5) | (arc[:, 1] > w - 0.5)
+    ri = np.clip(np.rint(arc[:, 0]), 0, h - 1).astype(int)
+    ci = np.clip(np.rint(arc[:, 1]), 0, w - 1).astype(int)
+    return arc, out | closure[ri, ci]
+
+
 def _hidden(circle, body: np.ndarray, closure: np.ndarray, cfg: RegionConfig) -> tuple[Moments, np.ndarray]:
     """Moments of the fitted disk outside the valid region, and its hidden arc points."""
     h, w = body.shape
@@ -145,15 +158,21 @@ def _hidden(circle, body: np.ndarray, closure: np.ndarray, cfg: RegionConfig) ->
     if r1 > r0 and c1 > c0:
         rr, cl = np.nonzero(closure[r0:r1, c0:c1])
         hidden = hidden + disk_pixel_moments(circle, np.column_stack([rr + r0, cl + c0]))
-    th = np.linspace(0, 2 * np.pi, cfg.arc_samples, endpoint=False)
-    arc = np.column_stack([rc + radius * np.sin(th), cc + radius * np.cos(th)])
-    out = (arc[:, 0] < -0.5) | (arc[:, 0] > h - 0.5) | (arc[:, 1] < -0.5) | (arc[:, 1] > w - 0.5)
-    ri = np.clip(np.rint(arc[:, 0]), 0, h - 1).astype(int)
-    ci = np.clip(np.rint(arc[:, 1]), 0, w - 1).astype(int)
-    out |= closure[ri, ci]
+    arc, out = _arc_outside(circle, closure, cfg.arc_samples)
     if hidden.area < 0:
         hidden = Moments()
     return hidden, arc[out]
+
+
+def hidden_arc(circle: tuple[float, float, float], region: Region, exclude: np.ndarray,
+               cfg: RegionConfig) -> float:
+    """Fraction of *circle*'s circumference hidden by the ROI border or by excluded pixels
+    next to *region* (0 unless the region is clipped), as ``Region.hidden_arc`` is for the
+    circle that completes it."""
+    if not region.clipped:
+        return 0.0
+    _, out = _arc_outside(circle, exclude & ~region.mask, cfg.arc_samples)
+    return float(out.mean())
 
 
 def _fragments(others: np.ndarray, main: np.ndarray, radius: float, cfg: RegionConfig) -> tuple[int, float]:

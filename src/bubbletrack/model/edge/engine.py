@@ -6,12 +6,13 @@ coordinates in and out, i.e. pixel ``(i, j)`` has coordinate ``(i+1, j+1)``):
 A  normalise by the reference frame (gain + residual surface) or, without one,
    by a robust background surface;  B  coarse mask at 50 % contrast;
 E  candidate selection;  C  sub-pixel edges along ~2*pi*R rays;
-D  robust circle fit (``r_circle``) and the outer extent;
+D  robust circle fit of the ray edges (finds the bubble) and the outer extent;
 G  the bubble as a region: outer iso-contour at the median ray-edge level,
    holes filled, thin necks split, the part hidden by the ROI border completed
-   with the circle fit, fragments counted;  F  the radius under the user's
-   definition (``definition``: the circle, or the area when the bubble may be
-   non-round) with its independent check (``shape_check``), confidence, flags,
+   with the robust circle, fragments counted; the least-squares circle through
+   its genuine outline (``r_circle``);  F  the radius under the user's
+   definition (``definition``: that circle, or the area when the bubble may be
+   non-round) with its independent checks (``shape_check``), confidence, flags,
    provenance.
 """
 
@@ -43,7 +44,9 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.2.0"
+ENGINE_VERSION = "edge-1.3.0"
+"""1.3.0: the default radius is the least-squares (Taubin, one outlier pass) circle through the
+bubble outline instead of the robust circle through the ray edges (owner decision 2026-11-13)."""
 
 __all__ = ["ENGINE_VERSION", "EdgeParams", "EdgeResult", "detect_edge", "detect_edge_with_config"]
 
@@ -83,7 +86,7 @@ def detect_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     Returns
     -------
     EdgeResult
-        ``radius`` is the robust circle through the bubble wall, or with
+        ``radius`` is the least-squares circle through the bubble outline, or with
         ``params.non_round`` the area-equivalent radius of the bubble region
         (NaN when nothing was found; ``flags`` then names why).
 
@@ -330,6 +333,17 @@ def _describe(prov: dict, steep: Outline, outer: tuple[FitStats, RayPoints] | No
                         "hidden_arc": round(reg.hidden_arc, 4), "support": round(steep.evidence.support, 3)})
 
 
+def _circle_provenance(line: Outline, origin: tuple[int, int]) -> dict:
+    """The default definition's circle (``r_circle``) of the chosen outline, 1-based centre."""
+    circle = line.circle
+    fit = circle.fit
+    return {"method": "taubin+trim(outline)" if circle.fallback is None else fit.method,
+            "fallback": circle.fallback, "points": circle.n_points,
+            "kept": round(float(np.mean(fit.weights > 0)), 4) if circle.fallback is None else None,
+            "centre": (fit.rc + origin[0], fit.cc + origin[1]), "radius": fit.radius,
+            "sigma_fit": _rounded(fit.radius_sigma, 4), "hidden_arc": round(circle.hidden_arc, 4)}
+
+
 def _rounded(value: float, digits: int) -> float | None:
     """A provenance number (None when not finite: provenance stays strict JSON)."""
     return round(float(value), digits) if np.isfinite(value) else None
@@ -361,6 +375,7 @@ def _build(line: Outline, check: CircleCheck, outer_radius: float, shoulder: flo
     region, stats = line.region, line.stats
     frame = FrameStats(coarse.contrast, coarse.noise, sel.runner_up, edges.multi_fraction)
     m = measure(line, check, frame, config.quality, non_round=params.non_round)
+    prov["circle"] = _circle_provenance(line, origin)
     prov["confidence_terms"] = {k: round(v, 3) for k, v in m.terms.items()}
     prov["circle_check"] = {"method": check.method, "r_estimate": _rounded(check.r_estimate, 3),
                             "off": _rounded(m.check, 4)}
@@ -375,7 +390,7 @@ def _build(line: Outline, check: CircleCheck, outer_radius: float, shoulder: flo
                       outer_radius=float(outer_radius),
                       shoulder_width=float(shoulder), arc_coverage=stats.arc_coverage,
                       inlier_fraction=stats.inlier_fraction, mask=region.mask, provenance=prov,
-                      confidence_gate=params.confidence_gate, r_circle=float(stats.fit.radius),
+                      confidence_gate=params.confidence_gate, r_circle=float(line.circle.fit.radius),
                       area_px=float(region.area), perimeter_px=float(region.perimeter),
                       circularity=region.circularity, solidity=region.solidity,
                       fragment_count=region.fragment_count, fragment_area_px=region.fragment_area,

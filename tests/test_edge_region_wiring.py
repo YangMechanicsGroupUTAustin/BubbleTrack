@@ -15,6 +15,8 @@ from bubbletrack.ui.image_panel import is_ordered_contour
 
 KIDNEY = next(s for s in SHAPES if s.name == "kidney")
 PEANUT = next(s for s in SHAPES if s.name == "peanut")
+OUTLINE_CIRCLE = {"kidney": 58.27, "peanut": 60.03}
+"""The outline circle (r_circle) of each shape, as the circle-estimator evaluation measured it."""
 
 
 def _stored(shape):
@@ -33,6 +35,8 @@ def test_concave_bubble_reports_its_area_radius(shape):
     assert state.radius[0] == pytest.approx(truth, rel=0.01)
     assert state.fit_metrics["area_px"][0] == pytest.approx(np.pi * truth ** 2, rel=0.02)
     assert state.fit_metrics["circularity"][0] < 0.95
-    assert abs(state.fit_metrics["r_circle"][0] - truth) > 0.05 * truth  # the circle is off
+    # the outline circle (edge-1.3.0: least squares) is off: kidney +7.1 %, peanut +3.6 %
+    assert state.fit_metrics["r_circle"][0] == pytest.approx(OUTLINE_CIRCLE[shape.name], abs=0.15)
+    assert abs(state.fit_metrics["r_circle"][0] - truth) > 0.03 * truth
     assert "non_circular" in state.fit_flags[0]
     assert is_ordered_contour(state.circle_xy[0])  # outline, not a point cloud
