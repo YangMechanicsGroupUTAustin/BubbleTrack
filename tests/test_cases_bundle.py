@@ -18,7 +18,7 @@ from bubbletrack.model.cases.bundle import (
 )
 from bubbletrack.model.cases.labels import app_result, frame_label
 from bubbletrack.model.cases.schema import (
-    BY_ACCEPTED, BY_DELETED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, LABEL_UNLABELLED,
+    BY_ACCEPTED, BY_MANUAL, LABEL_BUBBLE, LABEL_NO_BUBBLE, LABEL_UNLABELLED,
     ROLE_CONTEXT, ROLE_REFERENCE, ROLE_SELECTED, AppResult, CaseFormatError, case_from_json,
     case_to_json,
 )
@@ -44,14 +44,6 @@ class TestLabels:
     def test_locked_without_result_is_no_bubble(self):
         label = frame_label(AppResult(None, locked=True))
         assert (label.status, label.by) == (LABEL_NO_BUBBLE, BY_ACCEPTED)
-
-    def test_deleted_without_result_is_no_bubble(self):
-        label = frame_label(AppResult(None), deleted=True)
-        assert (label.status, label.by) == (LABEL_NO_BUBBLE, BY_DELETED)
-
-    def test_deleted_then_refitted_is_unlabelled(self):
-        assert frame_label(AppResult(25.0, (1.0, 1.0), source="auto"), deleted=True).status \
-            == LABEL_UNLABELLED
 
     @pytest.mark.parametrize("result", [AppResult(25.0, (1.0, 1.0), source="auto"),
                                         AppResult(25.0, (1.0, 1.0), source="tracked"),
@@ -102,12 +94,14 @@ def state(make_sequence):
     set_manual(st, 5, 40.0, 126.0, 199.0)
     st.fit_locked[6] = True
     st.radius[7], st.fit_source[7] = -1.0, FitSource.NONE
+    st.fit_locked[7] = True  # accepted without a result: "no bubble here"
+    st.radius[4], st.fit_source[4] = -1.0, FitSource.NONE  # e.g. deleted: not a label
     return st
 
 
 def _request(**kw) -> CaseRequest:
     return CaseRequest(**{"start": 5, "end": 7, "note": "  merges with the wall ",
-                          "reporter": " Ann ", "deleted": {7}, "max_radius": 400.0, **kw})
+                          "reporter": " Ann ", "max_radius": 400.0, **kw})
 
 
 class TestCaseJson:
@@ -118,8 +112,10 @@ class TestCaseJson:
         assert case.source["name"] == "gel run" and case.source["kind"] == "folder"
         assert "\\" not in json.dumps(dict(case.source)) and "/" not in case.source["name"]
         assert case.frame(5).label.by == BY_MANUAL and case.frame(6).label.by == BY_ACCEPTED
-        assert case.frame(7).label.status == LABEL_NO_BUBBLE
+        assert (case.frame(7).label.status, case.frame(7).label.by) == (LABEL_NO_BUBBLE, BY_ACCEPTED)
         assert case.frame(8).label.status == LABEL_UNLABELLED
+        assert case.frame(4).result.radius is None
+        assert case.frame(4).label.status == LABEL_UNLABELLED  # no result, not accepted
         assert case.frame(5).source_file == "frame_006.tiff"
         assert (case.note, case.reporter) == ("merges with the wall", "Ann")
         assert case.detection.params["gridx"] == [31, 220]

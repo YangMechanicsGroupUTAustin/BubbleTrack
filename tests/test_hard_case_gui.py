@@ -8,11 +8,10 @@ from PyQt6.QtCore import QPoint
 from PyQt6.QtWidgets import QDialog, QMessageBox
 
 from bubbletrack.controller import hard_case_controller as hcc
-from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model import config
 from bubbletrack.model.cases.bundle import open_bundle
 from bubbletrack.model.cases.schema import (
-    BY_ACCEPTED, BY_DELETED, BY_MANUAL, LABEL_NO_BUBBLE, LABEL_UNLABELLED, ROLE_REFERENCE,
+    BY_ACCEPTED, BY_MANUAL, LABEL_NO_BUBBLE, LABEL_UNLABELLED, ROLE_REFERENCE,
 )
 from bubbletrack.model.image_io import imread_unicode
 from bubbletrack.model.provenance import FitSource
@@ -76,13 +75,14 @@ def test_export_records_the_user_fixes_as_labels(app, tmp_path):
     state = controller._get_state()
     state.radius[4], state.fit_source[4] = 33.0, FitSource.MANUAL
     controller._on_lock_range(5, 5, locked=True)
-    controller._on_delete_point(6)
+    state.radius[6], state.fit_source[6] = -1.0, FitSource.NONE  # Fit All found nothing ...
+    state.fit_locked[6] = True  # ... and Review > Accept said "no bubble here"
     case, size = _export(controller, 4, 6, tmp_path / "c.zip", note=" wall ", reporter="Ann")
     assert size > 0 and case.selection == (4, 6)
     assert [f.index for f in case.frames] == list(range(1, 10))
     assert case.frame(4).label.by == BY_MANUAL and case.frame(4).label.radius == 33.0
     assert case.frame(5).label.by == BY_ACCEPTED
-    assert (case.frame(6).label.status, case.frame(6).label.by) == (LABEL_NO_BUBBLE, BY_DELETED)
+    assert (case.frame(6).label.status, case.frame(6).label.by) == (LABEL_NO_BUBBLE, BY_ACCEPTED)
     assert case.frame(7).label.status == LABEL_UNLABELLED
     assert (case.gridx, case.gridy) == ROI and case.note == "wall"
     assert case.detection.max_radius == 400.0
@@ -94,18 +94,21 @@ def test_export_records_the_user_fixes_as_labels(app, tmp_path):
     assert "Hard case saved: c.zip" in window.header._status_label.text()
 
 
-def test_deleted_frames_are_forgotten_once_refitted_or_cleared(app):
+def test_a_deleted_frame_is_unlabelled(app, tmp_path):
+    """Users delete wrong results, often with a bubble present: never a label."""
     _, controller = app
-    hc = controller.hard_cases
-    controller._on_lock_range(3, 3, locked=True)
-    controller._on_delete_range(2, 4)  # the locked frame 3 is kept
-    assert hc.deleted_frames() == {2, 4}
+    controller._on_delete_point(3)  # chart: Delete point
+    controller._on_delete_range(5, 6)  # chart: Delete range
     state = controller._get_state()
-    state.radius[2] = 31.0
-    controller.bus.emit(RESULTS_CHANGED)
-    assert hc.deleted_frames() == {4}
-    controller.auto_ctrl.on_auto_clear()
-    assert hc.deleted_frames() == frozenset()
+    state.fit_confidence[8] = 0.1  # Review > Delete on a low-confidence row
+    controller.review.refresh()
+    controller.review.panel.step(1)
+    controller.review.perform("delete")
+    case, _ = _export(controller, 3, 8, tmp_path / "d.zip")
+    for idx in (3, 5, 6, 8):
+        frame = case.frame(idx)
+        assert frame.result.radius is None and frame.label.status == LABEL_UNLABELLED
+    assert not any(f.label.is_labelled for f in case.frames)
 
 
 def test_file_menu_exports_the_chart_selection(app, dialogs):

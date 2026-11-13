@@ -34,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="bubbletrack-cli eval-cases",
         description="Re-run the current engine on hard-case bundles and score it "
-                    "against the users' fixes (manual fits, accepted and deleted frames).",
+                    "against the users' fixes (manual fits and accepted frames).",
     )
     parser.add_argument("folder", help="Folder holding hard-case bundles (.zip files or "
                                        "unpacked folders), searched recursively")

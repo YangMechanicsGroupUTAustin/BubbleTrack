@@ -16,15 +16,19 @@ Only frames you fixed are scored. A fix is one of:
 |---|---|---|
 | Manual fit (click edge points) | Manual tab, or Review > Manual (M) | this circle is right |
 | Accept / lock a result | Review > Accept (A), or chart: Shift+drag a range > right-click > Lock | this result is right |
-| Accept a frame without a result | Review > Accept on a "No result" row | there is no bubble here |
-| Delete a result | Review > Delete (D), or chart right-click > Delete | there is no bubble here |
+| Accept a frame without a result | Review > Accept (A) on a "No result" row | there is no bubble here |
+
+**Deleting is not a fix.** Delete (D) only removes a wrong result: the frame
+is then sent *unlabelled*, because a wrong result is often deleted while a
+bubble is still there. "No bubble here" is said only by accepting (A) a
+frame that has no result, e.g. a "No result" row in Review. A frame whose
+result you deleted leaves the Review queue, so if the right answer is
+really "no bubble", write it in the note ("frames 12-15: no bubble") rather
+than relying on the deletion.
 
 Frames you did not touch are sent as well (they show the context) but count
 as *unlabelled*. Fix a few frames where it goes wrong and, ideally, a few
 where it is right just before and after.
-
-A deletion counts only while the frame stays without a result, and only until
-you close the recording: export the case in the same session.
 
 ### 2. Export
 
@@ -138,5 +142,5 @@ parameters, `tracking`, `reference_index`, `max_radius`), `selection` and per
 frame its 0-based `index`, `role` (selected / context / reference), the
 app's `result` (radius, centre, confidence, flags, source, locked) and its
 `label` (`bubble` with radius and centre, `no_bubble`, or `unlabelled`, and
-`by`: manual / accepted / deleted). Radii and centres are in pixels of the
+`by`: manual / accepted). Radii and centres are in pixels of the
 full frame, 1-based, as in the app.
