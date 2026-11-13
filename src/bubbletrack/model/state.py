@@ -106,6 +106,7 @@ class AppState:
     fit_metrics: object = None      # dict[str, np.ndarray (N,)] keyed by FIT_METRIC_KEYS, NaN = n/a
     fit_flags: object = None        # list[frozenset[str]] per frame (engine/sequence flags)
     fit_locked: object = None       # np.ndarray (N,) bool, accepted in review: never overwritten
+    fit_suggestion: object = None   # list[Suggestion | None]: Auto's rejected guess (display only)
 
     # Display parameters
     img_grayscale_max: int = 65535
@@ -151,6 +152,7 @@ class AppState:
             fit_metrics={key: np.full(n, np.nan) for key in FIT_METRIC_KEYS},
             fit_flags=[frozenset()] * n,
             fit_locked=np.zeros(n, dtype=bool),
+            fit_suggestion=[None] * n,
         )
 
 
@@ -159,11 +161,13 @@ def clear_frame_result(state: AppState, idx: int) -> None:
 
     Uses the same empty values as :meth:`AppState.with_results_initialized`
     (radius -1, centre NaN, source NONE).  A lock protects a result, so an
-    erased frame is unlocked and the next Fit All fits it again.
+    erased frame is unlocked and the next Fit All fits it again.  Auto's
+    guess for the frame (``fit_suggestion``) goes too.
     """
     empty = (("radius", -1.0), ("circle_fit_par", np.nan), ("region_count", 0),
              ("fit_source", FitSource.NONE), ("fit_confidence", np.nan),
-             ("fit_locked", False), ("circle_xy", None), ("fit_flags", frozenset()))
+             ("fit_locked", False), ("circle_xy", None), ("fit_flags", frozenset()),
+             ("fit_suggestion", None))
     for name, value in empty:
         values = getattr(state, name)
         if values is not None:

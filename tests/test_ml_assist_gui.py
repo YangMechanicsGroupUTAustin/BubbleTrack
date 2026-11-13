@@ -218,6 +218,7 @@ def test_apply_measures_unconfirmed_frames_and_lists_ml_outlines(app, qapp):
     assert {f: state.radius[f] for f in kept} == kept                      # never touched
     assert all(state.fit_source[f] == FitSource.MANUAL for f in kept)
     assert state.fit_source[6] == FitSource.ML and "ml_outline" in state.fit_flags[6]
+    assert all(state.fit_suggestion[f] is None for f in range(LAST + 1) if state.radius[f] > 0)
     assert state.radius[6] == pytest.approx(S.RADII[6], rel=0.1)
     assert any("ml_guided" in state.fit_flags[f] for f in (1, 2, 4))
     assert any(text.endswith("ML result") for text in controller.review.panel.texts())

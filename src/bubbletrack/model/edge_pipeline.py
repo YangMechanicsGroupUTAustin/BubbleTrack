@@ -20,6 +20,7 @@ import cv2
 import numpy as np
 
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode
+from bubbletrack.model.suggestion import Suggestion, make_suggestion
 
 
 def _engine():
@@ -96,6 +97,9 @@ class EdgeFrameFit:
     flags: frozenset
     rejected_reason: str  # "" when accepted
     metrics: dict = field(default_factory=dict)  # subset of state.FIT_METRIC_KEYS
+    # Rejected for low confidence only: the circle and outline the engine found
+    # (display-only until accepted, see ``model.suggestion``); None otherwise.
+    suggestion: Suggestion | None = None
 
 
 def _metrics(res) -> dict:
@@ -116,6 +120,16 @@ def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     from bubbletrack.model.edge.engine import engine_view
 
     return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
+
+
+def _low_confidence_guess(res, confidence: float, metrics: dict,
+                          max_radius: float) -> Suggestion | None:
+    """The circle of a fit rejected only for its confidence (a plausible radius)."""
+    if not (0 < float(res.radius) <= max_radius):
+        return None
+    xy = np.asarray(res.edge_xy, dtype=np.float64).reshape(-1, 2)
+    return make_suggestion(res.radius, res.rc, res.cc, xy, confidence,
+                           frozenset(res.flags), metrics)
 
 
 def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
@@ -148,9 +162,12 @@ def fit_from_result(res, job: EdgeJob, *, min_confidence: float | None = None) -
     else:
         reason = ""
     if reason:
+        metrics = _metrics(res)
+        guess = (_low_confidence_guess(res, confidence, metrics, job.max_radius)
+                 if np.isfinite(res.radius) and not passed else None)
         return EdgeFrameFit(-1.0, float("nan"), float("nan"), np.empty((0, 2)),
                             res.mask, confidence, frozenset(res.flags), reason,
-                            metrics=_metrics(res))
+                            metrics=metrics, suggestion=guess)
     return EdgeFrameFit(float(res.radius), float(res.rc), float(res.cc),
                         np.asarray(res.edge_xy, dtype=np.float64).reshape(-1, 2),
                         res.mask, confidence, frozenset(res.flags), "",

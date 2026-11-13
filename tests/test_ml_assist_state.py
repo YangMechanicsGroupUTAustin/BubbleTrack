@@ -171,6 +171,24 @@ def test_no_result_looks_like_autos_rejection():
     assert out.fit.flags == frozenset({"no_candidate", "ml_unfamiliar"})
 
 
+def test_autos_guess_stays_without_a_result_and_goes_with_one():
+    from bubbletrack.model.suggestion import make_suggestion
+
+    guess = make_suggestion(21.0, 50.0, 60.0, np.ones((4, 2)), 0.2)
+    state = _state()
+    state.radius[1] = -1.0
+    state.fit_source[1] = FitSource.NONE
+    state.fit_confidence[1] = 0.2
+    state.fit_suggestion[1] = guess
+    stored = M.stored_auto(state, 1)
+    assert stored.suggestion is guess and stored.as_fit().suggestion is guess
+    plain = stored.as_fit()
+    none = storable(_result("ml", 24.0, {"ml_outline"}, region=_region(conf=0.1), conf=0.1), plain, JOB)
+    assert none.source == FitSource.NONE and none.fit.suggestion is guess      # still shown dashed
+    outline = storable(_result("ml", 24.0, {"ml_outline"}, region=_region()), plain, JOB)
+    assert outline.source == FitSource.ML and outline.fit.suggestion is None   # a result replaces it
+
+
 def test_implausible_ml_outline_is_no_result():
     big = EdgeJob(params=make_params(), reference=None, max_radius=10.0)
     out = storable(_result("ml", 24.0, {"ml_outline"}, region=_region()), PLAIN_REJECTED, big)

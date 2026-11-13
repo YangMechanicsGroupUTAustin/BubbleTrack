@@ -17,6 +17,7 @@ import numpy as np
 from bubbletrack.model.provenance import FitSource, user_confirmed_mask
 from bubbletrack.model.sequence import CONTEXT_FLAGS
 from bubbletrack.model.state import AppState
+from bubbletrack.model.suggestion import suggested_mask
 
 LOW_CONFIDENCE = 0.5  # engine confidence below this is worth a look
 JUMP_FRACTION = 0.15  # |dR| to both valid neighbours, relative to each neighbour
@@ -45,6 +46,12 @@ REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected"}
 # Routine engine flags: they describe a listed frame and add to its rank, but
 # never list a frame on their own (see the sequence solver's CONTEXT_FLAGS).
 CONTEXT_REASONS = CONTEXT_FLAGS | {"ml_unfamiliar"}
+
+GUESS = "guess"
+"""A "rejected" frame that shows Auto's guess (``model.suggestion``).  It only
+describes the frame: it comes with "rejected", ranks right after it, so the
+row stays "No result", and Accept stores the guess instead of "no bubble"."""
+_GUESS_WEIGHT = REASON_WEIGHTS["rejected"] - 1
 
 
 @dataclass(frozen=True, eq=False)
@@ -142,6 +149,8 @@ def _frame_reasons(state: AppState, radius: np.ndarray, conf: np.ndarray,
 
     for i in np.flatnonzero(engine & ~fitted):
         add(i, "rejected")
+    for i in np.flatnonzero(engine & ~fitted & suggested_mask(state, n)):
+        add(i, GUESS)
     for i in np.flatnonzero(engine & (conf < LOW_CONFIDENCE)):
         add(i, "low_confidence")
     for i, flags in enumerate((state.fit_flags or ())[:n]):
@@ -174,6 +183,8 @@ def _weight(reason: str, confidence: float) -> int:
     if reason == "low_confidence" and np.isfinite(confidence):
         shortfall = (LOW_CONFIDENCE - min(max(confidence, 0.0), LOW_CONFIDENCE)) / LOW_CONFIDENCE
         return REASON_WEIGHTS[reason] + round(30 * shortfall)
+    if reason == GUESS:
+        return _GUESS_WEIGHT
     return REASON_WEIGHTS.get(reason, UNKNOWN_REASON_WEIGHT)
 
 

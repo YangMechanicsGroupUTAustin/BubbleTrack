@@ -17,6 +17,7 @@ from bubbletrack.model.ml_pipeline import (
     FLAG_GUIDED, FLAG_OUTLINE, FLAG_UNFAMILIAR, ML_FLAGS, RESULT_FLAGS, MLJob, StoredAuto,
 )
 from bubbletrack.model.provenance import USER_CONFIRMED_SOURCES, FitSource
+from bubbletrack.model.suggestion import stored_suggestion
 from bubbletrack.model.teach.examples import BACKGROUND, BUBBLE, LABELS, MLExamples
 
 SUGGESTED_FRAMES = 2  # the study: two verified frames of different sizes teach best
@@ -142,7 +143,8 @@ def stored_auto(state, idx: int) -> StoredAuto | None:
     if radius <= 0:
         if source != FitSource.NONE:
             return None
-        return StoredAuto(np.nan, np.nan, np.nan, conf, flags - ML_FLAGS, None, metrics)
+        return StoredAuto(np.nan, np.nan, np.nan, conf, flags - ML_FLAGS, None, metrics,
+                          stored_suggestion(state, idx))
     xy = state.circle_xy[idx] if state.circle_xy is not None else None
     rc, cc = (float(v) for v in state.circle_fit_par[idx])
     if source not in PLAIN_AUTO_SOURCES or xy is None or not (np.isfinite(rc) and np.isfinite(cc)):

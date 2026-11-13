@@ -14,7 +14,8 @@ Per frame (guarded policy, see ``model.teach.measure``):
 * ``ml`` (ML's own outline) is stored as ``FitSource.ML`` with flag
   ``ml_outline`` and ML's confidence: always listed in Review;
 * otherwise no result, stored exactly like plain Auto's rejection (its
-  confidence, flags and metrics), so a later Apply can hand it back as Auto's.
+  confidence, flags, metrics and guess, the dashed suggestion), so a later
+  Apply can hand it back as Auto's.  An ML result clears the guess.
 """
 
 from __future__ import annotations
@@ -96,6 +97,8 @@ class StoredAuto:
     flags: frozenset
     edge_xy: np.ndarray | None = None
     metrics: dict = field(default_factory=dict)
+    suggestion: object = None
+    """Auto's guess for a rejected frame (``model.suggestion.Suggestion``), if any."""
 
     @property
     def fitted(self) -> bool:
@@ -104,7 +107,8 @@ class StoredAuto:
     def as_fit(self) -> EdgeFrameFit:
         if not self.fitted:
             return EdgeFrameFit(-1.0, _NAN, _NAN, _EMPTY_XY, None, self.confidence, self.flags,
-                                "no bubble found", metrics=dict(self.metrics))
+                                "no bubble found", metrics=dict(self.metrics),
+                                suggestion=self.suggestion)
         xy = _EMPTY_XY if self.edge_xy is None else np.asarray(self.edge_xy, float).reshape(-1, 2)
         return EdgeFrameFit(self.radius, self.rc, self.cc, xy, None, self.confidence, self.flags, "",
                             metrics=dict(self.metrics))
@@ -189,5 +193,6 @@ def process_frame(args: tuple):
     idx, source, gridx, gridy, job, stored = args
     fit = measure_ml(worker_model(), edge_pipeline.read_raw(source), gridx, gridy, job, stored)
     f = fit.fit
-    meta = {"confidence": f.confidence, "flags": f.flags, "metrics": f.metrics, "source": int(fit.source)}
+    meta = {"confidence": f.confidence, "flags": f.flags, "metrics": f.metrics, "source": int(fit.source),
+            "suggestion": f.suggestion if f.radius <= 0 else None}
     return (idx, f.radius, f.edge_xy, f.mask, f.rc, f.cc, 0, meta)
