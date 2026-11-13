@@ -99,6 +99,8 @@ def test_rejected_frame_shows_the_guess_dashed_on_both_panels(app):
         assert "Auto's guess (confidence 0.20)" in panel.overlay_tip()
         assert "press A in Review" in panel.overlay_tip()
         assert "Not a bubble? Shift+drag on the chart > Mark as no bubble" in panel.overlay_tip()
+        assert "Auto's guess (not accepted)" in panel.legend_texts()  # the corner key names it
+        assert "outline (measured)" not in panel.legend_texts()
     assert _status(window).startswith("Frame 4: Auto's guess (confidence 0.20)")
     # the Auto view draws it in ROI coordinates: same place as the image panel
     assert window.binary_panel._overlay_items[0].path().boundingRect().center().x() == \

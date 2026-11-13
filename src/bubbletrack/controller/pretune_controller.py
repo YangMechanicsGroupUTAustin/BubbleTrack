@@ -8,6 +8,8 @@ import numpy as np
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
+    EQUAL_AREA_CIRCLE,
+    FITTED_CIRCLE,
     current_source,
     display_frame,
     redraw_original,
@@ -238,7 +240,8 @@ class PretuneController(BaseController):
         show_engine_view(self.state, self.w, idx)
         redraw_original(self.state, self.w)
         if fit.radius > 0:
-            self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1")
+            self.w.original_panel.draw_circle(fit.rc, fit.cc, fit.radius, "#6366f1",
+                                              legend=EQUAL_AREA_CIRCLE)
             self.w.original_panel.draw_points(fit.edge_xy, "#ef4444", 2.0)
         else:  # rejected: its guess, if any, dashed
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
@@ -308,7 +311,8 @@ class PretuneController(BaseController):
                     # Clear old overlays before drawing new results
                     redraw_original(self.state, self.w)
                     if self.state.detection_mode != "area":
-                        self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1")
+                        self.w.original_panel.draw_circle(rc, cc, radius, "#6366f1",
+                                                          legend=FITTED_CIRCLE)
                     self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
                     refresh_chart(self.state, self.w)
                     self._results_changed()
