@@ -10,8 +10,8 @@ One fix at a time, on one frame, shown in the Review dock's fix strip:
 * Cancel (Esc), another frame, another source, a left-panel tab or a
   starting Fit All end it; the frame stays as it was.
 
-A background re-track does not end a fix: storing it cancels the re-track
-and restarts its countdown (``RetrackController``).
+Starting a fix cancels a pending or running re-track (it would redraw the
+frame under the user's points); storing the fix restarts its countdown.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from collections.abc import Callable
 from bubbletrack.event_bus import CIRCLE_FIXED
 from bubbletrack.ui.circle_tool import TOOL_CIRCLE, TOOL_POINTS
 from bubbletrack.ui.fix_strip import FixStrip
+from bubbletrack.ui.tab_bar import mode_label
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ class FixMode:
         if self.active and self.frame == frame:
             return True
         self.end()
+        # A re-track landing now would redraw the frame under the user's
+        # points; storing the fix restarts its countdown.
+        self._app.retrack.cancel()
         tool = TOOL_CIRCLE if self._app.circle_ctrl.available() else TOOL_POINTS
         self.strip.show_tool(frame, tool)
         self._apply(tool)
@@ -133,6 +137,8 @@ class FixMode:
         circle.discard_prompt()
         circle.set_active(False)
         self._app.manual_ctrl.cancel_selection()
+        w = self._app.w  # the fix tools said "Mode: Manual"
+        w.status_bar.update_mode(mode_label(w.left_panel.tab_bar.current_name()))
 
     def _finish(self, frame: int) -> None:
         self.end()

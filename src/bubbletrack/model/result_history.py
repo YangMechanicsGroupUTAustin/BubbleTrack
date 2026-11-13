@@ -150,6 +150,10 @@ class ResultHistory:
     def can_undo(self) -> bool:
         return self._stack.can_undo()
 
+    def peek(self) -> ResultEdit | None:
+        """The edit Ctrl+Z would undo next (None if there is none)."""
+        return self._stack.peek()
+
     def clear(self) -> None:
         self._stack.clear()
 

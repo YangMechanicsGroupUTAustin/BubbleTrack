@@ -94,9 +94,8 @@ class TestRows:
 
     def test_position_and_span(self):
         segment = _segment("lost", 10, 12, 13)
-        assert position_text(segment, 12) == "3 left in this row"
-        assert position_text(segment, 11) == "3 left in this row"  # a gap frame too
-        assert position_text(_segment("lost", 4), 4) == ""
+        assert position_text(segment) == "3 left in this row"
+        assert position_text(_segment("lost", 4)) == ""
         assert span_text(segment) == "Frames 11\u201314"
         assert span_text(_segment("lost", 4)) == "Frame 5"
 

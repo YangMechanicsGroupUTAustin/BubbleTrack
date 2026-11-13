@@ -17,6 +17,8 @@ from bubbletrack.controller.display_mixin import display_frame
 from bubbletrack.model.result_history import FrameResult, record_edit, snapshot
 from bubbletrack.model.suggestion import shown_suggestion
 
+UNDO_HINT = " — Ctrl+Z undoes"  # every Review edit is one Ctrl+Z
+
 
 @dataclass(frozen=True)
 class Promotion:
@@ -52,4 +54,4 @@ def finish_promotion(app, promotion: Promotion) -> str:
     if state.image_no == promotion.frame:
         display_frame(state, app.w, state.image_no, app._set_state, app._image_cache)
     return (f"Frame {promotion.frame + 1}: Auto's guess accepted "
-            f"(R = {state.radius[promotion.frame]:.1f} px) and locked — Ctrl+Z undoes")
+            f"(R = {state.radius[promotion.frame]:.1f} px) and locked{UNDO_HINT}")

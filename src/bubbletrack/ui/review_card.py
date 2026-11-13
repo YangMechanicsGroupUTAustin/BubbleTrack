@@ -34,6 +34,8 @@ class CardAdvice(NamedTuple):
     action: str  # the recommended (filled) action
     guess: bool = False  # the frame shows Auto's guess: Accept stores it
     can_accept: bool = True  # False on an empty frame: nothing to accept
+
+
 _KEYS = {"accept": "A", "fix": "F", "no_bubble": "N", "accept_all": "⇧A", "skip": "S"}
 _TIPS = {
     "accept": "Keep this frame's result (or store Auto's dashed guess) and lock it, so Fit All "
@@ -215,7 +217,7 @@ class FeedbackLine(QWidget):
         self._undo = QPushButton("Undo")
         self._undo.setObjectName("secondaryBtn")
         self._undo.setStyleSheet("QPushButton { padding: 1px 8px; min-height: 20px; }")
-        self._undo.setToolTip("Undo the last action (Ctrl+Z)")
+        self._undo.setToolTip("Undo this action (Ctrl+Z undoes the newest edit)")
         self._undo.clicked.connect(self.undo_requested)
         row.addWidget(self._undo, 0, Qt.AlignmentFlag.AlignTop)
         self.clear()

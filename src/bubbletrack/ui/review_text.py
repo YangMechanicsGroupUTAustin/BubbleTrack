@@ -129,7 +129,7 @@ def progress_text(left: int, total: int) -> str:
     return f"{left} {noun} to check" if left == total else f"{left} of {total} {noun} to check"
 
 
-def position_text(segment: ReviewSegment, frame: int) -> str:
+def position_text(segment: ReviewSegment) -> str:
     """How much of the row is left: '47 left in this row' ('' for one frame).
 
     Checked frames leave the row, so a position ('1 of 47') would always
@@ -179,15 +179,6 @@ def guess_lines(segment: ReviewSegment) -> list[str]:
             "stores the one on screen, Accept all (Shift+A) every one", REVIEW_NO_BUBBLE_HINT]
 
 
-def guess_hint(item: ReviewItem | None, segment: ReviewSegment | None) -> str:
-    """What A does on the shown frame if it shows Auto's guess ('' otherwise)."""
-    if segment is None or item is None or GUESS not in item.reasons:
-        return ""
-    more = _guess_count(segment) - 1
-    return "A accepts the guess shown" + (
-        f"; {more} more guess{'es' if more != 1 else ''} in this row" if more else "")
-
-
 def accept_all_question(frames: int, unseen: int) -> str:
     """Accept all's question when it would store guesses nobody has looked at:
     'Accept 229 frames? 213 of them are Auto's guesses you have not looked at.'"""
@@ -202,17 +193,12 @@ def _guess_count(segment: ReviewSegment) -> int:
 
 
 def detail_text(item: ReviewItem | None, frame: int, images: Sequence[str],
-                limit: int | None = DETAIL_REASONS,
-                segment: ReviewSegment | None = None) -> str:
+                limit: int | None = DETAIL_REASONS) -> str:
     """The shown *frame* and why it is listed (its *item*, None if it is
-    not): the leading *limit* reasons, None = all of them.  With the
-    selected *segment*, what A does there if the row has Auto's guesses."""
+    not): the leading *limit* reasons, None = all of them."""
     if item is None:
-        text = f"{frame_title(frame, images)} — not flagged"
-    else:
-        text = item_text(item, images, limit)
-    hint = guess_hint(item, segment)
-    return f"{text}. {hint}" if hint else text
+        return f"{frame_title(frame, images)} — not flagged"
+    return item_text(item, images, limit)
 
 
 def _reason_counts(segment: ReviewSegment) -> list[tuple[str, int]]:

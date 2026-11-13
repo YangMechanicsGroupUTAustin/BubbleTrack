@@ -192,12 +192,21 @@ class TestStartFix:
     def test_out_of_range(self, app, frame):
         assert not app[2].start_fix(frame) and not app[2].fix.active
 
-    def test_not_while_a_run_is_active(self, app):
+    def test_not_while_fit_all_runs(self, app):
         window, controller, rc = app
+        controller.auto_ctrl._running = True
         controller.bus.emit("run_state_changed", True)
         assert not rc.start_fix(3)
         assert "Wait for the running fit" in window.header.status_text()
+        controller.auto_ctrl._running = False
         controller.bus.emit("run_state_changed", False)
+
+    def test_starting_a_fix_cancels_a_pending_retrack(self, app):
+        """A re-track landing during a fix would redraw the frame under the points."""
+        window, controller, rc = app
+        controller.retrack.timer.start()
+        assert rc.start_fix(3)
+        assert not controller.retrack.timer.isActive()
 
 
 class TestRuns:
@@ -207,7 +216,7 @@ class TestRuns:
         rc.perform("fix")
         monkeypatch.setattr(controller.retrack, "is_running", lambda: True)
         controller.bus.emit("run_state_changed", True)  # a re-track (Fit All is not busy)
-        assert not rc.panel.isEnabled() and rc.fix.strip.isEnabled() and rc.fix.active
+        assert rc.panel.isEnabled() and rc.fix.strip.isEnabled() and rc.fix.active
         _points(controller)
         rc.fix.finish_points()
         assert controller._get_state().fit_source[2] == FitSource.MANUAL

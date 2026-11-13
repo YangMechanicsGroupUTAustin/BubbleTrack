@@ -24,6 +24,7 @@ from bubbletrack.model.suggestion import shown_suggestion
 from bubbletrack.ui.review_text import reason_text
 
 ACCEPT, FIX, NO_BUBBLE = "accept", "fix", "no_bubble"
+NONE = ""  # a settled (locked) frame: no action is recommended
 NEIGHBOURHOOD = 3  # frames on each side that the advice compares with
 GUESS_TOLERANCE = 0.3  # a guess within 30 % of the radius around it fits
 _LIKELY_WRONG = ("lost", "jump")  # a result with these is more often wrong than right
@@ -46,6 +47,11 @@ def advise(state: AppState, frame: int, item: ReviewItem | None) -> Advice:
     radius = state.radius
     if radius is None or not 0 <= frame < len(radius):
         return Advice(FIX, "No result.", empty=True)
+    locked = state.fit_locked
+    if locked is not None and locked[frame]:  # already settled: nothing to recommend
+        if radius[frame] > 0:
+            return Advice(NONE, "Accepted (locked). Fix it if the outline is off the wall.")
+        return Advice(NONE, "Marked as no bubble (locked).", empty=True)
     guess = shown_suggestion(state, frame)
     if guess is not None:
         return _advise_guess(state, frame, guess.radius)

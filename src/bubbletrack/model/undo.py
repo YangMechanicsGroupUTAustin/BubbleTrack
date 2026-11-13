@@ -41,6 +41,10 @@ class UndoStack:
         self._undo.append(item)
         return item
 
+    def peek(self) -> Any | None:
+        """The state ``undo()`` would return next, without popping it."""
+        return self._undo[-1] if self._undo else None
+
     def can_undo(self) -> bool:
         return len(self._undo) > 0
 

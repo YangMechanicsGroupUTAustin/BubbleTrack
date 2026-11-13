@@ -28,6 +28,7 @@ REVIEW_BINDINGS: dict[str, str] = {
 FIX_BINDINGS: dict[str, str] = {
     "Esc": "fix_cancel",
     "Return": "fix_done",
+    "Enter": "fix_done",  # the keypad's
 }
 
 _TEXT_INPUTS = (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox)

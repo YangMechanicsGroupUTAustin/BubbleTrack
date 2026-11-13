@@ -203,7 +203,7 @@ class ReviewPanel(QWidget):
     def refresh_card(self) -> None:
         """Re-ask the advisor (e.g. after the frame's result changed)."""
         frame, segment = self._shown, self.current_segment()
-        on = frame is not None and bool(self._images)
+        on = frame is not None and bool(self._images) and self._fitted  # after a fit
         self.card.setVisible(on)
         if not on:
             return
@@ -213,7 +213,7 @@ class ReviewPanel(QWidget):
                   else CardAdvice("", "accept"))
         self.card.show_frame(
             frame_title(frame, self._images),
-            position_text(segment, frame) if segment is not None else "", advice,
+            position_text(segment) if segment is not None else "", advice,
             row_count=segment.count if segment is not None else 0, fix_label=self._fix_label,
             why=detail_text(item, frame, self._images, None) if item is not None else "")
 

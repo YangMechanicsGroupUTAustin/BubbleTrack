@@ -80,15 +80,18 @@ def _promoted(state) -> list[int]:
 
 @pytest.fixture
 def answers(monkeypatch):
-    """Answer Accept all's question with the queued replies; records the questions."""
+    """Answer Accept all's question with the queued replies; records the
+    questions and their small print (frames that become "no bubble")."""
     asked: list[str] = []
     replies: list[bool] = []
+    empties: list[int] = []
 
-    def ask(_parent, question):
+    def ask(_parent, question, *, empty=0):
         asked.append(question)
+        empties.append(empty)
         return replies.pop(0)
     monkeypatch.setattr(review_confirm, "ask_accept_all", ask)
-    return asked, replies
+    return asked, replies, empties
 
 
 # -- Accept: the guess on screen ------------------------------------------------------------
@@ -162,7 +165,7 @@ def test_a_without_any_guess_means_no_bubble(app):
 
 def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
     window, controller = app
-    asked, _ = answers
+    asked, _, _ = answers
     state = _state(controller)
     _empty(state, [2, 4])
     _guess(state, [3, 5])
@@ -172,7 +175,8 @@ def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
     controller.review.perform("accept_all")
     assert asked == []  # nothing unseen: no question
     assert _promoted(state) == [3, 5] and state.fit_locked[2:6].all()
-    assert "(2 of Auto's guesses stored)" in _status(window)
+    assert "(2 of Auto's guesses stored; 2 empty frame(s) marked as no bubble)" \
+        in _status(window)
     controller._on_undo()  # one Ctrl+Z undoes it all
     assert _promoted(state) == [] and not state.fit_locked.any()
     assert all(shown_suggestion(state, f) is not None for f in (3, 5))
@@ -180,7 +184,7 @@ def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
 
 def test_accept_all_asks_about_unseen_guesses_and_cancel_stores_nothing(app, answers):
     _, controller = app
-    asked, replies = answers
+    asked, replies, small_print = answers
     state = _state(controller)
     _empty(state, [2, 4, 6, 7, 9])
     _guess(state, [3, 5, 8])
@@ -188,6 +192,7 @@ def test_accept_all_asks_about_unseen_guesses_and_cancel_stores_nothing(app, ans
     replies.append(False)
     controller.review.perform("accept_all")
     assert asked == ["Accept 8 frames? 2 of them are Auto's guesses you have not looked at."]
+    assert small_print == [5]  # frames 2, 4, 6, 7, 9 become "no bubble"
     assert _promoted(state) == [] and not state.fit_locked.any()
     assert _state(controller).image_no == 3  # cancelled: stay
     replies.append(True)
@@ -214,7 +219,7 @@ def test_the_real_question_box(app, qapp):
     QTimer.singleShot(0, answer)
     controller.review.perform("accept_all")
     assert seen["text"] == "Accept 3 frames? 2 of them are Auto's guesses you have not looked at."
-    assert "Ctrl+Z" in seen["detail"]
+    assert "Ctrl+Z" in seen["detail"] and "no bubble" not in seen["detail"]
     assert "Accept all" in seen["buttons"] and len(seen["buttons"]) == 2
     assert _promoted(state) == []
 
@@ -241,7 +246,7 @@ def test_row_tooltip_and_card_say_what_accept_does(app):
 
 def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path, answers):
     window, controller = _app(gui, tmp_path, 231)
-    asked, replies = answers
+    asked, replies, _ = answers
     state = _state(controller)
     bare = list(range(16, 231, 14))  # 16 of the row's frames have no guess, as on lic_hard 05
     _guess(state, [f for f in range(2, 231) if f not in bare])

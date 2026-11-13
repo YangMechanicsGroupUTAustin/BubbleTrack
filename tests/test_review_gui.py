@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import QComboBox, QDockWidget, QSpinBox
 from bubbletrack.controller.review_controller import build_review_items, install_review
 from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.state import update_state
 from bubbletrack.ui.shortcuts import FIX_BINDINGS, REVIEW_BINDINGS
 
 N_FRAMES = 8
@@ -282,20 +283,105 @@ class TestCardAndFeedback:
         assert exported == [1]
 
 
+class TestReviewFindings:
+    """Regression tests from the code review of the Review redesign."""
+
+    def test_actions_hit_the_frame_on_screen_even_after_a_silent_move(self, review,
+                                                                      make_sequence):
+        _, controller, rc = review
+        state = _flag(controller, rc, f6=0.1)
+        controller.file_ctrl.on_frame_changed(6)
+        # a run moves the view without frame_changed:
+        controller._state = update_state(state, image_no=2)
+        rc.perform("no_bubble")
+        assert state.radius[2] == -1.0 and state.radius[6] > 0
+        # another, shorter recording: the old frame index must not be used
+        controller.file_ctrl.on_folder_selected(str(make_sequence("B", 4)))
+        new = _fitted(controller)
+        new.fit_confidence[0] = 0.1
+        rc.refresh()
+        rc.perform("accept")
+        assert new.fit_locked[0]
+
+    def test_the_feedback_undo_undoes_exactly_its_own_action(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        rc.perform("accept")  # frame 2, then on to 5
+        rc.perform("fix")
+        rc.fix.strip.points_requested.emit()
+        controller.manual_ctrl.on_point_clicked(200.0, 100.0)  # a clicked point
+        rc.panel.feedback._undo.click()
+        assert not state.fit_locked[2]  # the accept, not the point
+        assert controller._get_state().image_no == 2
+
+    def test_ctrl_z_elsewhere_retires_the_feedback(self, review):
+        _, controller, rc = review
+        _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        rc.perform("accept")
+        controller._on_undo()  # the keyboard's Ctrl+Z
+        assert rc.panel.feedback.isHidden()
+
+    def test_nothing_to_settle_before_a_fit(self, review):
+        _, controller, rc = review
+        controller.file_ctrl.on_frame_changed(3)
+        assert rc.panel.card.isHidden()
+        rc.perform("no_bubble")
+        rc.perform("accept")
+        state = controller._get_state()
+        assert not state.fit_locked.any()
+
+    def test_a_settled_frame_recommends_nothing(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        rc.perform("accept")
+        controller.file_ctrl.on_frame_changed(2)  # back to the accepted frame
+        assert rc.panel.card.recommended() is None
+        assert rc.panel.card.advice.text().startswith("Accepted (locked).")
+
+    def test_all_done_is_only_said_when_nothing_is_hidden(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, f2=0.1)
+        state.fit_flags[6] = frozenset({"non_circular"})
+        rc.refresh()
+        rc.panel.set_hidden_categories({"shape"})
+        rc.panel.step(1)
+        rc.perform("accept")
+        assert not rc.panel.feedback.text().endswith("All done.")
+
+
 class TestRunLock:
     def test_actions_disabled_while_a_run_is_active(self, qapp, review):
         window, controller, rc = review
         _show(qapp, window)
         state = _flag(controller, rc, f2=0.1)
         rc.panel.step(1)
+        controller.auto_ctrl._running = True  # Fit All
         controller.bus.emit("run_state_changed", True)
         assert not rc.panel.isEnabled()
         assert not any(sc.isEnabled() for sc in rc.shortcuts.shortcuts.values())
         rc.perform("accept")
         assert not state.fit_locked[2]
+        controller.auto_ctrl._running = False
         controller.bus.emit("run_state_changed", False)
         assert rc.panel.isEnabled()
         assert all(sc.isEnabled() for sc in rc.shortcuts.shortcuts.values())
+
+    def test_a_retrack_does_not_block_review(self, qapp, review, monkeypatch):
+        """Review's own edits start a re-track two seconds later: keys must stay live."""
+        window, controller, rc = review
+        _show(qapp, window)
+        state = _flag(controller, rc, f2=0.1, f5=0.3)
+        rc.panel.step(1)
+        monkeypatch.setattr(controller.retrack, "is_running", lambda: True)
+        controller.bus.emit("run_state_changed", True)  # a re-track, not Fit All
+        assert rc.panel.isEnabled()
+        assert all(sc.isEnabled() for sc in rc.shortcuts.shortcuts.values())
+        rc.perform("accept")
+        assert state.fit_locked[2] and controller._get_state().image_no == 5
+        controller.bus.emit("run_state_changed", False)
 
     def test_real_fit_all_locks_then_refreshes(self, qapp, review):
         window, controller, rc = review

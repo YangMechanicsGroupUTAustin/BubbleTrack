@@ -5,7 +5,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from bubbletrack.controller.review_advice import ACCEPT, FIX, NO_BUBBLE, advise
+from bubbletrack.controller.review_advice import ACCEPT, FIX, NO_BUBBLE, NONE, advise
 from bubbletrack.controller.review_queue import GUESS, ReviewItem
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import AppState
@@ -115,6 +115,14 @@ class TestResults:
         state = _state([40, 41, 42])
         advice = advise(state, 1, None)
         assert advice.action == ACCEPT and advice.text.startswith("Not flagged.")
+
+    def test_settled_frames_recommend_nothing(self):
+        state = _state([40, -1, 42])
+        state.fit_locked[[0, 1]] = True
+        accepted, empty = advise(state, 0, None), advise(state, 1, None)
+        assert accepted.action == empty.action == NONE
+        assert accepted.text.startswith("Accepted (locked)") and accepted.can_accept
+        assert empty.text == "Marked as no bubble (locked)." and not empty.can_accept
 
     def test_texts_are_plain_words(self):
         state = _state([40, 41, 42])

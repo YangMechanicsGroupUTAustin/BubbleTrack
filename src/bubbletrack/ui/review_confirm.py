@@ -9,13 +9,22 @@ DETAIL = ("Each guess becomes a locked result, like Accept on that frame. "
           "Ctrl+Z undoes the whole Accept all.")
 
 
-def accept_all_box(parent: QWidget | None, question: str) -> QMessageBox:
+def accept_all_detail(empty: int) -> str:
+    """The question's small print; *empty*: frames with no result and no guess."""
+    if not empty:
+        return DETAIL
+    frames = "1 frame has" if empty == 1 else f"{empty} frames have"
+    return (f"{DETAIL} {frames} neither a result nor a guess: "
+            "they are marked as no bubble.")
+
+
+def accept_all_box(parent: QWidget | None, question: str, empty: int = 0) -> QMessageBox:
     """The question as a message box (not shown): Accept all / Cancel."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle("Accept all")
     box.setText(question)
-    box.setInformativeText(DETAIL)
+    box.setInformativeText(accept_all_detail(empty))
     accept = box.addButton(ACCEPT_ALL_TEXT, QMessageBox.ButtonRole.AcceptRole)
     cancel = box.addButton(QMessageBox.StandardButton.Cancel)
     cancel.setObjectName("secondaryBtn")  # the app stylesheet's quiet button
@@ -23,9 +32,9 @@ def accept_all_box(parent: QWidget | None, question: str) -> QMessageBox:
     return box
 
 
-def ask_accept_all(parent: QWidget | None, question: str) -> bool:
+def ask_accept_all(parent: QWidget | None, question: str, *, empty: int = 0) -> bool:
     """Ask *question*; True if the user chose Accept all."""
-    box = accept_all_box(parent, question)
+    box = accept_all_box(parent, question, empty)
     box.exec()
     clicked = box.clickedButton()
     return clicked is not None and box.buttonRole(clicked) == QMessageBox.ButtonRole.AcceptRole

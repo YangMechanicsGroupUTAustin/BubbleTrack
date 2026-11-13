@@ -190,6 +190,20 @@ class TestMovingOn:
         assert _shown(controller) == 8 and rc.panel.current_segment().frames == (8,)
         assert rc.panel.feedback.text().endswith("That row is done.")
 
+    def test_likely_wrong_rows_above_come_before_the_next_amber_row(self, review):
+        """Done with a red row low in the list: back to the red rows above, not
+        on to the amber ones below them."""
+        _, controller, rc = review
+        state = _flag(controller, rc, low=(1, 4), conf=0.05)  # red rows: 1, 4
+        state.fit_confidence[7] = 0.4  # an amber row: 7
+        rc.refresh()
+        assert [s.tier for s in rc.panel.segments()] == ["high", "high", "medium"]
+        controller.file_ctrl.on_frame_changed(4)
+        rc.perform("accept")
+        assert _shown(controller) == 1
+        rc.perform("accept")
+        assert _shown(controller) == 7
+
     def test_a_row_started_in_the_middle_wraps_to_its_first_frames(self, review):
         _, controller, rc = review
         _flag(controller, rc, low=(2, 3, 5), shape=(8,), conf=0.05)
@@ -217,8 +231,8 @@ class TestRowActions:
         state = _flag(controller, rc, low=(2, 3, 5), shape=(8,), conf=0.05)
         rc.panel.step(1)
         rc.perform("accept_all")
-        assert state.fit_locked[2:6].all()  # the unflagged frame 4 too
-        assert not state.fit_locked[[0, 1, 6, 7, 8, 9]].any()
+        assert state.fit_locked[[2, 3, 5]].all()  # "Accept all 3": exactly those
+        assert not state.fit_locked[[0, 1, 4, 6, 7, 8, 9]].any()
         assert rc.panel.frames() == [8] and _shown(controller) == 8
         controller._on_undo()  # one Ctrl+Z undoes the whole Accept all
         assert not state.fit_locked.any()
@@ -235,16 +249,27 @@ class TestRowActions:
         rc.perform("accept_all")
         assert state.fit_locked[[3, 4]].all() and rc.count == 0
 
-    def test_no_bubble_on_all_marks_the_span_and_never_deletes_elsewhere(self, review):
+    def test_no_bubble_on_all_marks_the_rows_frames_only(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, low=(2, 3, 5))
         rc.panel.step(1)
         rc.perform("no_bubble_all")
-        assert (state.radius[2:6] == -1.0).all() and state.fit_locked[2:6].all()
-        assert (state.radius[[1, 6]] > 0).all()
+        assert (state.radius[[2, 3, 5]] == -1.0).all() and state.fit_locked[[2, 3, 5]].all()
+        assert (state.radius[[1, 4, 6]] > 0).all() and not state.fit_locked[4]
         assert rc.count == 0
         controller._on_undo()
         assert (state.radius[2:6] > 0).all() and not state.fit_locked.any()
+
+    def test_row_actions_leave_another_rows_frame_inside_the_span_alone(self, review):
+        _, controller, rc = review
+        state = _flag(controller, rc, low=(2, 4), conf=0.4)  # an amber row 2-4 ...
+        state.fit_flags[3] = frozenset({"jump"})  # ... around a red "Radius jumps" frame
+        rc.refresh()
+        controller.file_ctrl.on_frame_changed(2)
+        assert rc.panel.current_segment().frames == (2, 4)
+        rc.perform("accept_all")
+        assert state.fit_locked[[2, 4]].all() and not state.fit_locked[3]
+        assert 3 in rc.panel.frames()  # still waiting for its own look
 
     def test_skip_drops_the_row_until_a_result_changes(self, review):
         _, controller, rc = review
