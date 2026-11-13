@@ -20,11 +20,11 @@ from bubbletrack.ui.chart_interaction import (
     HOVER_TOLERANCE, ChartViewBox, build_point_menu, build_range_menu, build_view_menu,
     hover_text, make_hover_label, nearest_point,
 )
-from bubbletrack.ui.chart_legend import build_legend_row
+from bubbletrack.ui.chart_legend import CONFIDENCE, build_legend_row, ramp_tip
 from bubbletrack.ui.chart_overlays import ChartOverlays, frames_in_span
 from bubbletrack.ui.chart_view import ChartNavigator
 
-CHART_MIN_HEIGHT = 260  # px: tall enough to read R(t) on a 1280x800 screen
+CHART_MIN_HEIGHT = 230  # px: R(t) stays readable, the images get room on a 1280x800 screen
 
 
 class RadiusChart(QWidget):
@@ -79,7 +79,9 @@ class RadiusChart(QWidget):
         self._plot.scene().sigMouseClicked.connect(self._on_mouse_clicked)
         layout.addWidget(self._plot, 1)
         legend = build_legend_row()
-        self._legend_shapes, self._score_name = legend.shapes, legend.score_name
+        self._legend_keys = legend.keys
+        self._score_name, self._score_high = legend.score_name, legend.score_high
+        self._score_label = CONFIDENCE  # what the marker colours mean (see set_score_name)
         self._select_btn, self._reset_btn = legend.select_btn, legend.reset_btn
         self._reset_btn.clicked.connect(self.reset_zoom)
         layout.addLayout(legend.layout)
@@ -179,8 +181,12 @@ class RadiusChart(QWidget):
         self._frame_labels = tuple(labels)
 
     def set_score_name(self, name: str) -> None:
-        """Legend wording of the colour ramp, e.g. ``"confidence"``."""
-        self._score_name.setText(f"{name}: poor")
+        """What the marker colours mean, e.g. ``"confidence"`` (Auto) or
+        ``"fit quality"`` (classic methods): the ramp's and the hover's word.
+        Both use one 0-1 scale ("confidence 0 [ramp] 1", "confidence 0.25")."""
+        self._score_label = name
+        self._score_name.setText(f"{name} 0")
+        self._score_name.setToolTip(ramp_tip(name))
 
     def set_total_frames(self, n: int) -> None:
         """Limit the x axis to frames 1..n and show them all."""
@@ -372,6 +378,6 @@ class RadiusChart(QWidget):
         return hover_text(
             frame, float(self._radii[k]),
             file_tag=self._frame_labels[frame - 1] if 0 < frame <= len(self._frame_labels) else "",
-            score=at(self._quality_scores), source=at(self._sources),
-            locked=bool(at(self._locked)), flags=at(self._flag_sets),
+            score=at(self._quality_scores), score_name=self._score_label,
+            source=at(self._sources), locked=bool(at(self._locked)), flags=at(self._flag_sets),
         )

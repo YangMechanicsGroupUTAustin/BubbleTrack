@@ -155,6 +155,41 @@ class TestFitOverlayOnRawImage:
         assert [type(i) for i in panel._overlay_items] == [QGraphicsPathItem]
 
 
+class TestTitle:
+    LONG = "Auto view: frame ÷ reference, a title far too long for its panel"
+
+    def test_a_long_title_ends_in_an_ellipsis_and_keeps_its_text(self, qapp):
+        panel = ImagePanel(self.LONG)
+        panel.resize(260, 200)
+        panel.show()
+        qapp.processEvents()
+        label = panel._title_label
+        assert label.text() == self.LONG
+        assert label.width() < label.sizeHint().width()
+        assert label.shown_text().endswith("…") and len(label.shown_text()) > 3
+        panel.resize(1600, 200)
+        qapp.processEvents()
+        assert label.shown_text() == self.LONG
+        panel.close()
+
+    def test_the_title_does_not_widen_the_panel(self, qapp):
+        long, short = ImagePanel(self.LONG), ImagePanel("Image…")
+        assert long.minimumSizeHint().width() <= short.minimumSizeHint().width()
+        assert long.sizeHint() == ImagePanel("Image").sizeHint()  # side by side: even split
+
+    def test_title_tooltip(self, qapp):
+        panel = ImagePanel()
+        panel.set_title("Auto view", "frame ÷ reference")
+        assert panel._title_label.toolTip() == "frame ÷ reference"
+        panel.set_title("Binary Mask")
+        assert panel._title_label.toolTip() == ""
+
+    def test_auto_view_title_is_short_and_explained(self):
+        from bubbletrack.controller.display_mixin import ENGINE_VIEW_TIP, ENGINE_VIEW_TITLE
+        assert ENGINE_VIEW_TITLE == "Auto view"
+        assert "reference" in ENGINE_VIEW_TIP
+
+
 class TestViewModesInWindow:
     def test_image_and_mask_is_default(self, gui):
         window, _ = gui

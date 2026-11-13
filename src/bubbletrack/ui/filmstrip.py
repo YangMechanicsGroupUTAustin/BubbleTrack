@@ -1,4 +1,8 @@
-"""Filmstrip: a collapsible row of key-frame thumbnails; a click jumps there."""
+"""Filmstrip: a collapsible row of key-frame thumbnails; a click jumps there.
+
+The thumbnails shrink (down to ``MIN_ICON_SCALE``) to fit the strip's width,
+so the row needs no scroll bar on usual window sizes.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +15,11 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-THUMB_HEIGHT = 64
-THUMB_MAX_WIDTH = 132
+THUMB_HEIGHT = 56
+THUMB_MAX_WIDTH = 112
+MIN_ICON_SCALE = 0.5  # smaller than this: scroll instead
+_SCALE_STEP = 0.05
+HINT = "first fit · Rmax · collapses · last · to check (Review) — click to jump"
 
 
 @dataclass(frozen=True)
@@ -58,7 +65,7 @@ class Filmstrip(QWidget):
         self._toggle.setToolTip("Show / hide the key frames")
         self._toggle.toggled.connect(self._on_toggled)
         header.addWidget(self._toggle)
-        self._hint = QLabel("first fit · Rmax · collapses · last · flagged — click to jump")
+        self._hint = QLabel(HINT)
         self._hint.setObjectName("dimText")
         # Clipped on narrow windows rather than widening them.
         self._hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -102,6 +109,7 @@ class Filmstrip(QWidget):
         self._placeholder.setVisible(not thumbs)
         self._update_toggle_text()
         self.set_current(self._current)
+        self._fit_to_width()
 
     def set_current(self, frame: int | None) -> None:
         """Mark the thumbnail of the shown frame (if it is a key frame)."""
@@ -124,6 +132,26 @@ class Filmstrip(QWidget):
 
     # -- internals -------------------------------------------------------- #
 
+    def resizeEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        super().resizeEvent(event)
+        self._fit_to_width()
+
+    def _fit_to_width(self) -> None:
+        """Largest thumbnail scale (1 down to ``MIN_ICON_SCALE``) whose row fits."""
+        if not self._buttons:
+            return
+        room = self.width() - self._row.spacing() * (len(self._buttons) - 1)
+        scale = 1.0
+        while True:
+            for btn in self._buttons:
+                natural = btn.property("natural")
+                btn.setIconSize(QSize(max(1, round(natural.width() * scale)),
+                                      max(1, round(natural.height() * scale))))
+            fits = sum(b.sizeHint().width() for b in self._buttons) <= room
+            if fits or scale - _SCALE_STEP < MIN_ICON_SCALE - 1e-9:
+                return
+            scale -= _SCALE_STEP
+
     def _make_button(self, thumb: Thumbnail) -> QToolButton:
         btn = QToolButton()
         btn.setObjectName("thumbBtn")
@@ -131,7 +159,9 @@ class Filmstrip(QWidget):
         btn.setAutoRaise(True)
         btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         btn.setIcon(QIcon(thumb.pixmap))
-        btn.setIconSize(QSize(thumb.pixmap.width(), thumb.pixmap.height()))
+        natural = QSize(thumb.pixmap.width(), thumb.pixmap.height())
+        btn.setProperty("natural", natural)
+        btn.setIconSize(natural)
         btn.setText(thumb.caption)
         btn.setToolTip(thumb.tooltip or thumb.caption)
         btn.setProperty("frame", thumb.frame)

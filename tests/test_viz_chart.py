@@ -54,8 +54,13 @@ class TestMarkerEncoding:
     def test_hover_text(self):
         text = hover_text(44, 16.39, file_tag="_054", score=0.25,
                           source=int(FitSource.MANUAL), flags=frozenset({"b", "a"}))
-        assert text == "Frame 44 · _054  R 16.4 px  Q 25%  manual  flags: a, b"
+        assert text == "Frame 44 · _054  R 16.4 px  confidence 0.25  manual  flags: a, b"
         assert hover_text(3, 10.0, locked=True, source=1) == "Frame 3  R 10.0 px  locked"
+        # Classic modes colour by the geometric fit quality: same 0-1 scale, own name.
+        assert "fit quality 0.37" in hover_text(5, 9.0, score=0.37, score_name="fit quality")
+        # Review's plain words for the flags it knows; others lose their underscores.
+        assert hover_text(1, 2.0, flags=frozenset({"non_circular", "low_snr"})).endswith(
+            "flags: low snr, outline not round")
 
     def test_nearest_point(self):
         frames, radii = np.array([1.0, 5.0, 9.0]), np.array([10.0, 20.0, 30.0])
@@ -357,6 +362,20 @@ class TestChartWiring:
         state.fit_confidence[:] = 0.8
         refresh_chart(state, window)
         assert window.radius_chart._score_name.text().startswith("confidence")
+
+    def test_classic_modes_name_the_ramp_fit_quality(self, gui):
+        window, _ = gui
+        refresh_chart(update_state(_fitted_state(), detection_mode="intensity"), window)
+        assert window.radius_chart._score_name.text().startswith("fit quality")
+
+    def test_auto_says_confidence_before_and_during_a_fit(self, gui, make_sequence):
+        window, controller = gui
+        controller._state = update_state(controller._get_state(), detection_mode="edge")
+        controller.file_ctrl.on_folder_selected(str(make_sequence("seq", 5)))
+        chart = window.radius_chart
+        assert chart._score_name.text().startswith("confidence")  # loaded, not fitted
+        chart.plot_all(np.arange(1, 6), np.full(5, 20.0))  # Fit's live updates: no scores
+        assert chart._score_name.text().startswith("confidence")
 
     def test_no_valid_frames_clears_rmax(self, gui):
         window, _ = gui

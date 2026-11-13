@@ -287,11 +287,15 @@ QComboBox {
 QComboBox:focus {
     border: 1px solid rgba(99, 102, 241, 0.5);
 }
+/* No border or background on the drop-down: a styled drop-down loses Fusion's
+   arrow (drawn from QPalette ButtonText), and there is no arrow image to ship. */
 QComboBox::drop-down {
-    border: none;
     width: 20px;
 }
-/* Let Fusion engine render native arrow via QPalette ButtonText */
+QComboBox::down-arrow {
+    width: 9px;
+    height: 9px;
+}
 QComboBox QAbstractItemView {
     background: #1a1b23;
     border: 1px solid rgba(255, 255, 255, 0.06);

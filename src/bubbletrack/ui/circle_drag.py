@@ -16,7 +16,7 @@ from PyQt6.QtGui import QColor, QPainterPath, QPen
 from PyQt6.QtWidgets import QGraphicsEllipseItem, QGraphicsPathItem, QGraphicsScene
 
 CLICK_SLOP_PX = 3.0  # screen pixels: a smaller drag is a click
-PREVIEW_COLOUR = "#f59e0b"
+PREVIEW_COLOUR = "#22d3ee"  # = overlay_legend.USER_CIRCLE_COLOUR (cyan, unlike the yellow guess)
 _CROSS_PX = 4.0  # half-size of the centre cross, scene pixels
 
 

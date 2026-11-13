@@ -133,12 +133,3 @@ def style_plot(plot: pg.PlotWidget) -> None:
         axis.setStyle(tickTextOffset=4)
         axis.label.document().setDocumentMargin(1)  # the label's text box, not 4 px of air
         plot.setLabel(axis_name, label, **AXIS_LABEL_STYLE)  # sizes the axis for it
-
-
-def shape_legend_html() -> str:
-    """Legend text for the marker shapes (and the collapse lines' C1, C2 labels)."""
-    shapes = "&nbsp;&nbsp;".join(
-        f'<span style="color:#e4e4e7;">{glyph}</span> {name}' for glyph, name in SHAPE_LEGEND
-    )
-    return (f'<span style="color:#a1a1aa; font-size:11px;">{shapes}'
-            f'&nbsp;&nbsp;&nbsp;C1, C2 = collapses</span>')

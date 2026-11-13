@@ -142,17 +142,28 @@ def build_view_menu(chart) -> QMenu:
     return _menu(chart, (("Reset zoom", chart.reset_zoom),))
 
 
+def flag_words(flag: str) -> str:
+    """A result flag in plain words (Review's wording where it has one)."""
+    # Imported here: review_text reaches the controller package, which imports this module.
+    from bubbletrack.ui.review_text import REASON_LABELS
+
+    return REASON_LABELS.get(flag, flag.replace("_", " "))
+
+
 def hover_text(frame: int, radius: float, *, file_tag: str = "", score: float | None = None,
-               source: int | None = None, locked: bool = False,
+               score_name: str = "confidence", source: int | None = None, locked: bool = False,
                flags: Sequence[str] | frozenset | None = None) -> str:
-    """``Frame 44 · _054  R 16.4 px  Q 25%  manual  flags: a, b``."""
+    """``Frame 44 · _054  R 16.4 px  confidence 0.25  manual  flags: outline not round``.
+
+    The score uses Review's 0-1 scale; *score_name* is the chart ramp's word.
+    """
     parts = [f"Frame {frame}" + (f" · {file_tag}" if file_tag else ""),
              f"R {radius:.1f} px"]
     if score is not None and np.isfinite(score):
-        parts.append(f"Q {int(round(score * 100))}%")
+        parts.append(f"{score_name} {score:.2f}")
     name = cs.source_name(source, locked)
     if name:
         parts.append(name)
     if flags:
-        parts.append("flags: " + ", ".join(sorted(flags)))
+        parts.append("flags: " + ", ".join(flag_words(f) for f in sorted(flags)))
     return "  ".join(parts)

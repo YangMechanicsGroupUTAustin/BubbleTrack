@@ -56,6 +56,18 @@ class TestEntries:
         assert yellow.red() > 200 and yellow.green() > 180 and yellow.blue() < 120
         assert QColor(GUESS_GAP_COLOUR).lightness() < 60  # the dark line under the dashes
 
+    def test_your_circle_does_not_look_like_auto_s_guess(self):
+        from bubbletrack.ui.circle_drag import PREVIEW_COLOUR
+
+        mine, guess = QColor(ol.USER_CIRCLE_COLOUR), QColor(GUESS_COLOUR)
+        apart = abs(mine.hue() - guess.hue())
+        assert min(apart, 360 - apart) >= 120  # cyan against yellow, not amber (~10 degrees)
+        for other in (ol.OUTLINE_COLOUR, ol.CIRCLE_COLOUR):  # the circles it may sit on
+            hue = abs(mine.hue() - QColor(other).hue())
+            assert min(hue, 360 - hue) >= 40, other
+        assert QColor(PREVIEW_COLOUR) == mine  # the drag preview: the same colour
+        assert ol.default_text(ol.USER_CIRCLE_COLOUR, "dash") == "your circle (not stored)"
+
     def test_make_entry_default_explicit_or_none(self):
         assert ol.make_entry(ol.OUTLINE_COLOUR, "line", None).text == "outline (measured)"
         assert ol.make_entry(ol.OUTLINE_COLOUR, "line", "") is None
