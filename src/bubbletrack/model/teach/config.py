@@ -22,7 +22,7 @@ class ExampleConfig:
 
     inner: float = 0.8
     """Pixels within ``inner * R`` of a verified centre are bubble."""
-    ring: tuple[float, float] = (1.25, 2.0)
+    ring: tuple[float, float] = (1.15, 2.0)
     """Pixels between ``ring[0] * R`` and ``ring[1] * R`` are background ..."""
     far: float | None = 2.5
     """... and so is everything beyond ``far * R`` (None: only the ring)."""
@@ -54,7 +54,7 @@ class FeatureConfig:
     sigma_max: float = 16.0
     num_sigma: int = 5
     texture: bool = True
-    half_resolution: bool = False
+    half_resolution: bool = True
     """Compute features and predict on a 2x2-binned grid (sigmas halved), upsample P."""
     polarity: str = "dark"
     num_workers: int = 1
@@ -119,8 +119,9 @@ class MeasureConfig:
     agree_centre: tuple[float, float] = (0.25, 4.0)
     """... and the centres are within max(frac * R, px)."""
     confidence_gate: float = 0.3
-    novelty_warn: float = 0.15
-    """Flag ``ml_unfamiliar`` above this fraction of out-of-range features."""
+    novelty_warn: float = 0.10
+    """Flag ``ml_unfamiliar`` above this novelty (study: frames of the training recording
+    stay below 0.06, 64 % of frames from other recordings are above 0.10)."""
 
     def __post_init__(self) -> None:
         if self.policy not in _POLICIES:

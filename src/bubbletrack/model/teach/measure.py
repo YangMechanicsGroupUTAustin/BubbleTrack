@@ -12,9 +12,10 @@ Precedence (``policy="guarded"``, the default), per unverified frame:
 4. If ML finds no region either, no result (source ``"none"``).
 
 ``policy="combined"`` is the same without step 2 (the owner's first proposal):
-in the study it lost up to 40 of 189 frames on recordings where Auto is good
-when the model was taught on unrepresentative frames, because a wrong ML
-region sends Auto astray and its wrong outline replaces a correct Auto result.
+in the study it lost up to 74 of 182 frames on recordings where Auto is good
+when the model was taught on unrepresentative frames (strokes on the two
+biggest bubbles), because a wrong ML region sends Auto astray and its wrong
+outline replaces a correct Auto result.  Guarded never lost a correct frame there.
 
 Manual and locked frames are never measured here (the caller skips them).
 ``policy="prior"`` (always Auto's guided wall) and ``"contour"`` (always ML's

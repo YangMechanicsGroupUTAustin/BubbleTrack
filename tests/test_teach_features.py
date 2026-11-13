@@ -13,6 +13,7 @@ from bubbletrack.model.teach import FeatureConfig, compute_features, feature_nam
 
 H, W = 120, 160
 FULL = ((1, H), (1, W))
+FULL_RES = FeatureConfig(half_resolution=False)
 
 
 @pytest.fixture(scope="module")
@@ -21,14 +22,15 @@ def scene():
     return img, info["ref"]
 
 
-def test_default_stack_has_both_channels_at_full_resolution(scene):
+def test_default_stack_has_both_channels_at_half_resolution(scene):
+    """Half resolution is the default: same accuracy in the study, 4x fewer pixels to predict."""
     img, ref = scene
     cfg = FeatureConfig()
     stack = compute_features(img, *FULL, reference=ref, config=cfg)
     names = feature_names(cfg)
-    assert stack.values.shape == (H, W, len(names))
+    assert stack.values.shape == (H // 2, W // 2, len(names))
     assert stack.values.dtype == np.float32 and np.isfinite(stack.values).all()
-    assert stack.step == 1 and stack.roi_shape == (H, W)
+    assert stack.step == 2 and stack.roi_shape == (H, W)
     assert any(n.startswith("raw") for n in names) and any(n.startswith("view") for n in names)
     assert len(set(names)) == len(names)
 
@@ -44,17 +46,19 @@ def test_channels_and_texture_are_configurable(scene):
         FeatureConfig(channels=())
 
 
-def test_half_resolution_halves_the_grid_but_keeps_the_roi_shape(scene):
+def test_full_resolution_keeps_the_roi_grid(scene):
     img, ref = scene
-    stack = compute_features(img, *FULL, reference=ref, config=FeatureConfig(half_resolution=True))
-    assert stack.step == 2 and stack.roi_shape == (H, W)
-    assert stack.values.shape[:2] == (H // 2, W // 2)
+    stack = compute_features(img, *FULL, reference=ref, config=FULL_RES)
+    assert stack.step == 1 and stack.roi_shape == (H, W)
+    assert stack.values.shape[:2] == (H, W)
 
 
 def test_features_cover_the_roi_only(scene):
     img, ref = scene
-    stack = compute_features(img, (11, 100), (21, 140), reference=ref, config=FeatureConfig())
+    stack = compute_features(img, (11, 100), (21, 140), reference=ref, config=FULL_RES)
     assert stack.values.shape[:2] == (90, 120) and stack.roi_shape == (90, 120)
+    half = compute_features(img, (11, 100), (21, 140), reference=ref, config=FeatureConfig())
+    assert half.values.shape[:2] == (45, 60) and half.roi_shape == (90, 120)
 
 
 def test_no_reference_still_gives_the_same_feature_set(scene):
@@ -85,7 +89,7 @@ def test_raw_channel_ignores_a_global_brightness_change(scene):
 
 def test_view_channel_separates_bubble_from_background(scene):
     img, ref = scene
-    cfg = FeatureConfig(channels=("view",), texture=False)
+    cfg = FeatureConfig(channels=("view",), texture=False, half_resolution=False)
     stack = compute_features(img, *FULL, reference=ref, config=cfg)
     first = stack.values[..., 0]                      # finest-scale smoothed view
     assert np.median(first[5:20, 5:20]) == pytest.approx(1.0, abs=0.1)
