@@ -338,6 +338,19 @@ def test_painting_section_is_folded_and_its_keys_live_only_while_open(app, qapp,
     assert trainings == []
 
 
+def test_a_painted_frames_card_follows_its_strokes(app):
+    from bubbletrack.model.teach import BACKGROUND, BUBBLE, MLExamples
+
+    window, controller = app
+    controller.ml.open_teaching()
+    teach = _teach(controller)
+    first = MLExamples().paint(9, BUBBLE, [(60, 80), (60, 81)]).paint(9, BACKGROUND, [(10, 10)])
+    moved = MLExamples().paint(9, BUBBLE, [(62, 80), (62, 81)]).paint(9, BACKGROUND, [(10, 10)])
+    strokes = [first.strokes[9], moved.strokes[9]]     # as many pixels, other places
+    pictures = [teach._picture(9, None, s) for s in strokes]
+    assert pictures[0] is not pictures[1]
+
+
 def test_strokes_outside_the_roi_are_refused(app):
     window, controller = app
     controller._state = update_state(controller._get_state(), gridx=(20, 100), gridy=(20, 140))

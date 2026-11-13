@@ -219,8 +219,8 @@ class TeachingMode:
         return CardView(frame, caption, frame in progress.frames, self._picture(frame, outline, strokes))
 
     def _picture(self, frame: int, outline, strokes):
-        key = (frame, None if outline is None else (outline.radius, outline.rc, outline.cc),
-               None if strokes is None else (len(strokes.bubble), len(strokes.background)))
+        # FrameStrokes is frozen and hashable: any change of the painted pixels is a new key.
+        key = (frame, None if outline is None else (outline.radius, outline.rc, outline.cc), strokes)
         if key not in self._pictures:
             self._pictures[key] = card_picture(self._c.state, frame, outline, strokes)
         return self._pictures[key]
