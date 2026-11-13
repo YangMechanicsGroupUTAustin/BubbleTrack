@@ -50,7 +50,7 @@ class TestCategories:
         assert category_of(_item(0, "fragmented", "shoulder")) == "shape"
 
     def test_a_handful_of_named_categories(self):
-        assert 5 <= len(CATEGORIES) <= 9  # 7 + ML assist's "ML outline" and "ML disagrees"
+        assert 5 <= len(CATEGORIES) <= 8
         assert category_label("lost") == "Lost track"
         assert category_label("other") == "Other"
         assert all(category_label(c.key) == c.label for c in CATEGORIES)

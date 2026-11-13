@@ -30,7 +30,7 @@ from bubbletrack.controller.ml_teach import TeachingMode
 from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.ml_assist import (
-    HINT_SHARE, UNAVAILABLE_TIP, examples_for_run, failure_share, make_job, ml_available,
+    UNAVAILABLE_TIP, examples_for_run, failures, make_job, ml_available,
     protected_frames, readiness, state_text, stored_auto_map,
 )
 from bubbletrack.model.ml_pipeline import MLJob, train_job
@@ -253,13 +253,14 @@ class MLAssistController:
             return
         if state.ml_assist or not self.available:
             return
-        share = failure_share(state, info.get("frames", ()), self._app.review.queued_frames())
-        if share >= HINT_SHARE:
-            pct = round(100 * share)
-            self.hint.show_text(f"{pct}% of the frames have no result or need review. "
-                                "ML assist can help: teach it on a few frames.")
+        missing = failures(state, info.get("frames", ()))
+        if missing.worth_a_hint():
+            pct = round(100 * missing.share)
+            self.hint.show_text(f"{missing.missing} frames ({pct}%) inside the bubble's lifetime "
+                                "have no result. ML assist can help: teach it on a few frames.")
             header = self.w.header
-            header.set_status(f"{header.status_text()} — {pct}% need help: try ML assist", _WARN)
+            header.set_status(f"{header.status_text()} — {pct}% without a result: try ML assist",
+                              _WARN)
 
     def _on_results_changed(self) -> None:
         self.teach.on_results_changed()

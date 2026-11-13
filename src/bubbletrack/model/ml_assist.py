@@ -7,7 +7,8 @@ is, which frames to suggest, and the short texts the UI shows.
 from __future__ import annotations
 
 import importlib.util
-from collections.abc import Callable, Collection, Iterable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 
 import numpy as np
 from scipy import ndimage
@@ -19,7 +20,8 @@ from bubbletrack.model.provenance import USER_CONFIRMED_SOURCES, FitSource
 from bubbletrack.model.teach.examples import BACKGROUND, BUBBLE, LABELS, MLExamples
 
 SUGGESTED_FRAMES = 2  # the study: two verified frames of different sizes teach best
-HINT_SHARE = 0.2  # suggest ML assist when this share of a run's frames fail or need review
+HINT_SHARE = 0.2  # suggest ML assist when this share of the bubble's frames has no result ...
+HINT_MIN_FRAMES = 10  # ... and at least this many of them
 BRUSH_FRACTION = 0.12  # default brush radius, relative to the typical bubble radius
 BRUSH_RANGE = (2, 40)  # px
 DEFAULT_BUBBLE_RADIUS = 30.0  # px, before anything is fitted
@@ -185,14 +187,41 @@ def default_brush(state) -> int:
     return int(np.clip(round(BRUSH_FRACTION * typical), *BRUSH_RANGE))
 
 
-def failure_share(state, frames: Iterable[int], queued: Collection[int]) -> float:
-    """Share of *frames* (user-decided ones left out) without a result or in Review."""
+@dataclass(frozen=True)
+class Failures:
+    """Frames without a result inside the bubble's lifetime in a run."""
+
+    missing: int
+    """Frames with no result between the first and the last frame with one."""
+    span: int
+    """Frames between them (user-decided ones left out)."""
+
+    @property
+    def share(self) -> float:
+        return self.missing / self.span if self.span else 0.0
+
+    def worth_a_hint(self, share: float | None = None, min_frames: int | None = None) -> bool:
+        share = HINT_SHARE if share is None else share
+        min_frames = HINT_MIN_FRAMES if min_frames is None else min_frames
+        return self.missing >= min_frames and self.share >= share
+
+
+def failures(state, frames: Iterable[int]) -> Failures:
+    """Missing results of a run between its first and last frame with a result.
+
+    Frames before the first and after the last bubble are routine (before
+    cavitation, after the cloud), and listed frames with a result are not
+    failures; manual and locked frames are the user's and do not count.
+    """
+    if state.radius is None:
+        return Failures(0, 0)
+    order = sorted(int(i) for i in frames)
+    fitted = [i for i in order if state.radius[i] > 0]
+    if not fitted:
+        return Failures(0, 0)
     skip = protected_frames(state)
-    keep = [i for i in frames if i not in skip]
-    if not keep or state.radius is None:
-        return 0.0
-    bad = sum(1 for i in keep if not state.radius[i] > 0 or i in queued)
-    return bad / len(keep)
+    inside = [i for i in order if fitted[0] <= i <= fitted[-1] and i not in skip]
+    return Failures(sum(1 for i in inside if not state.radius[i] > 0), len(inside))
 
 
 def run_counts(state, frames: Iterable[int]) -> dict[str, int]:
@@ -234,7 +263,7 @@ def state_text(on: bool, examples: MLExamples | None) -> str:
 
 __all__ = [
     "BACKGROUND", "BUBBLE", "HINT_SHARE", "SUGGESTED_FRAMES", "UNAVAILABLE_TIP", "default_brush",
-    "examples_for_run", "failure_share", "make_job", "ml_available", "protected_frames", "readiness", "run_counts",
+    "examples_for_run", "failures", "make_job", "ml_available", "protected_frames", "readiness", "run_counts",
     "run_summary", "state_text", "stored_auto", "stored_auto_map", "stroke_count", "suggestions",
     "verified_circles",
 ]

@@ -11,6 +11,7 @@ import pytest
 
 from bubbletrack.controller.review_queue import build_review_items
 from bubbletrack.controller.review_segments import build_segments, category_of
+from bubbletrack.ui.review_text import tooltip_lines
 from bubbletrack.model import ml_assist as M
 from bubbletrack.model.edge import EdgeResult
 from bubbletrack.model.edge_pipeline import EdgeFrameFit, EdgeJob, make_params
@@ -190,12 +191,22 @@ def test_suggestions_leave_out_verified_locked_and_reference_frames():
     assert len(M.suggestions(state, reference=0)) == 2
 
 
-def test_failure_share_counts_missing_and_reviewed_frames():
-    state = _state()
-    state.radius[[1, 2]] = -1.0
-    state.fit_source[3] = FitSource.MANUAL        # user decisions do not count
-    assert M.failure_share(state, range(N), queued={4}) == pytest.approx(3 / 7)
-    assert M.failure_share(state, [], queued=()) == 0.0
+def test_failures_count_missing_results_inside_the_bubbles_lifetime_only():
+    state = _state(40)
+    state.radius[:5] = -1.0                       # before cavitation: routine
+    state.radius[35:] = -1.0                      # after the cloud: routine
+    state.radius[[10, 11, 12, 20]] = -1.0         # failures
+    state.fit_source[13] = FitSource.MANUAL       # user decisions do not count
+    state.radius[14] = -1.0
+    state.fit_locked[14] = True                   # "no bubble here", the user's call
+    state.fit_flags[15] = frozenset({"jump"})     # listed but with a result: not a failure
+    found = M.failures(state, range(40))
+    assert (found.missing, found.span) == (4, 28) and found.share == pytest.approx(4 / 28)
+    assert not found.worth_a_hint()               # 14 %
+    assert found.worth_a_hint(share=0.1, min_frames=4) and not found.worth_a_hint(0.1, 5)
+    state.radius[16:30] = -1.0                    # 18 missing of 28
+    assert M.failures(state, range(40)).worth_a_hint()
+    assert M.failures(state, range(5)).span == 0 and not M.failures(state, []).worth_a_hint()
 
 
 def test_default_brush_scales_with_the_bubble():
@@ -271,7 +282,7 @@ def test_old_and_damaged_sessions_load_without_ml_assist(tmp_path):
     assert data["ml_examples"] is None and data["ml_assist"] is False
 
 
-def test_ml_outlines_are_one_review_category_whatever_else_is_flagged():
+def test_ml_results_are_one_review_category_whatever_else_is_flagged():
     state = _state()
     for i in (2, 3, 4):
         state.fit_source[i] = FitSource.ML
@@ -280,11 +291,16 @@ def test_ml_outlines_are_one_review_category_whatever_else_is_flagged():
     state.fit_flags[6] = frozenset({"ml_unfamiliar"})          # context only: not listed alone
     items = build_review_items(state)
     assert [i.frame for i in items] == [3, 2, 4]
-    assert {category_of(i) for i in items} == {"ml_outline"}
+    assert {category_of(i) for i in items} == {"ml"}
     segments = build_segments(items)
-    assert len(segments) == 1 and segments[0].label == "ML outline" and segments[0].frames == (2, 3, 4)
-    state.fit_flags[6] = frozenset({"ml_disagrees"})
-    assert category_of(next(i for i in build_review_items(state) if i.frame == 6)) == "ml_disagrees"
+    assert len(segments) == 1 and segments[0].label == "ML result" and segments[0].frames == (2, 3, 4)
+    state.fit_flags[5] = frozenset({"ml_disagrees"})             # Auto kept, ML saw it elsewhere
+    state.fit_confidence[5] = 0.2                                # also low confidence
+    items = build_review_items(state)
+    assert {category_of(i) for i in items} == {"ml"}
+    segments = build_segments(items)
+    assert len(segments) == 1 and segments[0].frames == (2, 3, 4, 5)
+    assert "ML disagrees" in "\n".join(tooltip_lines(segments[0], ()))   # the exact reason
 
 
 def test_ml_source_is_exported_by_name_and_drawn_as_a_computed_dot():

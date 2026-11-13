@@ -15,6 +15,7 @@ import _ml_synth as S  # noqa: E402
 from bubbletrack.controller import ml_controller  # noqa: E402
 from bubbletrack.controller import worker as worker_module  # noqa: E402
 from bubbletrack.event_bus import RESULTS_CHANGED  # noqa: E402
+from bubbletrack.model import ml_assist  # noqa: E402
 from bubbletrack.model.provenance import FitSource  # noqa: E402
 from bubbletrack.model.state import update_state  # noqa: E402
 from bubbletrack.ui.image_compare import CompareMode  # noqa: E402
@@ -105,11 +106,14 @@ def test_without_scikit_learn_the_button_is_disabled_with_a_reason(qapp, isolate
         window.close()
 
 
-def test_hint_after_an_auto_run_where_many_frames_fail(app, qapp):
+def test_hint_after_an_auto_run_where_many_frames_fail(app, qapp, monkeypatch):
     window, controller = app
-    _fit_all(qapp, controller)
+    _fit_all(qapp, controller)                 # 2 of the bubble's 9 frames have no result
     hint = controller.ml.hint
-    assert not hint.isHidden() and "ML assist can help" in hint.text()
+    assert hint.isHidden()                     # fewer than HINT_MIN_FRAMES: quiet
+    monkeypatch.setattr(ml_assist, "HINT_MIN_FRAMES", 2)
+    _fit_all(qapp, controller)
+    assert not hint.isHidden() and hint.text().startswith("2 frames (22%) inside the bubble's lifetime")
     assert "try ML assist" in window.header.status_text()
     hint.open_clicked.emit()
     assert _teach(controller).active and hint.isHidden()
@@ -216,7 +220,7 @@ def test_apply_measures_unconfirmed_frames_and_lists_ml_outlines(app, qapp):
     assert state.fit_source[6] == FitSource.ML and "ml_outline" in state.fit_flags[6]
     assert state.radius[6] == pytest.approx(S.RADII[6], rel=0.1)
     assert any("ml_guided" in state.fit_flags[f] for f in (1, 2, 4))
-    assert any(text.endswith("ML outline") for text in controller.review.panel.texts())
+    assert any(text.endswith("ML result") for text in controller.review.panel.texts())
     assert state.ml_assist and _box(window).ml_switch.isChecked()
     assert _box(window).ml_state_label.text().startswith("On (")
     assert "ML assist:" in window.header.status_text()
