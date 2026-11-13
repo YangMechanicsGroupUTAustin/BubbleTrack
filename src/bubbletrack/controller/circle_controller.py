@@ -30,12 +30,13 @@ from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.ui.circle_tool import CIRCLE_UNAVAILABLE_TIP
 from bubbletrack.ui.fix_strip import FixView, NoFixView
+# The drawn circle (not stored) and what the engine found instead: the
+# image legend's colours, so what is drawn always matches its key.
+from bubbletrack.ui.overlay_legend import FOUND_COLOUR, USER_CIRCLE_COLOUR
 
 logger = logging.getLogger(__name__)
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
-USER_CIRCLE_COLOUR = "#f59e0b"  # the drawn circle, when it is not stored
-FOUND_COLOUR = "#a1a1aa"  # what the engine found instead
 _MANUAL_OUTLINE_POINTS = 72  # a stored circle's outline, for both panels
 
 

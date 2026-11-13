@@ -190,6 +190,14 @@ def test_circle_beside_the_bubble_is_not_stored_and_prompts(app):
     assert events == [] and controller.review.fix.active
 
 
+def test_refused_circle_is_drawn_in_the_colour_its_key_names(app):
+    window, _, _ = app
+    _drag(window, 60.0, 60.0, 25.0)
+    # The image key names the dashed circle only when it has the key's colour
+    # (cyan, never the amber that read as Auto's yellow guess).
+    assert "your circle (not stored)" in window.original_panel.legend_texts()
+
+
 def test_use_my_circle_stores_a_manual_fit_and_undo_restores(app):
     window, controller, events = app
     _drag(window, 60.0, 60.0, 25.0)
