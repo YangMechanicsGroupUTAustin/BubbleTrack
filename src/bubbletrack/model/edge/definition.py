@@ -11,10 +11,12 @@ Circle (default, ``EdgeParams.non_round`` False)
     circumference, and how far the check is off (``roundness``).
 
 Area ("Bubble may be non-round")
-    R is the area-equivalent radius of the outline, the centre its centroid.  A bubble
-    cut by the border is completed with its circle only when the visible wall agrees
-    (the same check); otherwise it is ``clipped_unmeasurable``: no result, its
-    candidate kept as Auto's guess.  ``non_circular`` describes the outline only.
+    R is the area-equivalent radius of the outline, the centre the centroid of the same
+    (completed) region, never the circle's: on an elongated bubble the robust circle
+    hugs one flank.  A bubble cut by the border is completed with its circle only when
+    the visible wall agrees (the same check); otherwise it is ``clipped_unmeasurable``:
+    no result, its candidate kept as Auto's guess.  ``non_circular`` describes the
+    outline only.
 
 Every result of this mode carries ``area_radius`` (the definition, frame by frame).
 Coordinates are 0-based ROI pixels.
@@ -97,10 +99,10 @@ def measure_circle(line: Outline, check: CircleCheck, frame: FrameStats, cfg: Qu
     sigma = circle_sigma(line)
     off = check_off(radius, check)
     flags = set()
-    if region.clipped:
+    if check.method == "ellipse":
         if clipped_disagrees(radius, check, cfg):
             flags.add(FLAG_CLIPPED_NOT_ROUND)
-    elif np.isfinite(off) and off > cfg.circle_check_rel:
+    elif check.method == "area" and np.isfinite(off) and off > cfg.circle_check_rel:
         flags.add(FLAG_NON_CIRCULAR)
     terms = circle_terms(line.evidence, radius, sigma, region.hidden_arc, off, frame.contrast,
                          frame.noise, frame.runner_up, frame.multi_fraction, cfg)
@@ -115,13 +117,12 @@ def measure_area(line: Outline, check: CircleCheck, frame: FrameStats, cfg: Qual
         flags.add(FLAG_NON_CIRCULAR)
     if region.completed:
         flags.add(FLAG_COMPLETED)
-    if region.clipped and clipped_disagrees(region.radius, check, cfg):
+    if clipped_disagrees(region.radius, check, cfg):
         flags.add(FLAG_UNMEASURABLE)
-    centre = (fit.rc, fit.cc) if region.clipped else region.visible.centroid
     terms = area_terms(region, line.evidence, line.sigma_r, frame.contrast, frame.noise,
                        frame.runner_up, frame.multi_fraction, cfg)
     kind = "area+circle_completion" if region.completed else "area"
-    return Measured(region.radius, centre, line.sigma_r, kind, frozenset(flags), terms,
+    return Measured(region.radius, region.centroid, line.sigma_r, kind, frozenset(flags), terms,
                     check_off(fit.radius, check))
 
 

@@ -97,8 +97,8 @@ class EdgeResult:
     visible wall agrees with it (``radius_kind == "area+circle_completion"``), else the frame
     is rejected (flag ``clipped_unmeasurable``) and ``radius`` is only Auto's guess."""
     rc: float
-    """Centre row: the circle-fit centre (circle definition, or a clipped region), else the
-    area centroid of the visible region."""
+    """Centre row from the same definition as ``radius``: the circle-fit centre (circle), or the
+    area centroid of the (completed) region (area; ``centroid``)."""
     cc: float
     radius_sigma: float
     """Standard error of ``radius`` (circle: its fit covariance; area: outline noise plus the

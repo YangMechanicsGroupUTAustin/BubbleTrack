@@ -161,7 +161,8 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
     flags |= measurement_flags(region=chosen.region, multi_fraction=edges.multi_fraction,
                                runner_up=sel.runner_up, contrast=coarse.contrast, noise=coarse.noise,
                                saturated=bool(sat.any()), shoulder_width=shoulder, cfg=config.quality)
-    check = circle_check(chosen.region, chosen.stats.fit.radius, exclude)
+    check = circle_check(chosen.region, chosen.stats.fit.radius, exclude,
+                         config.quality.clipped_check_hidden)
     return _build(chosen, check, outer_radius, shoulder, edges, coarse, sel, flags, prov, origin, params,
                   config, watch)
 

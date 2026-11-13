@@ -38,8 +38,8 @@ def _check_completed(res, rc0: float, cc0: float, roi_rows=(1, H), roi_cols=(1, 
     assert res.radius_kind == "area+circle_completion"
     assert res.radius == pytest.approx(R, rel=0.005)
     assert res.radius == pytest.approx(res.r_circle, rel=0.005)
-    assert (res.rc, res.cc) == pytest.approx((rc0 + 1, cc0 + 1), abs=0.5)    # circle-fit centre
-    assert res.centroid == pytest.approx((rc0 + 1, cc0 + 1), abs=1.0)         # completed region
+    assert (res.rc, res.cc) == pytest.approx((rc0 + 1, cc0 + 1), abs=0.5)    # completed region's
+    assert (res.rc, res.cc) == pytest.approx(res.centroid, abs=1e-9)          # centroid, as R
     assert res.area_px == pytest.approx(np.pi * res.radius ** 2)
     e = res.edge_xy                                                           # no point on the border
     assert e[:, 0].min() > roi_rows[0] - 0.5 + 1e-6 and e[:, 0].max() < roi_rows[1] + 0.5 - 1e-6

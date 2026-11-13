@@ -221,6 +221,9 @@ class QualityConfig:
     ``clipped_unmeasurable`` (area).  Calibrated on real round bubbles cut by the border (example_1,
     LIC 01, 05, 06, 10, lic_hard 07): at most 0.04; synthetic round ones (R 10-100, cut up to 65 %)
     at most 0.05; three lobes of 8 % cut at their phase 0 up to 50 %: 0.049; 1.5:1 ellipses: >= 0.12."""
+    clipped_check_hidden: float = 0.02
+    """A clipped region with at most this share of its area hidden (an outline that only touches
+    a glare blob or the ROI border) is checked by its area, like one inside the ROI."""
     roundness_free: float = 0.05
     roundness_span: float = 0.10
     roundness_floor: float = 0.6
