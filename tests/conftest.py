@@ -42,6 +42,17 @@ def _no_autosave_into_data(tmp_path, monkeypatch):
     monkeypatch.setattr(AutoController, "_autosave_path", guarded)
 
 
+@pytest.fixture(autouse=True)
+def _no_blocking_questions(monkeypatch):
+    """Questions that would block an offscreen test answer like the app used to
+    before they were asked: loading another recording discards an unsaved review.
+    Tests of the questions override this."""
+    from bubbletrack.controller import session_controller
+
+    monkeypatch.setattr(session_controller, "ask_save_review",
+                        lambda _parent, _name, _detail: "discard")
+
+
 @pytest.fixture(scope="session")
 def qapp():
     from PyQt6.QtWidgets import QApplication

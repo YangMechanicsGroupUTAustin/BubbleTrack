@@ -407,13 +407,7 @@ class AppController:
 
     def _on_save_session(self) -> None:
         """Prompt the user for a path and save the current session."""
-        default_dir = self._state.folder_path or os.path.expanduser("~")
-        path, _ = QFileDialog.getSaveFileName(
-            self.w, "Save Session", default_dir,
-            "BubbleTrack Session (*.brt);;All Files (*)",
-        )
-        if path:
-            self.save_session_file(path)
+        self.session_ctrl.save_as()
 
     def _on_load_session(self) -> None:
         """Prompt the user for a .brt file and restore the session."""

@@ -22,8 +22,12 @@ from pathlib import Path
 
 import numpy as np
 from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QFileDialog
 
 from bubbletrack.controller.base import BaseController
+from bubbletrack.controller.unsaved_review import (
+    CANCEL, SAVE, ask_save_review, describe, recording_name, review_counts, review_signature,
+)
 from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
@@ -44,8 +48,11 @@ AUTOSAVE_MIN_INTERVAL_S = 60.0  # at most one autosave per minute ...
 AUTOSAVE_DEBOUNCE_S = 2.0       # ... starting this long after the first change
 RECOVERY_MTIME_SLACK_S = 2.0    # file-time resolution (FAT: 2 s) vs the clean-exit stamp
 RESULTS_CHANGED_EVENT = RESULTS_CHANGED  # bus event: any controller edited results
+# Bus event (no arguments): a session file restored the recording and its parameters.
+SESSION_RESTORED = "session_restored"
+SESSION_FILTER = "BubbleTrack Session (*.brt);;All Files (*)"
 
-_OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
+_OK, _WARN, _ERR, _DIM = "#10b981", "#f59e0b", "#ef4444", "#a1a1aa"
 
 
 def recovery_dir() -> Path:
@@ -184,6 +191,13 @@ class SessionController(BaseController):
         self._locate_folder = locate_folder
         self._after_restore = after_restore
 
+        # The review last saved in (or restored from) a session file; another
+        # recording replaces the current one only after asking (confirm_leave).
+        self._saved_review: tuple = ()
+        self.choose_save_path: Callable[[], str] | None = None  # None: a file dialog
+        file_ctrl.confirm_leave = self.confirm_leave
+        self.bus.subscribe("source_loaded", self._on_source_loaded)
+
         self._clock = clock
         self._autosave_dirty = False
         self._autosave_target: Path | None = None
@@ -201,12 +215,50 @@ class SessionController(BaseController):
             logger.error("Session save failed: %s", exc)
             self.w.header.set_status(f"Save failed: {exc}", _WARN)
             return False
+        self._saved_review = review_signature(self.state)
         self.w.header.set_status(f"Session saved: {os.path.basename(path)}", _OK)
         return True
+
+    def save_as(self) -> bool:
+        """Ask where to save the session, then save it; False if cancelled or failed."""
+        path = self.choose_save_path() if self.choose_save_path else self._ask_save_path()
+        return bool(path) and self.save(path)
+
+    def _ask_save_path(self) -> str:
+        default_dir = self.state.folder_path or os.path.expanduser("~")
+        path, _ = QFileDialog.getSaveFileName(self.w, "Save Session", default_dir, SESSION_FILTER)
+        return path
+
+    # -- leaving a recording -------------------------------------------------- #
+
+    def has_unsaved_review(self) -> bool:
+        """The user's decisions differ from the last saved or loaded session."""
+        current = review_signature(self.state)
+        return bool(current) and current != self._saved_review
+
+    def confirm_leave(self) -> bool:
+        """Before another recording replaces this one: True to go on.
+
+        With unsaved decisions: "Save the review of <name> first?"
+        [Save session…] [Discard] [Cancel].
+        """
+        if not self.has_unsaved_review():
+            return True
+        detail = describe(review_counts(self.state))
+        answer = ask_save_review(self.w, recording_name(self.state), detail)
+        if answer == SAVE:
+            return self.save_as()
+        return answer != CANCEL
+
+    def _on_source_loaded(self, _n: int) -> None:
+        self._saved_review = ()  # a new recording: nothing decided yet
 
     def load(self, path: str) -> bool:
         if self._is_busy():
             self.w.header.set_status("Stop the running fit before loading a session", _WARN)
+            return False
+        if not self.confirm_leave():
+            self.w.header.set_status("Session not loaded", _DIM)
             return False
         try:
             data = load_session(path)
@@ -233,11 +285,11 @@ class SessionController(BaseController):
             if not os.path.isfile(video):
                 self.w.header.set_status(f"Video not found: {video}", _ERR)
                 return False
-            self._file_ctrl.on_video_selected(video)
+            self._file_ctrl.on_video_selected(video, ask=False)
             if self.state.video_path != video:
                 return False  # opening failed; FileController reported why
         elif folder:
-            self._file_ctrl.on_folder_selected(folder)
+            self._file_ctrl.on_folder_selected(folder, ask=False)
             if self.state.folder_path != folder:
                 return False  # loading failed; FileController reported why
 
@@ -253,7 +305,9 @@ class SessionController(BaseController):
         warning = restore_results(self.state, results)
         if warning:
             warnings.append(warning)
+        self._saved_review = review_signature(self.state)
         self._after_restore()
+        self.bus.emit(SESSION_RESTORED)
 
         name = os.path.basename(path)
         if warnings:
