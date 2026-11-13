@@ -30,6 +30,15 @@ logger = logging.getLogger(__name__)
 
 AUTOSAVE_INTERVAL = 50  # frames between incremental auto-saves
 AUTOSAVE_NAME = ".bubbletrack_autosave.mat"
+# A file with this name in a source folder or any of its parents turns the
+# source-folder autosave off there (reference data sets, read-only archives).
+NO_AUTOSAVE_MARKER = ".bubbletrack_no_autosave"
+
+
+def autosave_disabled(folder: Path) -> bool:
+    """True when *folder* or one of its parents holds ``NO_AUTOSAVE_MARKER``."""
+    folder = Path(folder).resolve()
+    return any((d / NO_AUTOSAVE_MARKER).is_file() for d in (folder, *folder.parents))
 
 
 class AutoController(BaseController):
@@ -435,13 +444,19 @@ class AutoController(BaseController):
             self.w.radius_chart.plot_all(frames, self.state.radius)
 
     def _autosave_path(self) -> Path | None:
-        """Next to the images, or next to the video (one file per video)."""
+        """Next to the images, or next to the video (one file per video).
+
+        None when there is no source or the source sits under a folder that
+        holds a ``NO_AUTOSAVE_MARKER`` file.
+        """
         if self.state.video_reader is not None and self.state.video_path:
             video = Path(self.state.video_path)
-            return video.with_name(f".{video.stem}{AUTOSAVE_NAME}")
-        if self.state.folder_path:
-            return Path(self.state.folder_path) / AUTOSAVE_NAME
-        return None
+            path = video.with_name(f".{video.stem}{AUTOSAVE_NAME}")
+        elif self.state.folder_path:
+            path = Path(self.state.folder_path) / AUTOSAVE_NAME
+        else:
+            return None
+        return None if autosave_disabled(path.parent) else path
 
     def _write_autosave(self) -> bool:
         """Write the incremental autosave; never raises."""
