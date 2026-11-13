@@ -27,7 +27,7 @@ from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
-from bubbletrack.model.config import load_config
+from bubbletrack.model.config import load_config, ui_setting
 from bubbletrack.model.detection import (
     detect_bubble_gradient, detect_bubble_with_mode, measure_detection,
 )
@@ -44,8 +44,16 @@ logger = logging.getLogger(__name__)
 
 
 def initial_state(saved: dict) -> AppState:
-    """The persisted parameters; without a saved method the app measures with Auto."""
-    return update_state(AppState(), **{"detection_mode": AUTO_METHOD, **(saved or {})})
+    """The persisted parameters; the app starts in Auto unless classic methods are on.
+
+    Older versions saved "intensity" as the default method in every config,
+    so a saved classic method only counts when Settings shows classic methods.
+    (Sessions keep their own method: loading one restores it.)
+    """
+    params = {"detection_mode": AUTO_METHOD, **(saved or {})}
+    if params["detection_mode"] != AUTO_METHOD and not ui_setting("show_classic_methods"):
+        params["detection_mode"] = AUTO_METHOD
+    return update_state(AppState(), **params)
 
 
 class AppController:

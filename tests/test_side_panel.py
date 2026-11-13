@@ -108,13 +108,28 @@ class TestDefaultWindow:
         window, _ = gui
         assert window.status_bar._mode_label.text() == "Mode: Measure"
 
-    def test_saved_classic_method_keeps_its_controls(self, qapp, isolated_config):
+    def _start(self):
         from bubbletrack.controller.controller import AppController
         from bubbletrack.ui.main_window import MainWindow
 
-        config.save_config(AppState(detection_mode="intensity"))
         window = MainWindow()
-        controller = AppController(window)
+        return window, AppController(window)
+
+    def test_old_saved_classic_default_starts_in_auto(self, qapp, isolated_config):
+        """Older versions saved "intensity" as every config's default method."""
+        config.save_config(AppState(detection_mode="intensity"))
+        window, controller = self._start()
+        try:
+            panel = window.left_panel.measure_panel
+            assert controller._get_state().detection_mode == "edge"
+            assert not panel.classic_section.isVisibleTo(window.left_panel)
+        finally:
+            window.close()
+
+    def test_saved_classic_method_kept_when_classic_methods_are_on(self, qapp, isolated_config):
+        config.save_config(AppState(detection_mode="intensity"))
+        config.set_ui_setting("show_classic_methods", True)
+        window, controller = self._start()
         try:
             panel = window.left_panel.measure_panel
             assert controller._get_state().detection_mode == "intensity"
