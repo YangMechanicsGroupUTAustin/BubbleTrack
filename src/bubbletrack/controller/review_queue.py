@@ -14,7 +14,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import FitSource, user_confirmed_mask
 from bubbletrack.model.sequence import CONTEXT_FLAGS
 from bubbletrack.model.state import AppState
 
@@ -127,8 +127,8 @@ def _frame_reasons(state: AppState, radius: np.ndarray, conf: np.ndarray,
                    ) -> dict[int, list[str]]:
     n = len(radius)
     source = _per_frame(state.fit_source, n, FitSource.NONE, int)
-    manual = source == FitSource.MANUAL
-    # A manual fix supersedes the engine's verdict on that frame.
+    manual = user_confirmed_mask(source)
+    # A manual fix (or a drawn circle) supersedes the engine's verdict on that frame.
     engine = np.isfinite(conf) & ~manual
     fitted = np.isfinite(radius) & (radius > 0)
     found: dict[int, list[str]] = defaultdict(list)

@@ -16,6 +16,7 @@ REVIEW_BINDINGS: dict[str, str] = {
     "A": "accept",
     "R": "refit",
     "N": "refit_neighbors",
+    "C": "circle",
     "M": "manual",
     "D": "delete",
     "S": "skip",

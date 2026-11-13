@@ -15,7 +15,7 @@ from functools import lru_cache
 import numpy as np
 import pyqtgraph as pg
 
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import USER_CONFIRMED_SOURCES, FitSource
 
 # Green -> yellow -> red, bright enough for the dark plot background.  Score 1
 # (best) maps to the first stop, score 0 (worst) to the last.
@@ -26,8 +26,9 @@ RAMP_BINS = 32
 UNSCORED_COLOUR = "#a1a1aa"  # no score (area mode, or a live run)
 SURFACE_COLOUR = "#0c0d12"   # plot background, used as the marker outline
 
-# Computed results are dots; only a manual fit gets a diamond.
-SOURCE_SYMBOLS: dict[int, str] = {int(FitSource.MANUAL): "d"}
+# Computed results are dots; a result the user decided (a manual fit, or a
+# drawn circle while it counts as confirmed) gets the diamond.
+SOURCE_SYMBOLS: dict[int, str] = {int(s): "d" for s in USER_CONFIRMED_SOURCES}
 LOCKED_SYMBOL = "d"  # accepted in review: decided by the user, like a manual fit
 SYMBOL_SIZES = {"o": 9, "d": 12}
 

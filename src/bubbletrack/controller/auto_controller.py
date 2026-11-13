@@ -27,7 +27,7 @@ from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_T
 from bubbletrack.model.conventions import display_to_frame, frame_to_display
 from bubbletrack.model.export import export_r_data
 from bubbletrack.model.frame_source import normalize_source
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import FitSource, is_user_confirmed
 
 logger = logging.getLogger(__name__)
 
@@ -218,8 +218,8 @@ class AutoController(BaseController):
         # Frames accepted in review are always kept; manual fits are asked about.
         locked = frozenset(int(i) for i in in_range
                            if locked_arr is not None and locked_arr[i])
-        manual = [int(i) for i in in_range
-                  if source[i] == FitSource.MANUAL and i not in locked]
+        manual = [int(i) for i in in_range  # manual fits and drawn circles
+                  if is_user_confirmed(source[i]) and i not in locked]
         if not manual:
             return locked
         policy = self._ask_manual_policy(len(manual))
@@ -235,7 +235,8 @@ class AutoController(BaseController):
         box.setIcon(QMessageBox.Icon.Question)
         box.setWindowTitle("Manual fixes in range")
         box.setText(
-            f"{n_manual} frame(s) in this range were fitted manually.\n"
+            f"{n_manual} frame(s) in this range were fixed by hand "
+            "(manual fits or drawn circles).\n"
             "Fit All can keep them or replace them with automatic fits."
         )
         keep = box.addButton("Keep manual fits", QMessageBox.ButtonRole.AcceptRole)

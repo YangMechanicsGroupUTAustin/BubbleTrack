@@ -119,13 +119,19 @@ def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
 
 
 def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
-             job: EdgeJob) -> EdgeFrameFit:
-    """Run the engine on one raw frame and apply the acceptance rules."""
+             job: EdgeJob, *, min_confidence: float | None = None) -> EdgeFrameFit:
+    """Run the engine on one raw frame and apply the acceptance rules.
+
+    *min_confidence* replaces the engine's confidence gate for the
+    acceptance only (a user-drawn circle is itself evidence, see
+    ``guided_fit``); below the engine's gate it still reports the circle fit.
+    """
     res = _engine()(raw, gridx, gridy, reference=job.reference, params=job.params)
     confidence = float(res.confidence)
+    passed = res.accepted if min_confidence is None else confidence >= min_confidence
     if not np.isfinite(res.radius):
         reason = "no bubble found"
-    elif not res.accepted:
+    elif not passed:
         reason = f"low confidence ({confidence:.2f})"
     elif not (0 < res.radius <= job.max_radius):
         reason = "implausible radius"
