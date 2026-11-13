@@ -10,18 +10,25 @@ from PyQt6.QtWidgets import (
     QTextEdit, QWidget,
 )
 
-# Review queue keys: plain letters, so they never collide with the global
-# bindings below (arrows, + = - 0, Space, Ctrl+Z) or Ctrl+S / Ctrl+O.
+# Review queue keys: letters (with Shift for the whole row), so they never
+# collide with the global bindings below (arrows, + = - 0, Space, Ctrl+Z),
+# Ctrl+S / Ctrl+O or ML assist's teaching keys (B, G, E).  Up/Down move
+# through the list while it has focus (Qt's own keys).
 REVIEW_BINDINGS: dict[str, str] = {
     "A": "accept",
-    "R": "refit",
-    "N": "refit_neighbors",
-    "C": "circle",
-    "M": "manual",
-    "D": "delete",
+    "Shift+A": "accept_all",
+    "F": "fix",
+    "N": "no_bubble",
+    "Shift+N": "no_bubble_all",
     "S": "skip",
     "J": "next",
     "K": "prev",
+}
+# Live only while a fix runs (the Review dock's fix strip).
+FIX_BINDINGS: dict[str, str] = {
+    "Esc": "fix_cancel",
+    "Return": "fix_done",
+    "Enter": "fix_done",  # the keypad's
 }
 
 _TEXT_INPUTS = (QLineEdit, QTextEdit, QPlainTextEdit, QAbstractSpinBox, QComboBox)
@@ -33,7 +40,7 @@ def text_input_has_focus() -> bool:
 
 
 class ReviewShortcuts:
-    """The single-letter review keys, live only while *is_active()* holds.
+    """The review keys (*bindings*), live only while *is_active()* holds.
 
     ``sync()`` disables them outright (so the keys stay free) whenever the
     review is unavailable; each key also re-checks on activation and does
@@ -41,10 +48,11 @@ class ReviewShortcuts:
     """
 
     def __init__(self, window: QWidget, callbacks: dict[str, Callable[[], None]],
-                 is_active: Callable[[], bool]) -> None:
+                 is_active: Callable[[], bool],
+                 bindings: dict[str, str] | None = None) -> None:
         self._is_active = is_active
         self.shortcuts: dict[str, QShortcut] = {}
-        for key, action in REVIEW_BINDINGS.items():
+        for key, action in (REVIEW_BINDINGS if bindings is None else bindings).items():
             if action not in callbacks:
                 continue
             sc = QShortcut(QKeySequence(key), window)

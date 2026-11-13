@@ -311,14 +311,15 @@ def test_ml_results_are_one_review_category_whatever_else_is_flagged():
     assert [i.frame for i in items] == [3, 2, 4]
     assert {category_of(i) for i in items} == {"ml"}
     segments = build_segments(items)
-    assert len(segments) == 1 and segments[0].label == "ML result" and segments[0].frames == (2, 3, 4)
+    assert len(segments) == 1 and segments[0].frames == (2, 3, 4)
+    assert segments[0].label == "Outline from ML assist"
     state.fit_flags[5] = frozenset({"ml_disagrees"})             # Auto kept, ML saw it elsewhere
     state.fit_confidence[5] = 0.2                                # also low confidence
     items = build_review_items(state)
     assert {category_of(i) for i in items} == {"ml"}
     segments = build_segments(items)
     assert len(segments) == 1 and segments[0].frames == (2, 3, 4, 5)
-    assert "ML disagrees" in "\n".join(tooltip_lines(segments[0], ()))   # the exact reason
+    assert "ML assist sees it elsewhere" in "\n".join(tooltip_lines(segments[0], ()))  # why
 
 
 def test_ml_source_is_exported_by_name_and_drawn_as_a_computed_dot():

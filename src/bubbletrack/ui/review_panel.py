@@ -1,68 +1,74 @@
-"""Review panel: runs of suspicious frames (segments) and one-key actions on them.
+"""Review panel: the frames to check, and what to do with the one on screen.
 
 ::
 
-    12 segments · 340 frames      [All types ▾]
+    12 of 48 frames to check        [All types ▾]
     ●  Frames 120–180               [61]
-       Lost track
+       Auto lost the bubble
     ●  Frame 44 · _054
-       Sudden jump
-    Frame 121 · _131 — lost track, low confidence 0.21
-    [Accept (A)] [Skip (S)] ...
+       Radius jumps
+    ────────────────────────────────────────────
+    Frame 125 · _135                     6 of 61      (ReviewCard)
+    No result, but Auto has a guess ...
+    [ Accept the guess                         A ]
+    [ Fix with a circle                        F ]
+    [ No bubble here                           N ]
+    [ Accept all 61     ⇧A ] [ Skip row   S ] [⋯]
+    ✓ Frame 124 accepted.                   [Undo]
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 
 from PyQt6.QtCore import QModelIndex, QPoint, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
-    QAbstractItemView, QFrame, QGridLayout, QHBoxLayout, QLabel, QListWidget,
-    QListWidgetItem, QMenu, QPushButton, QSizePolicy, QStackedWidget, QToolButton,
-    QVBoxLayout, QWidget,
+    QAbstractItemView, QFrame, QHBoxLayout, QLabel, QListWidget, QListWidgetItem, QMenu,
+    QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.controller.review_segments import (
-    CATEGORIES, OTHER, ReviewSegment, category_label, queue_frames, segment_of,
+    CATEGORIES, OTHER, ReviewSegment, queue_frames, segment_of,
 )
+from bubbletrack.ui.review_card import CardAdvice, DonePage, FeedbackLine, ReviewCard
+from bubbletrack.ui.review_filter import KindFilter
 from bubbletrack.ui.review_rows import ROW_ROLE, ReviewRowDelegate, row_data, tooltip_html
-from bubbletrack.ui.review_text import detail_text, segment_text, summary_text
+from bubbletrack.ui.review_text import (
+    detail_text, frame_title, position_text, progress_text, segment_text,
+)
 
-EMPTY_BEFORE_FIT = "Doubtful frames show up here after a fit."
-EMPTY_ALL_CLEAR = "All clear — nothing needs a second look."
+EMPTY_BEFORE_FIT = "Frames to check show up here after a fit."
+EMPTY_ALL_CLEAR = "Nothing to check: Auto is sure of every frame.\nNext: export R(t)."
+EMPTY_ALL_DONE = "All done: every flagged frame is checked.\nNext: export R(t)."
 EMPTY_FILTERED = "Nothing of the selected types."
 _CATEGORY_ORDER = [c.key for c in CATEGORIES] + [OTHER.key]
 
+# advisor(frame, item) -> what the card says about the frame on screen
+Advisor = Callable[[int, ReviewItem | None], CardAdvice]
+
 
 class ReviewPanel(QWidget):
-    """Segments to review with Accept / Refit / Manual / Delete / Skip.
+    """The frames to check (rows) and the card for the frame on screen.
 
-    The panel only shows segments and reports requests; ReviewController
-    decides what they do.  A segment is selected only while the shown frame
-    lies in its span (its range is highlighted on the chart), so actions
-    always hit the run the user is looking at.
+    The panel only shows and reports requests; ReviewController decides
+    what they do.  A row is selected only while the shown frame lies in its
+    span (its range is highlighted on the chart), so actions always hit the
+    run the user is looking at.  Accept, Fix and No bubble act on the frame
+    on screen, Accept all, Skip and No bubble on all on the selected row;
+    afterwards Review moves on by itself.
     """
 
-    ACTIONS = ("accept", "refit", "refit_neighbors", "circle", "manual", "delete", "skip")
-    _BUTTONS = (  # (action, label, tooltip), laid out in pairs
-        ("accept", "Accept (A)", "Keep the results of the whole row and lock them against Fit All "
-                                 "(on a frame showing Auto's dashed guess: store that guess only)"),
-        ("skip", "Skip (S)", "Leave the row as it is and drop it from the queue"),
-        ("refit", "Refit (R)", "Run detection again on every frame of the row"),
-        ("refit_neighbors", "Neighbours (N)",
-         "Refit the shown frame using neighbouring fits as a prior"),
-        ("circle", "Circle (C)", "Drag a circle on the shown frame in the Manual tab: "
-                                 "Auto measures the wall near it (Auto (reference frame) mode)"),
-        ("manual", "Manual (M)", "Click edge points on the shown frame in the Manual tab"),
-        ("delete", "Delete (D)", "Remove the results of every frame of the row"),
-    )
+    ACTIONS = ("accept", "accept_all", "fix", "no_bubble", "no_bubble_all", "skip")
+    ROW_ACTIONS = frozenset({"accept_all", "no_bubble_all", "skip"})  # need a selected row
 
     count_changed = pyqtSignal(int)  # frames waiting for review (every type)
     frame_activated = pyqtSignal(int)  # the user picked a row: show this frame
     action_requested = pyqtSignal(str)  # one of ACTIONS
     segment_changed = pyqtSignal(object)  # the selected ReviewSegment, or None
-    export_case_requested = pyqtSignal(object)  # a row's ReviewSegment (its right-click menu)
+    export_case_requested = pyqtSignal(object)  # a row's ReviewSegment (right-click, More)
+    export_requested = pyqtSignal()  # "Export R(t)..." once everything is checked
+    undo_requested = pyqtSignal()  # the feedback line's Undo
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -78,18 +84,22 @@ class ReviewPanel(QWidget):
         self._selected: ReviewSegment | None = None  # as last announced
         self._last_row: int | None = None  # where J/K continue when nothing is selected
         self._count = -1
+        self._ever: set[int] = set()  # listed since the last reset_progress()
+        self._advisor: Advisor | None = None
+        self._fix_label = "Fix with a circle"
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 8)
         layout.setSpacing(6)
         layout.addLayout(self._build_header())
         layout.addWidget(self._build_list(), 1)
-        self._detail = QLabel()
-        self._detail.setObjectName("reviewDetail")
-        self._detail.setWordWrap(True)
-        self._detail.setStyleSheet("color:#a1a1aa; font-size:11px; padding:0 2px;")
-        layout.addWidget(self._detail)
-        layout.addLayout(self._build_buttons())
+        self.card = ReviewCard()
+        self.card.action_requested.connect(self.action_requested)
+        self.card.export_case_requested.connect(self._export_selected_case)
+        layout.addWidget(self.card)
+        self.feedback = FeedbackLine()
+        self.feedback.undo_requested.connect(self.undo_requested)
+        layout.addWidget(self.feedback)
         self._refresh_view()
 
     # -- construction ------------------------------------------------------ #
@@ -103,14 +113,9 @@ class ReviewPanel(QWidget):
         # Never let a long summary widen the dock (it is clipped instead).
         self._summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self._summary, 1)
-        self._filter_btn = QToolButton()
-        self._filter_btn.setObjectName("reviewFilter")
-        self._filter_btn.setToolTip("Show only some types of problem")
-        self._filter_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self._filter_menu = QMenu(self._filter_btn)
-        self._filter_menu.aboutToShow.connect(self._fill_filter_menu)
-        self._filter_btn.setMenu(self._filter_menu)
-        row.addWidget(self._filter_btn)
+        self.kind_filter = KindFilter()
+        self.kind_filter.hidden_changed.connect(self.set_hidden_categories)
+        row.addWidget(self.kind_filter)
         return row
 
     def _build_list(self) -> QStackedWidget:
@@ -126,38 +131,12 @@ class ReviewPanel(QWidget):
         self._list.clicked.connect(self._on_clicked)
         self._list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._list.customContextMenuRequested.connect(self._on_context_menu)
-        self._empty = QLabel()
-        self._empty.setObjectName("reviewEmpty")
-        self._empty.setWordWrap(True)
-        self._empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._empty.setStyleSheet("color:#71717a; padding:16px;")
+        self.done_page = DonePage()
+        self.done_page.export_requested.connect(self.export_requested)
         self._stack = QStackedWidget()
         self._stack.addWidget(self._list)
-        self._stack.addWidget(self._empty)
+        self._stack.addWidget(self.done_page)
         return self._stack
-
-    def _build_buttons(self) -> QGridLayout:
-        grid = QGridLayout()
-        grid.setSpacing(4)
-        self._action_buttons: dict[str, QPushButton] = {}
-        for i, (action, label, tip) in enumerate(self._BUTTONS):
-            btn = QPushButton(label)
-            btn.setToolTip(tip)
-            if action != "accept":  # one primary action; the rest stay quiet
-                btn.setObjectName("secondaryBtn")
-            btn.clicked.connect(lambda _checked, a=action: self.action_requested.emit(a))
-            grid.addWidget(btn, i // 2, i % 2)
-            self._action_buttons[action] = btn
-        self._prev_btn = QPushButton("▲ Prev (K)")
-        self._next_btn = QPushButton("Next (J) ▼")
-        for btn, delta in ((self._prev_btn, -1), (self._next_btn, 1)):
-            btn.setObjectName("secondaryBtn")
-            btn.setToolTip("Previous / next row (J/K); ←/→ step through a row's frames")
-            btn.clicked.connect(lambda _checked, d=delta: self.step(d))
-        nav_row = (len(self._BUTTONS) + 1) // 2
-        grid.addWidget(self._prev_btn, nav_row, 0)
-        grid.addWidget(self._next_btn, nav_row, 1)
-        return grid
 
     # -- segments ---------------------------------------------------------- #
 
@@ -170,8 +149,10 @@ class ReviewPanel(QWidget):
             return
         if images != self._images:  # another recording: start from the top
             self._last_row = None
+            self._ever = set()
         self._all, self._images, self._fitted = segments, images, fitted
         self._items = {item.frame: item for s in segments for item in s.items}
+        self._ever |= set(self._items)
         self._rebuild()
 
     def segments(self) -> list[ReviewSegment]:
@@ -193,6 +174,55 @@ class ReviewPanel(QWidget):
         """Show *widget* (e.g. a hint) between the summary line and the list."""
         self.layout().insertWidget(1, widget)
 
+    # -- progress, card, feedback ------------------------------------------ #
+
+    def reset_progress(self) -> None:
+        """Count progress from the frames listed now (after a fit)."""
+        self._ever = set(self._items)
+        self._update_header()
+
+    def progress(self) -> tuple[int, int]:
+        """(frames still to check, frames listed since the last reset)."""
+        return self.count(), len(self._ever)
+
+    def set_advisor(self, advisor: Advisor) -> None:
+        """*advisor(frame, item)*: what the card says about the frame on screen."""
+        self._advisor = advisor
+        self.refresh_card()
+
+    def set_fix_label(self, text: str) -> None:
+        """'Fix with a circle' (Auto engine) or 'Fix with edge points'."""
+        if text != self._fix_label:
+            self._fix_label = text
+            self.refresh_card()
+
+    def shown_frame(self) -> int | None:
+        """The frame on screen, row or not."""
+        return self._shown
+
+    def refresh_card(self) -> None:
+        """Re-ask the advisor (e.g. after the frame's result changed)."""
+        frame, segment = self._shown, self.current_segment()
+        on = frame is not None and bool(self._images) and self._fitted  # after a fit
+        self.card.setVisible(on)
+        if not on:
+            return
+        frame = self.current_frame() if segment is not None else frame
+        item = self._items.get(frame)  # may be of another type than the row
+        advice = (self._advisor(frame, item) if self._advisor is not None
+                  else CardAdvice("", "accept"))
+        self.card.show_frame(
+            frame_title(frame, self._images),
+            position_text(segment) if segment is not None else "", advice,
+            row_count=segment.count if segment is not None else 0, fix_label=self._fix_label,
+            why=detail_text(item, frame, self._images, None) if item is not None else "")
+
+    def show_feedback(self, text: str, *, undo: bool = True) -> None:
+        self.feedback.show_text(text, undo=undo)
+
+    def clear_feedback(self) -> None:
+        self.feedback.clear()
+
     # -- type filter ------------------------------------------------------- #
 
     def hidden_categories(self) -> frozenset[str]:
@@ -210,18 +240,6 @@ class ReviewPanel(QWidget):
         for s in self._all:
             totals[s.category] = totals.get(s.category, 0) + s.count
         return [(k, totals[k]) for k in _CATEGORY_ORDER if k in totals]
-
-    def _fill_filter_menu(self) -> None:
-        menu = self._filter_menu
-        menu.clear()
-        menu.addAction("Show all types", lambda: self.set_hidden_categories(()))
-        menu.addSeparator()
-        for key, frames in self._present():
-            action = menu.addAction(f"{category_label(key)}  ({frames})")
-            action.setCheckable(True)
-            action.setChecked(key not in self._hidden)
-            action.toggled.connect(lambda on, k=key: self.set_hidden_categories(
-                self._hidden - {k} if on else self._hidden | {k}))
 
     # -- selection --------------------------------------------------------- #
 
@@ -305,6 +323,11 @@ class ReviewPanel(QWidget):
             menu.exec(self._list.viewport().mapToGlobal(pos))
             menu.deleteLater()
 
+    def _export_selected_case(self) -> None:
+        segment = self.current_segment()
+        if segment is not None:
+            self.export_case_requested.emit(segment)
+
     def _set_row(self, row: int) -> None:
         self._list.blockSignals(True)
         self._list.setCurrentRow(row)
@@ -342,16 +365,8 @@ class ReviewPanel(QWidget):
         segment = self.current_segment()
         if segment is not None:
             self._last_row = self._list.currentRow()
-        self._update_controls(segment)
         self._update_header()
-        frame = self.current_frame()
-        shown = segment is not None and frame is not None
-        item = self._items.get(frame) if shown else None  # may be of another type
-        self._detail.setVisible(shown)
-        self._detail.setText(detail_text(item, frame, self._images, segment=segment)
-                             if shown else "")
-        self._detail.setToolTip(detail_text(item, frame, self._images, None, segment=segment)
-                                if shown else "")
+        self.refresh_card()
         if segment != self._selected:
             self._selected = segment
             self.segment_changed.emit(segment)
@@ -360,23 +375,20 @@ class ReviewPanel(QWidget):
             self._count = n
             self.count_changed.emit(n)
 
-    def _update_controls(self, segment: ReviewSegment | None) -> None:
-        for btn in self._action_buttons.values():
-            btn.setEnabled(segment is not None)
-        self._prev_btn.setEnabled(bool(self._visible))
-        self._next_btn.setEnabled(bool(self._visible))
-
     def _update_header(self) -> None:
-        self._summary.setText(summary_text(len(self._visible), len(self.frames()))
-                              or ("Every row hidden" if self._all else "Nothing to review"))
-        present = self._present()
-        shown = sum(1 for key, _ in present if key not in self._hidden)
-        self._filter_btn.setVisible(len(present) > 1 or bool(self._hidden))
-        self._filter_btn.setText("All types ▾" if shown == len(present)
-                                 else f"{shown} of {len(present)} types ▾")
+        left, total = self.progress()
+        self._summary.setText(progress_text(left, total) if self._fitted or self._all
+                              else "Nothing to check yet")
+        self.kind_filter.update_kinds(self._present(), self._hidden)
         if self._visible:
             self._stack.setCurrentWidget(self._list)
             return
-        self._empty.setText(EMPTY_FILTERED if self._all
-                            else EMPTY_ALL_CLEAR if self._fitted else EMPTY_BEFORE_FIT)
-        self._stack.setCurrentWidget(self._empty)
+        if self._all:
+            self.done_page.set_message(EMPTY_FILTERED, offer_export=False)
+        elif self._ever:
+            self.done_page.set_message(EMPTY_ALL_DONE, offer_export=True)
+        elif self._fitted:
+            self.done_page.set_message(EMPTY_ALL_CLEAR, offer_export=True)
+        else:
+            self.done_page.set_message(EMPTY_BEFORE_FIT, offer_export=False)
+        self._stack.setCurrentWidget(self.done_page)

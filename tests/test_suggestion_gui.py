@@ -169,7 +169,7 @@ def test_new_results_clear_the_guess(app, damp, action):
     elif action == "clear_all":
         controller.auto_ctrl.on_auto_clear()
     elif action == "circle":
-        window.left_panel.tab_bar.select("Manual")
+        assert controller.review.start_fix(3)  # Review's Fix: drag a circle
         window.original_panel.circle_drawn.emit(203.5, 128.5, 32.0, True)
     else:
         manual = controller.manual_ctrl

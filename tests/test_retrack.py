@@ -150,7 +150,8 @@ def test_edit_starts_a_retrack_after_the_debounce_and_locks_editing(qapp, app):
     worker = _started(qapp)
     lp = window.left_panel
     assert controller.retrack.is_running()
-    assert not lp.measure_panel.isEnabled() and not controller.review.panel.isEnabled()
+    assert not lp.measure_panel.isEnabled()
+    assert controller.review.panel.isEnabled()  # Review goes on: an edit restarts it
     assert lp.manual_tab.isEnabled()  # fixes there cancel and restart the re-track
     assert lp.fit_controls.stop_button.isVisibleTo(lp) and lp.fit_controls.stop_button.isEnabled()
     assert "Re-tracking" in lp.fit_controls.progress_text()

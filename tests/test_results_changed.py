@@ -87,9 +87,9 @@ def test_edit_schedules_an_autosave(app):
     assert session._autosave_dirty
 
 
-def test_manual_from_the_queue_advances_to_the_next_item(app):
-    """Manual Done refreshes the queue first; the advance must still go to
-    the item after the edited one, not back to the top of the queue."""
+def test_a_fix_from_the_queue_advances_to_the_next_item(app):
+    """Done refreshes the queue first; the advance must still go to the item
+    after the edited one, not back to the top of the queue."""
     window, controller, _ = app
     rc = install_review(window, controller)
     state = controller._get_state()
@@ -97,10 +97,11 @@ def test_manual_from_the_queue_advances_to_the_next_item(app):
         state.fit_confidence[frame] = 0.1
     rc.refresh()
     assert rc.panel.frames() == [2, 4, 6]
-    rc.panel.select_frame(4)
-    rc.perform("manual")
+    controller.file_ctrl.on_frame_changed(4)
+    rc.perform("fix")
+    rc.fix.strip.points_requested.emit()  # "Click edge points instead"
     _circle_clicks(controller)
-    window.left_panel.manual_tab.done_clicked.emit()
+    rc.fix.strip.done_clicked.emit()
     assert state.fit_source[4] == FitSource.MANUAL
     assert rc.panel.frames() == [2, 6]
     assert controller._get_state().image_no == 6

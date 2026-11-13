@@ -221,7 +221,7 @@ def test_apply_measures_unconfirmed_frames_and_lists_ml_outlines(app, qapp):
     assert all(state.fit_suggestion[f] is None for f in range(LAST + 1) if state.radius[f] > 0)
     assert state.radius[6] == pytest.approx(S.RADII[6], rel=0.1)
     assert any("ml_guided" in state.fit_flags[f] for f in (1, 2, 4))
-    assert any(text.endswith("ML result") for text in controller.review.panel.texts())
+    assert any("Outline from ML assist" in text for text in controller.review.panel.texts())
     assert state.ml_assist and _box(window).ml_switch.isChecked()
     assert _box(window).ml_state_label.text().startswith("On (")
     assert "ML assist:" in window.header.status_text()

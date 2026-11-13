@@ -1,4 +1,4 @@
-"""Manual tab "Drag a circle" through the real MainWindow + AppController
+"""Review's Fix (F), "Drag a circle", through the real MainWindow + AppController
 offscreen: press at the centre, drag to the wall, release; Auto measures the
 wall near the circle, the result shows at once, and Ctrl+Z undoes it."""
 
@@ -16,7 +16,7 @@ from bubbletrack.model import guided_fit
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import capture, same_result
 from bubbletrack.model.state import update_state
-from bubbletrack.ui.manual_tab import TOOL_CIRCLE, TOOL_POINTS
+from bubbletrack.ui.circle_tool import TOOL_CIRCLE, TOOL_POINTS
 from bubbletrack.ui.shortcuts import REVIEW_BINDINGS
 from conftest import write_sequence
 
@@ -30,8 +30,7 @@ def app(gui, tmp_path):
     controller.file_ctrl.on_folder_selected(str(write_sequence(tmp_path / "seq", RADII)))
     controller._state = update_state(controller._get_state(), detection_mode="edge",
                                      reference_frame=0)
-    window.left_panel.tab_bar.select("Manual")
-    controller.file_ctrl.on_frame_changed(3)
+    assert controller.review.start_fix(3)
     events = []
     controller.bus.subscribe(RESULTS_CHANGED, lambda *a: events.append("results"))
     controller.bus.subscribe(CIRCLE_FIXED, lambda idx: events.append(("fixed", idx)))
@@ -46,57 +45,60 @@ def _status(window) -> str:
     return window.header._status_label.text()
 
 
+def _strip(controller):
+    return controller.review.fix.strip
+
+
 # --------------------------------------------------------------------------- #
 #  The two tools
 # --------------------------------------------------------------------------- #
 
-def test_manual_tab_has_two_tools_and_circle_is_the_default(app):
-    window, _, _ = app
-    tab = window.left_panel.manual_tab
-    assert [b.text() for b in tab._tool_buttons.values()] == ["Drag a circle", "Click edge points"]
-    assert tab.tool() == TOOL_CIRCLE and tab._tool_buttons[TOOL_CIRCLE].isChecked()
-    assert window.original_panel.mode == "circle"
-
-
-def test_circle_tool_is_disabled_outside_auto_mode(app):
+def test_fix_starts_with_the_circle_tool(app):
     window, controller, _ = app
-    tab = window.left_panel.manual_tab
+    strip = _strip(controller)
+    assert strip.isVisibleTo(window) or not strip.isHidden()
+    assert strip.tool() == TOOL_CIRCLE and strip.frame() == 3
+    assert window.original_panel.mode == "circle"
+    assert not strip._points_btn.isHidden() and strip._done_btn.isHidden()
+    assert strip.hint_text().startswith("Drag from the bubble's centre to its wall")
+
+
+def test_outside_auto_mode_fix_clicks_edge_points(app):
+    window, controller, _ = app
+    controller.review.fix.cancel()
     controller._state = update_state(controller._get_state(), detection_mode="intensity")
-    controller.circle_ctrl.sync_tool()
-    button = tab._tool_buttons[TOOL_CIRCLE]
-    assert not button.isEnabled() and "Auto (reference frame)" in button.toolTip()
-    assert tab.tool() == TOOL_POINTS and window.original_panel.mode == "normal"
-    controller._state = update_state(controller._get_state(), detection_mode="edge")
-    controller.circle_ctrl.sync_tool()
-    assert tab.tool() == TOOL_CIRCLE and window.original_panel.mode == "circle"
+    assert controller.review.start_fix(3)
+    strip = _strip(controller)
+    assert strip.tool() == TOOL_POINTS and window.original_panel.mode == "point"
+    assert not strip._circle_btn.isEnabled()
+    assert "Auto (reference frame)" in strip._circle_btn.toolTip()
 
 
-def test_mode_change_in_pretune_updates_the_tool(app):
-    window, _, _ = app
+def test_mode_change_in_pretune_turns_the_circle_tool_off(app):
+    window, controller, _ = app
     pt = window.left_panel.pretune_tab
     params = pt.get_filter_params()
     pt.set_filter_params({**params, "detection_mode": "intensity"})
     pt.filters_changed.emit()
-    assert not window.left_panel.manual_tab.circle_available()
+    assert window.original_panel.mode == "normal"
+    assert "Auto (reference frame)" in _strip(controller).hint_text()
 
 
-def test_points_tool_keeps_its_behaviour(app):
+def test_switching_between_the_tools(app):
     window, controller, _ = app
-    tab = window.left_panel.manual_tab
-    tab.set_tool(TOOL_POINTS)
-    assert window.original_panel.mode == "normal"
-    tab._select_btn.click()
-    assert window.original_panel.mode == "point"
-    tab.set_tool(TOOL_CIRCLE)  # leaving the tool cancels the selection
-    assert window.original_panel.mode == "circle" and not controller.manual_ctrl._selecting
+    strip = _strip(controller)
+    strip._points_btn.click()
+    assert strip.tool() == TOOL_POINTS and window.original_panel.mode == "point"
+    assert controller.manual_ctrl.selecting and not controller.circle_ctrl.active
+    strip._circle_btn.click()  # leaving the points tool cancels the selection
+    assert strip.tool() == TOOL_CIRCLE and window.original_panel.mode == "circle"
+    assert not controller.manual_ctrl.selecting
 
 
-def test_other_tabs_leave_circle_mode(app):
-    window, _, _ = app
+def test_another_left_panel_tab_ends_the_fix(app):
+    window, controller, _ = app
     window.left_panel.tab_bar.select("Pre-tune")
-    assert window.original_panel.mode == "normal"
-    window.left_panel.tab_bar.select("Manual")
-    assert window.original_panel.mode == "circle"
+    assert window.original_panel.mode == "normal" and not controller.review.fix.active
 
 
 # --------------------------------------------------------------------------- #
@@ -114,8 +116,9 @@ def test_drag_measures_the_wall_and_shows_it_in_both_panels(app):
     assert len(window.original_panel._overlay_items) >= 3  # ROI, circle, outline
     assert window.binary_panel._title_label.text() == ENGINE_VIEW_TITLE
     assert len(window.binary_panel._overlay_items) == 1  # the outline on the Auto view
-    assert "R = 40" in _status(window) and "Ctrl+Z" in _status(window)
+    assert "Frame 4 fixed: R = 40" in _status(window) and "Ctrl+Z" in _status(window)
     assert events == ["results", ("fixed", 3)]
+    assert not controller.review.fix.active and window.original_panel.mode == "normal"
 
 
 def _mouse(view, kind, pos: QPointF, buttons):
@@ -170,70 +173,82 @@ def test_click_without_fitted_frames_still_finds_the_bubble(app):
     assert state.radius[3] == pytest.approx(40.0, abs=1.0)
 
 
+def test_drags_without_a_fix_do_nothing(app):
+    window, controller, _ = app
+    controller.review.fix.cancel()
+    _drag(window)
+    assert controller._get_state().radius[3] == -1.0
+
+
 # --------------------------------------------------------------------------- #
 #  Refused circle: non-blocking prompt
 # --------------------------------------------------------------------------- #
-
-def _prompt(window):
-    return window.left_panel.manual_tab.circle_page
-
 
 def test_circle_beside_the_bubble_is_not_stored_and_prompts(app):
     window, controller, events = app
     _drag(window, 60.0, 60.0, 25.0)
     state = controller._get_state()
     assert state.radius[3] == -1.0 and state.fit_source[3] == FitSource.NONE
-    page = _prompt(window)
-    assert page.prompt_visible() and page.offers_manual()
-    assert "Nothing was stored" in page.prompt_text()
-    assert events == []
+    strip = _strip(controller)
+    assert strip.prompt_visible() and strip.offers_manual()
+    assert "Nothing was stored" in strip.prompt_text()
+    assert strip._cancel_btn.isHidden()  # one Cancel: the prompt's
+    assert events == [] and controller.review.fix.active
 
 
 def test_use_my_circle_stores_a_manual_fit_and_undo_restores(app):
     window, controller, events = app
     _drag(window, 60.0, 60.0, 25.0)
-    _prompt(window)._use_btn.click()
+    _strip(controller).prompt._use_btn.click()
     state = controller._get_state()
     assert state.fit_source[3] == FitSource.MANUAL and state.radius[3] == 25.0
     assert tuple(state.circle_fit_par[3]) == (60.5, 60.5)  # 1-based
     assert np.isnan(state.fit_confidence[3])
-    assert not _prompt(window).prompt_visible()
+    assert not _strip(controller).prompt_visible() and not controller.review.fix.active
     assert events == ["results", ("fixed", 3)]
     controller._on_undo()
     assert state.radius[3] == -1.0 and state.fit_source[3] == FitSource.NONE
 
 
-def test_cancel_leaves_the_frame_as_it_was(app):
+def test_cancel_leaves_the_frame_as_it_was_and_ends_the_fix(app):
     window, controller, _ = app
     before = capture(controller._get_state(), 3)
     _drag(window, 60.0, 60.0, 25.0)
-    _prompt(window)._cancel_btn.click()
-    assert not _prompt(window).prompt_visible()
+    _strip(controller).prompt._cancel_btn.click()
+    assert not _strip(controller).prompt_visible() and not controller.review.fix.active
     assert same_result(capture(controller._get_state(), 3), before)
+    assert "frame 4 is unchanged" in _status(window)
+
+
+def test_dragging_again_after_a_refusal_replaces_the_prompt(app):
+    window, controller, _ = app
+    _drag(window, 60.0, 60.0, 25.0)
+    _drag(window)
+    assert controller._get_state().fit_source[3] == FitSource.GUIDED
 
 
 def test_circle_on_a_frame_without_bubble_is_refused(app):
     window, controller, _ = app
-    controller.file_ctrl.on_frame_changed(1)
+    assert controller.review.start_fix(1)
     _drag(window, CENTRE_X, CENTRE_Y, 40.0)
     assert controller._get_state().radius[1] == -1.0
-    assert _prompt(window).prompt_visible()
+    assert _strip(controller).prompt_visible()
 
 
 def test_refused_click_offers_only_cancel(app):
     window, controller, _ = app
-    controller.file_ctrl.on_frame_changed(1)
+    assert controller.review.start_fix(1)
     _drag(window, CENTRE_X, CENTRE_Y, 0.0, dragged=False)
-    page = _prompt(window)
-    assert page.prompt_visible() and not page.offers_manual()
+    strip = _strip(controller)
+    assert strip.prompt_visible() and not strip.offers_manual()
 
 
-def test_changing_frame_dismisses_the_prompt(app):
+def test_changing_frame_ends_the_fix_and_its_prompt(app):
     window, controller, _ = app
     _drag(window, 60.0, 60.0, 25.0)
     controller.file_ctrl.on_frame_changed(4)
-    assert not _prompt(window).prompt_visible()
-    _prompt(window)._use_btn.click()  # stale: nothing happens
+    assert not _strip(controller).prompt_visible() and not controller.review.fix.active
+    _strip(controller).prompt._use_btn.click()  # stale: nothing happens
     assert controller._get_state().radius[4] == -1.0
 
 
@@ -273,13 +288,13 @@ def test_ctrl_z_refuses_when_the_frame_changed_since(app):
 
 
 def _point_fit(controller, frame, radius=30.0):
-    """A committed "Click edge points" fit on *frame*."""
-    controller.file_ctrl.on_frame_changed(frame)
-    controller.manual_ctrl.on_manual_select()
+    """A committed "Click edge points" fit on *frame*, through Review's Fix."""
+    assert controller.review.start_fix(frame)
+    controller.review.fix.use_tool(TOOL_POINTS)
     for a in np.linspace(0, 2 * np.pi, 8, endpoint=False):
         controller.manual_ctrl.on_point_clicked(CENTRE_X + radius * np.cos(a),
                                                 CENTRE_Y + radius * np.sin(a))
-    controller.manual_ctrl.on_manual_done()
+    controller.review.fix.finish_points()
 
 
 def test_ctrl_z_after_a_point_fit_undoes_that_fit_not_an_older_circle(app):
@@ -312,12 +327,14 @@ def test_ctrl_z_still_undoes_a_clicked_point_first(app):
     window, controller, _ = app
     _drag(window)
     radius = controller._get_state().radius[3]
-    window.left_panel.manual_tab.set_tool(TOOL_POINTS)
-    controller.manual_ctrl.on_manual_select()
+    assert controller.review.start_fix(3)
+    _strip(controller)._points_btn.click()
     controller.manual_ctrl.on_point_clicked(200.0, 100.0)
     controller.manual_ctrl.on_point_clicked(220.0, 120.0)
+    assert _strip(controller).hint_text().endswith("2 so far")
     _ctrl_z(window)
     assert len(controller.manual_ctrl._manual_points) == 1
+    assert _strip(controller).hint_text().endswith("1 so far")
     assert controller._get_state().radius[3] == radius  # the circle fix is untouched
 
 
@@ -325,16 +342,15 @@ def test_ctrl_z_still_undoes_a_clicked_point_first(app):
 #  Runs, Fit All protection, review
 # --------------------------------------------------------------------------- #
 
-def test_drags_are_ignored_while_a_fit_runs(app):
+def test_fit_all_ends_the_fix(app):
     window, controller, _ = app
     controller.auto_ctrl._running = True
     controller.bus.emit("run_state_changed", True)
-    assert window.original_panel.mode == "normal"
+    assert window.original_panel.mode == "normal" and not controller.review.fix.active
     _drag(window)
     assert controller._get_state().radius[3] == -1.0
     controller.auto_ctrl._running = False
     controller.bus.emit("run_state_changed", False)
-    assert window.original_panel.mode == "circle"
 
 
 def test_fit_all_asks_before_overwriting_drawn_circles(app):
@@ -346,8 +362,9 @@ def test_fit_all_asks_before_overwriting_drawn_circles(app):
     assert asked == [1]
 
 
-def test_review_circle_key_is_bound():
-    assert REVIEW_BINDINGS["C"] == "circle"
+def test_review_fix_key_is_bound():
+    assert REVIEW_BINDINGS["F"] == "fix"
+    assert "C" not in REVIEW_BINDINGS and "M" not in REVIEW_BINDINGS
 
 
 def _flag_frames(controller, low):
@@ -361,29 +378,16 @@ def _flag_frames(controller, low):
     return state
 
 
-def test_review_circle_opens_the_tool_and_advances_after_a_fix(app):
+def test_review_fix_opens_the_tool_and_moves_on_after_a_fix(app):
     window, controller, _ = app
     rc = controller.review
+    rc.fix.cancel()
     _flag_frames(controller, low={3, 5})
-    window.left_panel.tab_bar.select("Pre-tune")
     rc.panel.step(1)
     assert controller._get_state().image_no == 3
-    rc.perform("circle")
-    assert window.left_panel.tab_bar.current_name() == "Manual"
-    assert window.left_panel.manual_tab.tool() == TOOL_CIRCLE
-    assert window.original_panel.mode == "circle"
+    rc.perform("fix")
+    assert rc.fix.tool == TOOL_CIRCLE and window.original_panel.mode == "circle"
     _drag(window)
     assert controller._get_state().fit_source[3] == FitSource.GUIDED
     assert rc.panel.frames() == [5] and controller._get_state().image_no == 5
-
-
-def test_review_circle_explains_itself_outside_auto_mode(app):
-    window, controller, _ = app
-    rc = controller.review
-    _flag_frames(controller, low={3})
-    controller._state = update_state(controller._get_state(), detection_mode="intensity")
-    window.left_panel.tab_bar.select("Pre-tune")
-    rc.panel.step(1)
-    rc.perform("circle")
-    assert window.left_panel.tab_bar.current_name() == "Pre-tune"
-    assert "Auto (reference frame)" in _status(window)
+    assert rc.panel.feedback.text().startswith("✓ Frame 4 fixed: R = 40")

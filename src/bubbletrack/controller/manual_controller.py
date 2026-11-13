@@ -1,4 +1,8 @@
-"""ManualController — manual point-and-click circle fitting."""
+"""ManualController — "Click edge points": a circle through points the user clicks.
+
+The fallback tool of the Review dock's Fix (``FixMode``); the point count is
+shown by the view attached with ``set_view`` (the fix strip).
+"""
 
 from __future__ import annotations
 
@@ -21,7 +25,8 @@ from bubbletrack.model.result_history import ResultHistory, record_edit, snapsho
 from bubbletrack.model.state import clear_frame_result
 from bubbletrack.model.suggestion import set_suggestion
 from bubbletrack.model.undo import UndoStack
-from bubbletrack.ui.manual_tab import TOOL_POINTS
+from bubbletrack.ui.circle_tool import TOOL_POINTS
+from bubbletrack.ui.fix_strip import FixView, NoFixView
 
 logger = logging.getLogger(__name__)
 
@@ -63,19 +68,29 @@ class ManualController(BaseController):
         self._history = history if history is not None else ResultHistory()
         self._cache = cache
         self._selecting = False
+        self._view: FixView = NoFixView()
         bus.subscribe("frame_changed", self._on_frame_changed)
+
+    def set_view(self, view: FixView) -> None:
+        """Show the point count in *view* (the Review dock's fix strip)."""
+        self._view = view
+
+    @property
+    def selecting(self) -> bool:
+        """True while clicks on the image add edge points."""
+        return self._selecting
 
     # -- public handlers -------------------------------------------------- #
 
-    def on_manual_select(self) -> None:
-        # Point selection is the "Click edge points" tool (e.g. from Review's Manual).
-        self.w.left_panel.manual_tab.set_tool(TOOL_POINTS)
+    def on_manual_select(self, *, announce: bool = True) -> None:
+        """Start a point selection on the frame on screen (any earlier points go)."""
         self._manual_points.clear()
         self._undo_stack.clear()
         self._selecting = True
-        self.w.left_panel.manual_tab.set_point_count(0)
+        self._view.set_point_count(0)
         self.w.original_panel.set_mode("point")
-        self.w.header.set_status("Click on bubble edge", "#f59e0b")
+        if announce:
+            self.w.header.set_status("Click on bubble edge", "#f59e0b")
         self.w.status_bar.update_mode("Manual")
 
     def _on_frame_changed(self, _idx: int) -> None:
@@ -89,14 +104,19 @@ class ManualController(BaseController):
 
     def on_tool_changed(self, tool: str) -> None:
         """Leaving the "Click edge points" tool cancels a running selection."""
-        if tool != TOOL_POINTS and (self._selecting or self._manual_points):
+        if tool != TOOL_POINTS:
+            self.cancel_selection()
+
+    def cancel_selection(self) -> None:
+        """Drop a running selection and its points (nothing is stored)."""
+        if self._selecting or self._manual_points:
             self._end_selection()
 
     def _end_selection(self) -> None:
         self._selecting = False
         self._manual_points.clear()
         self._undo_stack.clear()
-        self.w.left_panel.manual_tab.reset()
+        self._view.set_point_count(0)
         self.w.original_panel.set_mode("normal")
 
     def on_point_clicked(self, x: float, y: float) -> None:
@@ -111,25 +131,30 @@ class ManualController(BaseController):
         self._undo_stack.push(list(self._manual_points))
         self._manual_points.append((y, x))  # store as (row, col)
         n = len(self._manual_points)
-        self.w.left_panel.manual_tab.set_point_count(n)
+        self._view.set_point_count(n)
         # Draw the point
         pt = np.array([[y, x]])
         self.w.original_panel.draw_points(pt, "#ef4444", 4.0)
 
-    def on_manual_done(self) -> None:
-        self.w.original_panel.set_mode("normal")
+    def on_manual_done(self) -> bool:
+        """Fit a circle through the clicked points; True if a result was stored.
+
+        With fewer than 3 points the selection goes on; otherwise it ends
+        (a failed or out-of-range fit stores nothing).
+        """
         if not self.state.images or self.state.radius is None:
             self._end_selection()
             self.w.header.set_status("Load images before fitting", "#ef4444")
-            return
+            return False
         if len(self._manual_points) < 3:
             self.w.header.set_status("Need at least 3 points", "#ef4444")
-            return
+            return False
 
         xy = np.array(self._manual_points)
         rc, cc, radius = circle_fit_taubin(xy)
 
         idx = self.state.image_no
+        stored = False
         if np.isnan(radius):
             self.w.header.set_status("Fitting failed", "#ef4444")
         elif radius > self._get_max_radius():
@@ -137,6 +162,7 @@ class ManualController(BaseController):
                 f"Radius outlier ({radius:.0f} px), skipped", "#f59e0b",
             )
         else:
+            stored = True
             before = snapshot(self.state, [idx])
             self.state.radius[idx] = radius
             self.state.circle_fit_par[idx] = [rc, cc]
@@ -158,6 +184,7 @@ class ManualController(BaseController):
 
         # The fit is committed: Ctrl+Z must not resurrect its points.
         self._end_selection()
+        return stored
 
     def undo_last_point(self) -> bool:
         """Undo the last point click, restoring the previous points list.
@@ -169,7 +196,7 @@ class ManualController(BaseController):
             return False
         self._manual_points = snapshot
         n = len(self._manual_points)
-        self.w.left_panel.manual_tab.set_point_count(n)
+        self._view.set_point_count(n)
         # Redraw all current points
         self.w.original_panel.clear_overlays()
         if self._manual_points:
@@ -204,3 +231,4 @@ class ManualController(BaseController):
         self._selecting = False
         self._manual_points.clear()
         self._undo_stack.clear()
+        self._view.set_point_count(0)

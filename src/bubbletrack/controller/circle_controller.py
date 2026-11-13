@@ -1,10 +1,13 @@
-"""CircleController — the Manual tab's "Drag a circle" fix tool.
+"""CircleController — "Drag a circle", the default tool of Review's Fix (F).
 
 Press on the bubble centre, drag to the wall, release: the Auto engine
 measures the wall near the drawn circle (``model.guided_fit``) and the
 result is stored at once as GUIDED, or, when it does not match the circle,
 the user may keep the circle itself as a manual fit.  Every stored fix can
 be undone with Ctrl+Z (``model.result_history``, shared with re-tracking).
+
+The tool is on while ``set_active(True)`` holds (``FixMode``), the Auto
+engine is in use and no fit runs; its prompt shows in the attached view.
 """
 
 from __future__ import annotations
@@ -25,8 +28,8 @@ from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.guided_fit import UserCircle
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
-from bubbletrack.ui.manual_tab import CIRCLE_UNAVAILABLE_TIP, TOOL_CIRCLE
-from bubbletrack.ui.tab_bar import MANUAL
+from bubbletrack.ui.circle_tool import CIRCLE_UNAVAILABLE_TIP
+from bubbletrack.ui.fix_strip import FixView, NoFixView
 
 logger = logging.getLogger(__name__)
 
@@ -65,10 +68,16 @@ class CircleController(BaseController):
         self._retrack = retrack  # RetrackController: cancelled/muted by undo
         self._is_run_active = is_run_active  # a Fit All / batch run writes results
         self._pending: tuple[int, UserCircle] | None = None  # refused circle on screen
-        bus.subscribe("tab_changed", lambda _idx: self.sync_tool())
+        self._active = False  # the user chose the tool (Review's Fix)
+        self._view: FixView = NoFixView()
         bus.subscribe("run_state_changed", lambda _running: self.sync_tool())
         bus.subscribe("frame_changed", self._on_frame_changed)
         bus.subscribe("source_loaded", self._on_source_loaded)
+
+    def set_view(self, view: FixView) -> None:
+        """Show the tool's availability and prompt in *view* (the fix strip)."""
+        self._view = view
+        self.sync_tool()
 
     # -- tool state ------------------------------------------------------- #
 
@@ -79,18 +88,24 @@ class CircleController(BaseController):
     def explain_unavailable(self) -> None:
         self.w.header.set_status(CIRCLE_UNAVAILABLE_TIP.replace("\n", " "), _WARN)
 
-    def activate(self) -> None:
-        """Select the circle tool (the Manual tab should be open)."""
-        self.w.left_panel.manual_tab.set_tool(TOOL_CIRCLE)
+    @property
+    def active(self) -> bool:
+        return self._active
+
+    def set_active(self, on: bool) -> None:
+        """Switch the tool on or off (off also drops a refused circle's prompt)."""
+        self._active = bool(on)
         self.sync_tool()
+
+    def activate(self) -> None:
+        """Switch the tool on and say how to use it."""
+        self.set_active(True)
         self.w.header.set_status("Drag from the bubble centre to its wall", _WARN)
 
     def sync_tool(self) -> None:
-        """Image panel in circle mode while the tool is on screen and usable."""
-        tab = self.w.left_panel.manual_tab
-        tab.set_circle_available(self.available())
-        on = (self.w.left_panel.tab_bar.current_name() == MANUAL
-              and tab.tool() == TOOL_CIRCLE and not self._is_run_active())
+        """Image panel in circle mode while the tool is on and usable."""
+        self._view.set_circle_available(self.available())
+        on = self._active and self.available() and not self._is_run_active()
         panel = self.w.original_panel
         if on and panel.mode != "circle":
             panel.set_mode("circle")
@@ -101,13 +116,14 @@ class CircleController(BaseController):
             self._drop_prompt()
 
     def on_tool_changed(self, _tool: str) -> None:
+        """Kept for older wiring (a tool selector's signal): re-check the tool."""
         self.sync_tool()
 
     # -- the gesture -------------------------------------------------------- #
 
     def on_circle_drawn(self, x: float, y: float, radius: float, dragged: bool) -> None:
         """Scene centre (x = col, y = row), radius and drag flag from the image panel."""
-        if not self._can_fit():
+        if not self._active or not self._can_fit():
             return
         idx = self.state.image_no
         self._drop_prompt()
@@ -163,7 +179,7 @@ class CircleController(BaseController):
     def use_circle_as_manual(self) -> None:
         """Prompt choice: store the refused circle itself (source MANUAL)."""
         pending, self._pending = self._pending, None
-        self.w.left_panel.manual_tab.hide_circle_prompt()
+        self._view.hide_circle_prompt()
         state = self.state
         if pending is None or pending[0] != state.image_no or not pending[1].dragged:
             return
@@ -202,20 +218,25 @@ class CircleController(BaseController):
         text = f"Frame {idx + 1}: {reason}. Nothing was stored."
         if not circle.dragged:
             text += " Drag from the centre to the wall to give its size."
-        self.w.left_panel.manual_tab.show_circle_prompt(text, offer_manual=circle.dragged)
+        self._view.show_circle_prompt(text, offer_manual=circle.dragged)
         self.w.header.set_status(f"Frame {idx + 1}: {reason}", _WARN)
 
     def cancel_prompt(self) -> None:
         """Prompt choice: leave the frame as it was."""
+        if self.discard_prompt():
+            self.w.header.set_status("Circle discarded; the frame is unchanged", _OK)
+
+    def discard_prompt(self) -> bool:
+        """Drop a refused circle and its drawing (no message); False if none."""
         if self._pending is None:
-            return
+            return False
         self._drop_prompt()
         self._redraw(self.state.image_no)
-        self.w.header.set_status("Circle discarded; the frame is unchanged", _OK)
+        return True
 
     def _drop_prompt(self) -> None:
         self._pending = None
-        self.w.left_panel.manual_tab.hide_circle_prompt()
+        self._view.hide_circle_prompt()
 
     def _redraw(self, idx: int) -> None:
         refresh_chart(self.state, self.w)
