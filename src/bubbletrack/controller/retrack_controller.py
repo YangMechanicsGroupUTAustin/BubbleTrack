@@ -4,7 +4,7 @@ About two seconds after the last edit (any ``RESULTS_CHANGED`` that is not a
 run finishing, a source loading, an undo or the re-track itself), the
 sequence solver runs again in the background, so one fixed frame can repair
 its neighbours.  It only runs in Auto mode with "Track across frames after
-Fit All" on, when results exist and no fit is running.
+Fit" on, when results exist and no fit is running.
 
 A re-track never damages frames that look good: it may only change frames
 that, when it starts, have no result or are listed in the Review queue
@@ -144,7 +144,7 @@ class RetrackController(BaseController):
         return (AUTO_RETRACK_ENABLED and self._worker is None and not self._is_run_active()
                 and state.detection_mode == "edge" and state.radius is not None
                 and bool(np.any(np.asarray(state.radius) > 0))
-                and self.w.left_panel.pretune_tab.edge_box.tracking_enabled())
+                and self.w.left_panel.measure_panel.edge_box.tracking_enabled())
 
     # -- running ------------------------------------------------------------- #
 
@@ -215,9 +215,9 @@ class RetrackController(BaseController):
         finally:
             self._own_emit = False
         lp = self.w.left_panel
-        lp.automatic_tab.set_running(running)
+        lp.fit_controls.set_running(running)
         if running:
             lp.manual_tab.setEnabled(True)  # fixes there cancel and restart the re-track
-            lp.automatic_tab.set_progress_text("Re-tracking after your edit...")
+            lp.fit_controls.set_progress_text("Re-tracking after your edit...")
             self.w.header.set_status("Re-tracking the bubble after your edit... "
                                      "(Stop cancels)", _WARN)

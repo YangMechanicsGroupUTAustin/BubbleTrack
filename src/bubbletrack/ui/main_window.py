@@ -21,8 +21,7 @@ from bubbletrack.ui.status_bar import StatusBar
 MIN_WINDOW_SIZE = (1024, 680)
 DEFAULT_WINDOW_SIZE = (1600, 1000)
 WINDOW_FRAME_MARGIN = 48  # title bar / dock allowance when sizing to the screen
-DEFAULT_SPLIT = (0.62, 0.38)  # images : R(t) chart
-DEFAULT_SPLIT_WITH_STRIP = (0.52, 0.48)  # the key-frame strip shares the chart pane
+IMAGE_SHARE = 0.55  # images : R(t) chart = 55 : 45 on first start (strip not counted)
 SPLITTER_SETTINGS_KEY = "main_window/content_splitter_sizes"
 SPLITTER_SAVE_DELAY_MS = 400
 
@@ -46,6 +45,9 @@ class MainWindow(QMainWindow):
     save_session_requested = pyqtSignal()
     load_session_requested = pyqtSignal()
     export_hard_case_requested = pyqtSignal()  # File > Export Hard Case...
+    export_requested = pyqtSignal()  # File > Export Results... (also the side panel's Export)
+    settings_requested = pyqtSignal()  # File > Settings...
+    clear_results_requested = pyqtSignal()  # Edit > Clear All Results...
     compare_mode_changed = pyqtSignal(str)
 
     def __init__(self):
@@ -116,8 +118,10 @@ class MainWindow(QMainWindow):
         right.setContentsMargins(12, 8, 12, 6)
         right.setSpacing(6)
 
+        # Hidden unless Settings > "All image views": the view is Image + Mask.
         self.compare_toolbar = CompareToolbar()
         self.compare_toolbar.mode_changed.connect(self._on_compare_mode)
+        self.compare_toolbar.hide()
         right.addWidget(self.compare_toolbar)
 
         # Top pane: image viewers + frame scrubber
@@ -150,15 +154,15 @@ class MainWindow(QMainWindow):
         self.content_splitter.setHandleWidth(8)
         self.content_splitter.addWidget(image_area)
         self.content_splitter.addWidget(chart_area)
-        self.content_splitter.setStretchFactor(0, 3)
-        self.content_splitter.setStretchFactor(1, 2)
+        self.content_splitter.setStretchFactor(0, 11)  # resizing keeps about 55 : 45
+        self.content_splitter.setStretchFactor(1, 9)
         right.addWidget(self.content_splitter, 1)
         return right
 
     # -- Menubar -------------------------------------------------------- #
 
     def _build_menubar(self) -> None:
-        """File > Save/Load Session, Export Hard Case; View > layout helpers."""
+        """File (sessions, export, settings), Edit (clear), View (layout helpers)."""
         menubar: QMenuBar = self.menuBar()
         file_menu: QMenu = menubar.addMenu("&File")
 
@@ -176,12 +180,29 @@ class MainWindow(QMainWindow):
         self.load_session_action = load_action
 
         file_menu.addSeparator()
+        self.export_action = QAction("&Export Results...", self)
+        self.export_action.setShortcut(QKeySequence("Ctrl+E"))
+        self.export_action.triggered.connect(self.export_requested.emit)
+        file_menu.addAction(self.export_action)
         hard_case = QAction("Export &Hard Case...", self)
         hard_case.setStatusTip("Save frames the app gets wrong, with your fixes, "
                                "as one .zip to send to the maintainer")
         hard_case.triggered.connect(self.export_hard_case_requested.emit)
         file_menu.addAction(hard_case)
         self.export_hard_case_action = hard_case
+
+        file_menu.addSeparator()
+        self.settings_action = QAction("Se&ttings...", self)
+        self.settings_action.setShortcut(QKeySequence("Ctrl+,"))
+        self.settings_action.setMenuRole(QAction.MenuRole.PreferencesRole)
+        self.settings_action.triggered.connect(self.settings_requested.emit)
+        file_menu.addAction(self.settings_action)
+
+        edit_menu: QMenu = menubar.addMenu("&Edit")
+        self.clear_results_action = QAction("&Clear All Results...", self)
+        self.clear_results_action.setStatusTip("Remove every fitted result (asks first)")
+        self.clear_results_action.triggered.connect(self.clear_results_requested.emit)
+        edit_menu.addAction(self.clear_results_action)
 
         view_menu: QMenu = menubar.addMenu("&View")
         self.reset_zoom_action = QAction("Reset Image Zoom\t0", self)
@@ -206,10 +227,11 @@ class MainWindow(QMainWindow):
         self.binary_panel.reset_zoom()
 
     def reset_layout(self) -> None:
-        """Give images and chart their default share of the height."""
+        """Images 55 %, R(t) chart 45 % of the height (the key-frame strip extra)."""
         total = sum(self.content_splitter.sizes()) or self.content_splitter.height()
-        split = DEFAULT_SPLIT if self.filmstrip is None else DEFAULT_SPLIT_WITH_STRIP
-        self.content_splitter.setSizes([int(total * f) for f in split])
+        strip = 0 if self.filmstrip is None else self.filmstrip.sizeHint().height()
+        images = int(round(max(total - strip, 0) * IMAGE_SHARE))
+        self.content_splitter.setSizes([images, max(total - images, 0)])
 
     def save_layout(self) -> None:
         settings = layout_settings()
@@ -254,6 +276,12 @@ class MainWindow(QMainWindow):
     def compare_mode(self) -> CompareMode:
         """Return the currently active image comparison mode."""
         return self.compare_toolbar.current_mode
+
+    def set_all_view_modes(self, enabled: bool) -> None:
+        """Offer every image view, or only Image + Mask (the default)."""
+        self.compare_toolbar.setVisible(bool(enabled))
+        if not enabled and self.compare_mode is not CompareMode.SIDE_BY_SIDE:
+            self.compare_toolbar.set_mode(CompareMode.SIDE_BY_SIDE)
 
     def _on_compare_mode(self, mode_value: str, emit: bool = True) -> None:
         """Show the mask panel only side by side; other modes use one image."""

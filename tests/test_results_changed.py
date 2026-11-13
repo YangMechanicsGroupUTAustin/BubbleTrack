@@ -74,6 +74,7 @@ def test_refit_that_fails_keeps_quiet(app, monkeypatch):
 
     monkeypatch.setattr(module, "detect_bubble_with_mode",
                         lambda *a, **k: (np.zeros((2, 2), bool), np.empty((0, 2))))
+    controller._state = update_state(controller._get_state(), detection_mode="intensity")
     controller._on_refit_point(2)
     assert events == []
 

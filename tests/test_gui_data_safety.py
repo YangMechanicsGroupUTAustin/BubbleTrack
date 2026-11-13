@@ -33,14 +33,14 @@ def _wait(qapp, predicate, timeout_s: float = 90.0) -> None:
 
 def _run_fit_all(qapp, window, controller) -> None:
     controller.auto_ctrl.on_auto_fit()
-    _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
 
 
 def _use_owner_params(controller) -> None:
-    """The owner's everyday parameters; app defaults (thr 0.50) hit the
+    """The owner's everyday classic parameters; app defaults (thr 0.50) hit the
     known noise-blob regime on clean synthetic frames."""
-    controller._state = update_state(controller._get_state(), img_thr=0.58,
-                                     removing_factor=85, gaussian_sigma=3.0)
+    controller._state = update_state(controller._get_state(), detection_mode="intensity",
+                                     img_thr=0.58, removing_factor=85, gaussian_sigma=3.0)
 
 
 def _click_circle(controller, center=(125.0, 200.0), r=30.0, n=8):
@@ -83,7 +83,7 @@ class TestSessionRestore:
         assert (state.gridx, state.gridy) == ((10, 200), (20, 350))
         assert state.image_no == 3
         assert window.frame_scrubber.value() == 3
-        assert window.left_panel.pretune_tab.get_threshold() == pytest.approx(0.58)
+        assert window.left_panel.measure_panel.get_threshold() == pytest.approx(0.58)
         assert len(window.radius_chart._frames) == 8
 
     def test_frame_count_mismatch_keeps_params_not_results(
@@ -165,12 +165,13 @@ class TestRunSafety:
         controller.auto_ctrl.on_auto_fit()
         lp = window.left_panel
         assert not lp.image_source.isEnabled()
-        assert not lp.pretune_tab.isEnabled()
+        assert not lp.measure_panel.isEnabled()
         assert not lp.manual_tab.isEnabled()
+        assert not lp.export_button.isEnabled()
         assert not window.load_session_action.isEnabled()
-        _wait(qapp, lambda: lp.automatic_tab._fit_btn.isEnabled())
+        _wait(qapp, lambda: lp.fit_controls.fit_button.isEnabled())
         assert lp.image_source.isEnabled()
-        assert lp.pretune_tab.isEnabled()
+        assert lp.measure_panel.isEnabled()
         assert window.load_session_action.isEnabled()
 
     def test_folder_load_refused_while_fitting(self, qapp, gui, make_sequence):
@@ -181,7 +182,7 @@ class TestRunSafety:
         controller.auto_ctrl.on_auto_fit()
         _load(controller, folder_b)
         assert controller._get_state().folder_path == str(folder_a)
-        _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+        _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
 
     def test_results_from_a_stale_worker_are_ignored(self, gui, make_sequence):
         _, controller = gui
@@ -272,46 +273,6 @@ class TestManualProtection:
         assert controller._get_state().fit_source[2] == FitSource.NONE
 
 
-# -- batch -------------------------------------------------------------------------------
-
-class TestBatch:
-    def test_batch_needs_a_loaded_folder_first(self, gui, monkeypatch):
-        from PyQt6.QtWidgets import QFileDialog, QMessageBox
-
-        _, controller = gui
-        shown = []
-        monkeypatch.setattr(QMessageBox, "information",
-                            lambda *a, **k: shown.append(a[2] if len(a) > 2 else ""))
-        monkeypatch.setattr(QFileDialog, "getExistingDirectory",
-                            lambda *a, **k: pytest.fail("should not ask for a folder"))
-        controller.auto_ctrl.on_batch_folders()
-        assert shown and controller.auto_ctrl._batch_worker is None
-
-    def test_load_batch_result_restores_roi_centres_edges(self, gui, make_sequence):
-        from bubbletrack.model.batch_result import BatchResultStore, FolderResult
-
-        window, controller = gui
-        folder = make_sequence("A", 4)
-        edges = [np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 1.0]]) * (i + 1) for i in range(4)]
-        result = FolderResult(
-            folder_path=str(folder), folder_name="A", success=True, message="4/4",
-            n_frames=4, n_fitted=4, radius=np.array([10.0, 11.0, 12.0, 13.0]),
-            quality_scores=np.ones(4),
-            circle_fit_par=np.array([[50.0, 60.0]] * 4), circle_xy=edges,
-            region_count=np.zeros(4, dtype=int),
-        )
-        controller.auto_ctrl._batch_store = BatchResultStore(
-            results=(result,), timestamp="t", gridx=(5, 200), gridy=(6, 300),
-            sensitivity=0.6,
-        )
-        controller.auto_ctrl._on_load_batch_folder(result)
-        state = controller._get_state()
-        assert (state.gridx, state.gridy) == ((5, 200), (6, 300))
-        np.testing.assert_allclose(state.circle_fit_par[2], [50.0, 60.0])
-        np.testing.assert_allclose(state.circle_xy[3], edges[3])
-        assert (state.fit_source == FitSource.AUTO).all()
-
-
 # -- closing the window ------------------------------------------------------------------
 
 class TestClose:
@@ -322,7 +283,7 @@ class TestClose:
         controller.auto_ctrl.on_auto_fit()
         monkeypatch.setattr(controller, "_ask_yes_no", lambda title, text: False)
         assert controller._confirm_close() is False
-        _wait(qapp, lambda: window.left_panel.automatic_tab._fit_btn.isEnabled())
+        _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
 
     def test_close_saves_last_session_when_results_exist(self, gui, make_sequence,
                                                          isolated_config):

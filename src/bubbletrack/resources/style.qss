@@ -95,6 +95,10 @@ QGroupBox::title {
     subcontrol-position: top left;
     padding: 2px 8px;
 }
+/* Text and choices sit on the card, not on dark boxes of their own. */
+QGroupBox QLabel, QGroupBox QCheckBox, QGroupBox QRadioButton {
+    background: transparent;
+}
 
 /* ---------- Buttons ---------- */
 QPushButton {
@@ -309,33 +313,42 @@ QCheckBox::indicator:checked {
     border-color: #6366f1;
     image: none;
 }
-
-/* ---------- Tab bar ---------- */
-QWidget#TabBar QPushButton {
-    background: transparent;
-    color: #71717a;
-    border: none;
-    border-bottom: 2px solid transparent;
-    border-radius: 0;
-    padding: 8px 16px;
-    font-weight: 600;
+QRadioButton::indicator {
+    width: 12px;
+    height: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 7px;
+    background: #1a1b23;
 }
-QWidget#TabBar QPushButton:checked,
-QWidget#TabBar QPushButton[active="true"] {
-    color: #6366f1;
-    border-bottom: 2px solid #6366f1;
-}
-QWidget#TabBar QPushButton:hover {
-    color: #a1a1aa;
+QRadioButton::indicator:checked {
+    background: #6366f1;
+    border-color: #6366f1;
 }
 
-/* ---------- Pinned Pre-tune actions (below the scrolling sidebar) ---------- */
+/* ---------- Pinned Fit / Export (below the scrolling sidebar) ---------- */
 QWidget#PinnedFooter {
     background: #13141b;
     border-top: 1px solid rgba(255, 255, 255, 0.08);
 }
-QWidget#PinnedFooter QWidget#pinnedActions {
+QWidget#PinnedFooter QWidget#fitControls,
+QWidget#PinnedFooter QWidget#fitProgress,
+QWidget#PinnedFooter QLabel {
     background: transparent;
+}
+QWidget#PinnedFooter QPushButton#secondaryBtn {
+    background: #1a1b23;
+    padding: 6px 16px;
+    min-height: 28px;
+}
+QWidget#PinnedFooter QPushButton#secondaryBtn:hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+QWidget#PinnedFooter QPushButton#secondaryBtn:disabled {
+    background: #16171f;
+}
+QPushButton#primaryBtn {
+    font-size: 13px;
+    min-height: 34px;
 }
 
 /* ---------- Images / chart splitter ---------- */

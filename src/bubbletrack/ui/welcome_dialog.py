@@ -35,14 +35,15 @@ class WelcomeDialog(QDialog):
                 "(TIFF, PNG, JPG) or open a video file (AVI, MP4, MOV, MKV).",
             ),
             (
-                "2. Pre-tune Parameters",
-                "Adjust threshold and removing factor until the bubble boundary "
-                "is clearly detected in the binary image.",
+                "2. Fit",
+                "Auto compares every frame with a bubble-free reference frame: "
+                "no threshold to tune. Optionally click the bubble once (Seed), "
+                "then press Fit to measure every frame.",
             ),
             (
-                "3. Fit & Export",
-                "Use Automatic mode to batch-fit all frames, then export R(t) "
-                "data to MAT, CSV, or Excel.",
+                "3. Review & Export",
+                "Check the frames the Review panel lists, fix the few that need "
+                "it, then Export R(t) to MAT, CSV or Excel.",
             ),
         ]
         for step_title, desc in steps:

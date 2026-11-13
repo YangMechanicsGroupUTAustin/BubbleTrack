@@ -48,7 +48,7 @@ def app(gui, tmp_path, damp):
     controller.file_ctrl.on_folder_selected(str(write_sequence(tmp_path / "seq", RADII)))
     controller._state = update_state(controller._get_state(), detection_mode="edge",
                                      reference_frame=0)
-    window.left_panel.pretune_tab.edge_box._track_check.setChecked(False)
+    window.left_panel.measure_panel.edge_box._track_check.setChecked(False)
     return window, controller
 
 

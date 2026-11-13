@@ -22,6 +22,7 @@ from bubbletrack.controller.manual_controller import ManualController
 from bubbletrack.controller.pretune_controller import PretuneController
 from bubbletrack.controller.retrack_controller import RetrackController
 from bubbletrack.controller.session_controller import SessionController
+from bubbletrack.controller.settings_controller import SettingsController
 from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
@@ -35,9 +36,16 @@ from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.result_history import ResultHistory
 from bubbletrack.model.state import AppState, clear_frame_result, update_state
+from bubbletrack.ui.edge_options import STEEP_EDGE
+from bubbletrack.ui.measure_panel import AUTO_METHOD
 from bubbletrack.ui.shortcuts import setup_shortcuts
 
 logger = logging.getLogger(__name__)
+
+
+def initial_state(saved: dict) -> AppState:
+    """The persisted parameters; without a saved method the app measures with Auto."""
+    return update_state(AppState(), **{"detection_mode": AUTO_METHOD, **(saved or {})})
 
 
 class AppController:
@@ -52,8 +60,7 @@ class AppController:
     def __init__(self, window) -> None:
         self.w = window
         # Load persisted config and apply to initial state
-        saved = load_config()
-        self._state = update_state(AppState(), **saved) if saved else AppState()
+        self._state = initial_state(load_config())
         self._max_radius: float = float("inf")
 
         # LRU image cache (200 MB limit)
@@ -122,12 +129,11 @@ class AppController:
         # Wire preview timer to pretune handler
         self._preview_timer.timeout.connect(self.pretune_ctrl.preview_detection)
 
-        # Clear manual points on tab change
+        # Clear manual points when the side panel leaves manual fixing
         self.bus.subscribe("tab_changed", lambda idx: self.manual_ctrl.clear_points())
 
-        # Batch browser "Load into Main View" → reuse the normal loading logic
-        self.bus.subscribe("load_folder", self.file_ctrl.on_folder_selected)
-        self.bus.subscribe("load_video", self.file_ctrl.on_video_selected)
+        # File > Settings: classic methods, image views (applied live)
+        self.settings = SettingsController(self.w, self)
 
         # Lock everything that mutates results while a worker writes into them
         self.bus.subscribe("run_state_changed", self._apply_run_lock)
@@ -209,18 +215,16 @@ class AppController:
         # Frame scrubber
         self.w.frame_scrubber.value_changed.connect(self.file_ctrl.on_frame_changed)
 
-        # Pre-tune
-        pt = lp.pretune_tab
-        pt.threshold_changed.connect(self.pretune_ctrl.on_threshold_changed)
-        pt.invert_mask_changed.connect(self.pretune_ctrl.on_invert_mask_changed)
-        pt.removing_factor_changed.connect(self.pretune_ctrl.on_removing_factor_changed)
-        pt.edges_changed.connect(self.pretune_ctrl.on_edges_changed)
-        pt.fit_clicked.connect(self.pretune_ctrl.on_pretune_fit)
-        pt.autotune_clicked.connect(self.pretune_ctrl.on_autotune)
-        pt.frame_selected.connect(self.file_ctrl.on_tab_frame_selected)
-        pt.filters_changed.connect(self.pretune_ctrl.on_filters_changed)
+        # Measuring settings (the Auto box; classic methods when shown)
+        mp = lp.measure_panel
+        mp.threshold_changed.connect(self.pretune_ctrl.on_threshold_changed)
+        mp.invert_mask_changed.connect(self.pretune_ctrl.on_invert_mask_changed)
+        mp.removing_factor_changed.connect(self.pretune_ctrl.on_removing_factor_changed)
+        mp.edges_changed.connect(self.pretune_ctrl.on_edges_changed)
+        mp.autotune_clicked.connect(self.pretune_ctrl.on_autotune)
+        mp.filters_changed.connect(self.pretune_ctrl.on_filters_changed)
 
-        # Manual
+        # Manual fixing (opened from the Review panel)
         mt = lp.manual_tab
         mt.select_clicked.connect(self.manual_ctrl.on_manual_select)
         mt.done_clicked.connect(self.manual_ctrl.on_manual_done)
@@ -228,29 +232,24 @@ class AppController:
         mt.frame_selected.connect(self.file_ctrl.on_tab_frame_selected)
         self.w.original_panel.point_clicked.connect(self.manual_ctrl.on_point_clicked)
         self.w.original_panel.point_clicked.connect(self.pretune_ctrl.on_point_clicked)
-        eb = pt.edge_box
+        eb = mp.edge_box
         eb.use_current_reference_clicked.connect(self.pretune_ctrl.on_use_current_as_reference)
         eb.auto_reference_clicked.connect(self.pretune_ctrl.on_auto_reference)
         eb.pick_seed_clicked.connect(self.pretune_ctrl.on_pick_seed)
         eb.clear_seed_clicked.connect(self.pretune_ctrl.on_clear_seed)
         self.bus.subscribe("source_loaded", lambda _n: self.pretune_ctrl.refresh_edge_labels())
 
-        # Tab switching
+        # Side-panel mode (measure / manual fix)
         lp.tab_bar.tab_changed.connect(self.file_ctrl.on_tab_changed)
 
-        # Automatic
-        at = lp.automatic_tab
-        at.fit_clicked.connect(self.auto_ctrl.on_auto_fit)
-        at.stop_clicked.connect(self.auto_ctrl.on_auto_stop)
-        at.clear_clicked.connect(self.auto_ctrl.on_auto_clear)
-        at.batch_folders_clicked.connect(self.auto_ctrl.on_batch_folders)
+        # Fit (every frame) and Stop
+        lp.fit_controls.fit_clicked.connect(self.auto_ctrl.on_auto_fit)
+        lp.fit_controls.stop_clicked.connect(self.auto_ctrl.on_auto_stop)
 
-        # Post processing
-        pp = lp.post_processing
-        pp.export_r_data_clicked.connect(self.export_ctrl.on_export_r_data)
-        pp.export_rof_t_clicked.connect(self.export_ctrl.on_export_rof_t)
-        pp.generate_report_clicked.connect(self.export_ctrl.on_generate_report)
-        pp.physical_params_changed.connect(self._on_physical_params_changed)
+        # Export dialog (side-panel button and File menu); Edit > Clear All Results
+        lp.export_clicked.connect(self.export_ctrl.open_dialog)
+        self.w.export_requested.connect(self.export_ctrl.open_dialog)
+        self.w.clear_results_requested.connect(self._on_clear_results)
 
         # ROI: button click → enter selection mode, drag complete → apply ROI
         self.w.original_panel.select_roi_clicked.connect(self.pretune_ctrl.on_select_roi)
@@ -293,15 +292,20 @@ class AppController:
         mt.tool_changed.connect(circle.on_tool_changed)
         mt.use_circle_clicked.connect(circle.use_circle_as_manual)
         mt.cancel_circle_clicked.connect(circle.cancel_prompt)
-        # After the pre-tune handlers stored the new detection mode / ROI:
-        lp.pretune_tab.filters_changed.connect(circle.sync_tool)
+        # After the measuring handlers stored the new detection mode / ROI:
+        lp.measure_panel.filters_changed.connect(circle.sync_tool)
         self.w.original_panel.roi_selected.connect(lambda *_roi: circle.sync_tool())
         # After AutoController's Stop handler, so a re-track's status wins.
-        lp.automatic_tab.stop_clicked.connect(self.retrack.stop)
+        lp.fit_controls.stop_clicked.connect(self.retrack.stop)
 
     def _sync_ui_from_state(self) -> None:
         """Reflect loaded/persisted state in the visible controls."""
-        pt = self.w.left_panel.pretune_tab
+        if self._state.edge_definition != STEEP_EDGE:
+            # The "Wall at: outer extent" choice is gone: Auto uses the 50% edge.
+            logger.info("Auto wall position %r replaced by the steep (50%%) edge",
+                        self._state.edge_definition)
+            self._state = update_state(self._state, edge_definition=STEEP_EDGE)
+        pt = self.w.left_panel.measure_panel
         pt.set_threshold(self._state.img_thr)
         pt.set_removing_factor(self._state.removing_factor)
         pt.set_invert_mask(self._state.invert_mask)
@@ -319,12 +323,7 @@ class AppController:
             "edge_polarity": self._state.edge_polarity,
         })
         self.pretune_ctrl.refresh_edge_labels()
-
-        self.w.left_panel.post_processing.set_physical_params(
-            self._state.fps,
-            self._state.um2px,
-            self._state.rmax_fit_length,
-        )
+        self.settings.apply_classic()  # a classic method keeps its controls in view
 
     def _apply_run_lock(self, running: bool) -> None:
         """Disable every control that loads data or edits results during a run.
@@ -333,24 +332,29 @@ class AppController:
         """
         enabled = not running
         lp = self.w.left_panel
-        for widget in (lp.image_source, lp.pretune_tab, lp.manual_tab,
-                       lp.post_processing):
+        for widget in (lp.image_source, lp.measure_panel, lp.manual_tab, lp.export_button):
             widget.setEnabled(enabled)
-        lp.automatic_tab.set_editing_enabled(enabled)
+        for action in (self.w.export_action, self.w.clear_results_action):
+            action.setEnabled(enabled)
         self.w.save_session_action.setEnabled(enabled)
         self.w.load_session_action.setEnabled(enabled)
         self.w.radius_chart.set_editing_enabled(enabled)
 
-    def _on_physical_params_changed(self) -> None:
-        """Keep fps / scale / fit length in state so sessions, config and
-        reports record the values the user actually exports with."""
-        pp = self.w.left_panel.post_processing
-        self._state = update_state(
-            self._state,
-            fps=pp.get_fps(),
-            um2px=pp.get_scale(),
-            rmax_fit_length=pp.get_fit_length(),
-        )
+    def _on_clear_results(self) -> None:
+        """Edit > Clear All Results: remove every result once the user confirms."""
+        radius = self._state.radius
+        if radius is None or self.auto_ctrl.is_busy():
+            return
+        if not (radius > 0).any() and not (self._state.fit_locked is not None
+                                           and self._state.fit_locked.any()):
+            self.w.header.set_status("No results to clear", "#f59e0b")
+            return
+        if self._ask_yes_no(
+            "Clear all results?",
+            f"Remove the results of all {len(radius)} frames, including manual "
+            "fixes and locked frames?\n\nThis cannot be undone.",
+        ):
+            self.auto_ctrl.on_auto_clear()
 
     # ------------------------------------------------------------------ #
     #  Compare mode refresh

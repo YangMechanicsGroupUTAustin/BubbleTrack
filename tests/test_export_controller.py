@@ -1,7 +1,7 @@
 """Tests for ExportController wiring (status messages, export arguments).
 
-The Qt window is replaced by light fakes and the save dialog is patched, so
-these tests exercise only the controller's own logic.
+The Qt window is replaced by light fakes and the exports are called with a
+path (no dialog), so these tests exercise only the controller's own logic.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ class _FakeLabel:
 
 
 class _FakePanel:
-    """Stand-in for PostProcessingPanel."""
+    """Stand-in for the Export dialog's getters and status line."""
 
     def __init__(self, fmt: str = "mat", fps: float = 1e6,
                  scale: float = 3.2, fit_length: int = 11) -> None:
@@ -63,8 +63,7 @@ class _FakePanel:
         )
 
 
-def _make_controller(monkeypatch, save_path: str, radius: np.ndarray,
-                     panel: _FakePanel):
+def _make_controller(radius: np.ndarray):
     n = len(radius)
     state = AppState(
         folder_path="",
@@ -75,12 +74,7 @@ def _make_controller(monkeypatch, save_path: str, radius: np.ndarray,
     holder = {"state": state}
 
     window = SimpleNamespace(
-        left_panel=SimpleNamespace(post_processing=panel),
         status_bar=SimpleNamespace(update_scale=lambda _scale: None),
-    )
-    monkeypatch.setattr(
-        ec, "QFileDialog",
-        SimpleNamespace(getSaveFileName=lambda *a, **k: (save_path, "")),
     )
     ctrl = ec.ExportController(
         EventBus(),
@@ -96,9 +90,9 @@ class TestRofTStatus:
         t = np.arange(1, 31, dtype=float)
         radius = 100.0 - 0.05 * (t - 15) ** 2
         panel = _FakePanel()
-        ctrl = _make_controller(monkeypatch, str(tmp_path / "a.mat"), radius, panel)
+        ctrl = _make_controller(radius)
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(tmp_path / "a.mat"))
 
         text, success = panel.statuses[-1]
         assert success
@@ -109,9 +103,9 @@ class TestRofTStatus:
         radius = np.array([100.0, 90.0, 80.0, 70.0, 60.0])  # peak at frame 1
         panel = _FakePanel()
         out = tmp_path / "b.mat"
-        ctrl = _make_controller(monkeypatch, str(out), radius, panel)
+        ctrl = _make_controller(radius)
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(out))
 
         assert out.exists()
         text, _success = panel.statuses[-1]
@@ -123,7 +117,7 @@ class TestRofTStatus:
         radius = np.array([100.0, 90.0, 80.0, 70.0, 60.0])  # peak at frame 1
         panel = _FakePanel(fmt="csv", fps=2e5, scale=1.5, fit_length=7)
         out = tmp_path / "d.csv"
-        ctrl = _make_controller(monkeypatch, str(out), radius, panel)
+        ctrl = _make_controller(radius)
         calls = []
         real_export_csv = ec.export_csv
 
@@ -133,7 +127,7 @@ class TestRofTStatus:
 
         monkeypatch.setattr(ec, "export_csv", _spy)
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(out))
 
         assert out.exists()
         assert calls[0]["fps"] == 2e5
@@ -146,9 +140,9 @@ class TestRofTStatus:
     def test_failure_is_shown_in_red(self, monkeypatch, tmp_path):
         radius = np.array([-1.0, 10.0, -1.0])
         panel = _FakePanel()
-        ctrl = _make_controller(monkeypatch, str(tmp_path / "c.mat"), radius, panel)
+        ctrl = _make_controller(radius)
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(tmp_path / "c.mat"))
 
         text, success = panel.statuses[-1]
         assert not success
@@ -164,14 +158,14 @@ class TestReport:
     def test_report_uses_panel_fps_and_scale(self, monkeypatch, tmp_path):
         panel = _FakePanel(fps=5e5, scale=2.5)
         out = tmp_path / "report.pdf"
-        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+        ctrl = _make_controller(_smooth_radius())
         calls = []
         monkeypatch.setattr(
             ec, "generate_report",
             lambda *args, **kwargs: calls.append(kwargs),
         )
 
-        ctrl.on_generate_report()
+        ctrl.export_report(panel, str(out))
 
         assert calls[0]["fps"] == pytest.approx(5e5)
         assert calls[0]["um2px"] == pytest.approx(2.5)
@@ -196,9 +190,9 @@ class TestExportMetadata:
 
         panel = _FakePanel(fmt="mat", fps=5e5, scale=2.5, fit_length=7)
         out = tmp_path / "r.mat"
-        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+        ctrl = _make_controller(_smooth_radius())
 
-        ctrl.on_export_r_data()
+        ctrl.export_pixel(panel, str(out))
 
         meta = loadmat(str(out), simplify_cells=True)["BubbleTrackMeta"]
         self._check_meta(meta, panel)
@@ -208,9 +202,9 @@ class TestExportMetadata:
 
         panel = _FakePanel(fmt="mat", fps=5e5, scale=2.5, fit_length=7)
         out = tmp_path / "rt.mat"
-        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+        ctrl = _make_controller(_smooth_radius())
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(out))
 
         meta = loadmat(str(out), simplify_cells=True)["BubbleTrackMeta"]
         self._check_meta(meta, panel)
@@ -219,11 +213,9 @@ class TestExportMetadata:
         import json
 
         panel = _FakePanel(fmt="csv", fps=5e5, scale=2.5, fit_length=7)
-        ctrl = _make_controller(
-            monkeypatch, str(tmp_path / "run.csv"), _smooth_radius(), panel,
-        )
+        ctrl = _make_controller(_smooth_radius())
 
-        ctrl.on_export_rof_t()
+        ctrl.export_physical(panel, str(tmp_path / "run.csv"))
 
         meta = json.loads((tmp_path / "run.meta.json").read_text(encoding="utf-8"))
         self._check_meta(meta, panel)
@@ -233,9 +225,9 @@ class TestExportMetadata:
 
         panel = _FakePanel(fmt="xlsx", fps=5e5, scale=2.5, fit_length=7)
         out = tmp_path / "run.xlsx"
-        ctrl = _make_controller(monkeypatch, str(out), _smooth_radius(), panel)
+        ctrl = _make_controller(_smooth_radius())
 
-        ctrl.on_export_r_data()
+        ctrl.export_pixel(panel, str(out))
 
         rows = list(load_workbook(str(out))["Metadata"].iter_rows(values_only=True))
         self._check_meta(dict(rows[1:]), panel)

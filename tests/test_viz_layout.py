@@ -1,4 +1,4 @@
-"""Window layout: splitter, small screens, tab order, pinned buttons, styling."""
+"""Window layout: splitter, small screens, pinned Fit / Export, styling."""
 
 from __future__ import annotations
 
@@ -11,7 +11,6 @@ from PyQt6.QtWidgets import QApplication, QPushButton, QSplitter, QWidget
 
 import bubbletrack
 from bubbletrack.ui import main_window as mw
-from bubbletrack.ui.tab_bar import TabBar
 
 STYLE = (Path(bubbletrack.__file__).parent / "resources" / "style.qss").read_text(encoding="utf-8")
 
@@ -61,6 +60,26 @@ class TestSplitter:
             mw.SPLITTER_SETTINGS_KEY, ["x", "y"])
         assert not window.restore_layout()
 
+    def test_first_start_gives_the_chart_about_45_percent(self, gui, qapp):
+        window, _ = gui
+        window.resize(1440, 900)
+        window.show()
+        qapp.processEvents()
+        images, chart_pane = window.content_splitter.sizes()
+        strip = window.filmstrip.height() if window.filmstrip is not None else 0
+        share = (chart_pane - strip) / (images + chart_pane - strip)
+        assert 0.40 <= share <= 0.50, (images, chart_pane, strip)
+
+    def test_saved_sizes_win_over_the_default(self, gui, temp_settings, qapp):
+        QSettings(temp_settings, QSettings.Format.IniFormat).setValue(
+            mw.SPLITTER_SETTINGS_KEY, [500, 200])
+        window, _ = gui
+        window.resize(1440, 900)
+        window.show()
+        qapp.processEvents()
+        images, chart_pane = window.content_splitter.sizes()
+        assert images / (images + chart_pane) > 0.6  # the default gives images < 55 %
+
     def test_user_drag_saves_after_a_pause(self, gui, temp_settings, qapp):
         window, _ = gui
         window.content_splitter.splitterMoved.emit(100, 1)
@@ -87,15 +106,16 @@ class TestSmallScreens:
         assert window.radius_chart.height() >= window.radius_chart.minimumHeight()
         assert window.original_panel.height() > 120
 
-    def test_left_panel_scrolls_and_fit_buttons_stay_pinned(self, gui, qapp):
+    def test_left_panel_scrolls_and_fit_and_export_stay_pinned(self, gui, qapp):
         window, _ = gui
         window.show()
         window.resize(1280, 800)
         qapp.processEvents()
         lp = window.left_panel
-        bar = lp.pretune_tab.action_bar
-        assert not lp.scroll_area.widget().isAncestorOf(bar)
-        assert lp.pinned_footer.isAncestorOf(bar)
+        fit, export = lp.fit_controls.fit_button, lp.export_button
+        for button in (fit, export):
+            assert not lp.scroll_area.widget().isAncestorOf(button)
+            assert lp.pinned_footer.isAncestorOf(button)
         # Content height depends on the fonts available; force it to be tall.
         lp.scroll_area.widget().setMinimumHeight(2000)
         qapp.processEvents()
@@ -103,53 +123,34 @@ class TestSmallScreens:
         assert scroll.maximum() > 0  # content is taller than the panel
         scroll.setValue(scroll.maximum())
         qapp.processEvents()
-        assert bar.isVisible() and lp.pretune_tab._fit_btn.isVisible()
+        assert fit.isVisible() and export.isVisible()
 
 
-class TestTabs:
-    def test_workflow_order(self, gui):
-        window, _ = gui
-        assert TabBar.TAB_NAMES == ("Pre-tune", "Automatic", "Manual")
-        stack = window.left_panel._stack
-        lp = window.left_panel
-        assert [stack.widget(i) for i in range(3)] == [
-            lp.pretune_tab, lp.automatic_tab, lp.manual_tab]
-
-    @pytest.mark.parametrize("name", TabBar.TAB_NAMES)
-    def test_switching_updates_page_status_and_footer(self, gui, name):
+class TestSidePanel:
+    def test_no_tabs_source_then_settings_then_footer(self, gui):
         window, _ = gui
         lp = window.left_panel
-        lp.tab_bar.select(name)
-        page = {"Pre-tune": lp.pretune_tab, "Automatic": lp.automatic_tab,
-                "Manual": lp.manual_tab}[name]
-        assert lp._stack.currentWidget() is page
-        assert window.status_bar._mode_label.text() == f"Mode: {name}"
-        assert lp.pinned_footer.isHidden() == (name != "Pre-tune")
-        assert lp.tab_bar.current_name() == name
+        content = lp.scroll_area.widget().layout()
+        order = [content.itemAt(i).widget() for i in range(content.count())]
+        assert order.index(lp.image_source) < order.index(lp.measure_panel)
+        assert not hasattr(lp, "automatic_tab") and not hasattr(lp, "post_processing")
 
-    def test_short_tab_leaves_no_gap(self, gui):
-        lp = gui[0].left_panel
-        lp.tab_bar.select("Automatic")
-        assert lp._stack.sizeHint().height() < lp.pretune_tab.sizeHint().height()
+    def test_status_bar_shows_the_mode(self, gui):
+        window, _ = gui
+        lp = window.left_panel
+        assert window.status_bar._mode_label.text() == "Mode: Measure"
+        lp.tab_bar.select("Manual")
+        assert window.status_bar._mode_label.text() == "Mode: Manual"
         lp.tab_bar.select("Pre-tune")
-        assert lp._stack.sizeHint().height() >= lp.pretune_tab.sizeHint().height()
+        assert window.status_bar._mode_label.text() == "Mode: Measure"
 
-    def test_pinned_buttons_follow_the_run_lock(self, gui):
+    def test_footer_follows_the_run_lock(self, gui):
         window, controller = gui
+        lp = window.left_panel
         controller._apply_run_lock(True)
-        assert not window.left_panel.pretune_tab.action_bar.isEnabled()
+        assert not lp.export_button.isEnabled()
         controller._apply_run_lock(False)
-        assert window.left_panel.pretune_tab.action_bar.isEnabled()
-
-    def test_pinned_buttons_still_emit(self, gui):
-        window, _ = gui
-        tab = window.left_panel.pretune_tab
-        hits = []
-        tab.fit_clicked.connect(lambda: hits.append("fit"))
-        tab.autotune_clicked.connect(lambda: hits.append("tune"))
-        tab._fit_btn.click()
-        tab._autotune_btn.click()
-        assert hits == ["fit", "tune"]
+        assert lp.export_button.isEnabled() and lp.fit_controls.fit_button.isEnabled()
 
 
 def _centre_colour(widget) -> QColor:
@@ -176,18 +177,23 @@ class TestStyling:
         assert enabled.red() > 200 and enabled.green() < 100  # still red when active
         assert not (disabled.red() > 150 and disabled.green() < 100)
 
-    def test_idle_stop_button_in_the_app_is_not_red(self, gui, styled):
+    def test_idle_app_shows_no_stop_button(self, gui):
         window, _ = gui
-        stop = window.left_panel.automatic_tab._stop_btn
-        window.left_panel.tab_bar.select("Automatic")
-        assert not stop.isEnabled()
-        colour = _centre_colour(stop)
+        stop = window.left_panel.fit_controls.stop_button
+        assert not stop.isVisibleTo(window.left_panel) and not stop.isEnabled()
+
+    def test_fit_is_the_primary_button(self, gui, styled):
+        window, _ = gui
+        fit = window.left_panel.fit_controls.fit_button
+        assert fit.objectName() == "primaryBtn"
+        colour = _centre_colour(fit)
         window.close()
-        assert not (colour.red() > 150 and colour.green() < 100)
+        assert colour.blue() > 200  # indigo fill
 
     def test_active_view_mode_is_filled(self, gui, styled):
-        window, _ = gui
+        window, controller = gui
         from bubbletrack.ui.image_compare import CompareMode
+        controller.settings.set("show_all_view_modes", True)
         buttons = window.compare_toolbar._buttons
         for btn in buttons.values():
             btn.resize(110, 28)

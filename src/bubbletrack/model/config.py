@@ -61,7 +61,7 @@ EXPORT_FORMATS: tuple[str, ...] = ("mat", "csv", "xlsx")
 # checked before it reaches AppState: a wrong type used to crash every launch
 # (the UI widgets reject it), and out-of-range values were silently kept.
 # Each validator returns the cleaned value, clamped to the range the UI
-# allows (ui/pretune_tab.py and ui/post_processing.py), or raises ValueError,
+# allows (ui/classic_controls.py and ui/export_dialog.py), or raises ValueError,
 # in which case the key is dropped and AppState's default applies.
 
 def _as_number(value: Any) -> float:
