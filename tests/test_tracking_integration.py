@@ -240,3 +240,25 @@ def test_tracking_review_reaches_the_queue_and_expires_on_edit(qapp, gui, drift_
     assert 7 in rc.panel.frames()
     controller._on_lock_range(7, 7, locked=True)  # the user accepted it
     assert 7 not in rc.panel.frames()
+
+
+def test_tracking_after_a_partial_run_may_change_only_that_run(gui, make_sequence, monkeypatch):
+    # ML assist's Train and apply, or a chart range, measures some frames only:
+    # tracking afterwards must leave every other (good) result alone.
+    from bubbletrack.controller import auto_controller as auto
+
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("part", 6)))
+    ctrl = controller.auto_ctrl
+    seen = []
+    monkeypatch.setattr(auto, "apply_tracking",
+                        lambda state, outcome, allowed_frames=None: seen.append(allowed_frames) or [])
+    monkeypatch.setattr(auto, "review_items", lambda result: [])
+    monkeypatch.setattr(ctrl, "_finish_run", lambda **kwargs: None)
+    tracker, outcome = object(), type("Outcome", (), {"result": None})()
+    ctrl._tracker = tracker
+    ctrl._run_frames = (2, 3)
+    ctrl._on_tracking_solved(tracker, outcome)
+    ctrl._run_frames = tuple(range(6))  # Fit All
+    ctrl._on_tracking_solved(tracker, outcome)
+    assert seen == [frozenset({2, 3}), None]

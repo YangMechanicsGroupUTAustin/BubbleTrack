@@ -353,11 +353,19 @@ class AutoController(BaseController):
     def _on_tracking_solved(self, tracker, outcome) -> None:
         if tracker is not self._tracker:
             return
-        changed = apply_tracking(self.state, outcome)
+        changed = apply_tracking(self.state, outcome, allowed_frames=self._tracking_scope())
         logger.info("Tracking re-measured %d frame(s): %s", len(changed), changed[:20])
         if changed:
             self._run_notes.append(f"tracking re-measured {plural(len(changed), 'frame')}")
         self._finish_run(stopped=False, review=review_items(outcome.result))
+
+    def _tracking_scope(self) -> frozenset[int] | None:
+        """Frames tracking may change: any after a run over every frame (Fit All),
+        else only the run's own (Train and apply, a chart range): good results
+        outside a partial run are never touched."""
+        frames = frozenset(self._run_frames)
+        n = len(self.state.images) if self.state.images else 0
+        return None if len(frames) >= n else frames
 
     def _on_tracking_ended(self, tracker, note: str, detail: str = "") -> None:
         """Tracking failed or was stopped: keep the single-frame results."""
