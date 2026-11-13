@@ -15,6 +15,7 @@ import numpy as np
 
 from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export_fit import FitColumns
+from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.export_meta import (
     META_SHEET_TITLE,
     excel_value,
@@ -230,7 +231,7 @@ def export_csv(
         rmax_fit_length=rmax_fit_length, fit=fit,
     )
 
-    with open(filepath, "w", newline="", encoding="utf-8") as f:
+    with open(os_path(filepath), "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(header)
         for cells in rows:
@@ -318,5 +319,5 @@ def export_excel(
         for key, value in plain_metadata(metadata).items():
             meta_ws.append([key, excel_value(value)])
 
-    wb.save(filepath)
+    wb.save(os_path(filepath))
     return warning

@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from bubbletrack.model.frame_source import RECORDING_DIALOG_FILTER, is_recording_file
+from bubbletrack.model.long_paths import os_path
 
 
 def format_rate(fps: float) -> str:
@@ -141,13 +142,13 @@ class _DropZone(QWidget):
     def accept_path(self, path: str) -> None:
         """Emit *path* if this zone takes it (a dropped file selects its folder)."""
         if self._mode == "folder":
-            if os.path.isdir(path):
+            if os.path.isdir(os_path(path)):
                 self.path_selected.emit(path)
-            elif os.path.isfile(path):
+            elif os.path.isfile(os_path(path)):
                 # Fallback: use the file's parent directory
                 self.path_selected.emit(str(Path(path).parent))
         else:  # video or .dat recording
-            if os.path.isfile(path) and is_recording_file(path):
+            if os.path.isfile(os_path(path)) and is_recording_file(path):
                 self.path_selected.emit(path)
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
-from bubbletrack.model.image_io import ImageLoadError, imread_unicode
+from bubbletrack.model.image_io import ImageLoadError, imread_unicode, read_failure
 from bubbletrack.model.suggestion import Suggestion, make_suggestion
 
 
@@ -65,7 +65,7 @@ def read_raw(source) -> np.ndarray:
         return source
     raw = imread_unicode(source, cv2.IMREAD_UNCHANGED)
     if raw is None:
-        raise ImageLoadError(f"Cannot read image (file may be missing or corrupted): {source}")
+        raise ImageLoadError(read_failure(source))
     return raw
 
 

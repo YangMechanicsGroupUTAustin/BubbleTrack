@@ -109,7 +109,7 @@ class TestLoadersUseUnicodeReader:
         assert binary.any() and not binary.all()
 
     def test_load_missing_unicode_file_still_raises(self, unicode_dir):
-        with pytest.raises(ImageLoadError, match="missing or corrupted"):
+        with pytest.raises(ImageLoadError, match="file not found"):
             load_and_normalize(str(unicode_dir / "nope.tiff"), 0.5, (1, 10), (1, 10))
 
     def test_detect_bit_depth(self, unicode_dir, frame16):

@@ -39,6 +39,7 @@ from pathlib import Path
 import numpy as np
 
 from bubbletrack.model.image_io import ImageLoadError
+from bubbletrack.model.long_paths import os_path
 
 DAT_EXTS = frozenset({".dat"})
 
@@ -141,8 +142,8 @@ def _interval_ns(entries: dict, n_frames: int) -> float:
 def read_header(path: str | os.PathLike) -> DatHeader:
     """Parse and validate the header of an HPV-X2 ``.dat`` recording."""
     try:
-        size = os.path.getsize(path)
-        with open(path, "rb") as fh:
+        size = os.path.getsize(os_path(path))
+        with open(os_path(path), "rb") as fh:
             buf = fh.read(_HEADER_READ)
     except OSError as exc:
         raise ImageLoadError(f"Cannot open {path}: {exc}") from exc
@@ -176,7 +177,7 @@ class DatFrameReader:
         self._path = str(path)
         self.header = read_header(self._path)
         try:
-            self._file = open(self._path, "rb")
+            self._file = open(os_path(self._path), "rb")
         except OSError as exc:
             raise ImageLoadError(f"Cannot open {self._path}: {exc}") from exc
 

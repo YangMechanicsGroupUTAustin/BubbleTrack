@@ -16,6 +16,7 @@ from bubbletrack.model.folder_scan import (  # noqa: F401  (re-exported)
     scan_folder_report,
     tiff_page_count,
 )
+from bubbletrack.model.long_paths import MAX_PATH, os_path, too_long
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,22 @@ class ImageLoadError(Exception):
     """Raised when an image file cannot be loaded or is corrupted."""
 
 
+def read_failure(path: str | os.PathLike) -> str:
+    """Why the image at *path* could not be read, in plain words (with the path).
+
+    A path beyond Windows' MAX_PATH is named as the likely cause rather than a
+    damaged file: plain Win32 calls cannot open it.
+    """
+    text = os.fspath(path)
+    if too_long(text):
+        return (f"Cannot read image: the path is too long ({len(os.path.abspath(text))} "
+                f"characters; Windows allows {MAX_PATH}). Move the data to a shorter "
+                f"folder: {text}")
+    if not os.path.exists(os_path(text)):
+        return f"Cannot read image: file not found: {text}"
+    return f"Cannot read image (the file is damaged or not an image): {text}"
+
+
 def imread_unicode(
     path: str | os.PathLike,
     flags: int = cv2.IMREAD_UNCHANGED,
@@ -72,7 +89,8 @@ def imread_unicode(
     ``cv2.imread`` cannot open paths with characters outside the ANSI code
     page on Windows (CJK, ``µ``, ``Å``, emoji, ...) and silently returns None.
     Reading the bytes with numpy and decoding them in memory avoids the
-    problem on every platform.
+    problem on every platform.  Paths beyond Windows' MAX_PATH are read
+    through the extended-length prefix (see ``model.long_paths``).
 
     Parameters
     ----------
@@ -90,7 +108,7 @@ def imread_unicode(
         For multi-page files only the first page is returned.
     """
     try:
-        buf = np.fromfile(os.fspath(path), dtype=np.uint8)
+        buf = np.fromfile(os_path(path), dtype=np.uint8)
     except (OSError, ValueError) as exc:
         logger.debug("Cannot read file bytes %s: %s", path, exc)
         return None
@@ -145,7 +163,7 @@ class VideoFrameReader:
         # CJK, "µ", "Å" and emoji; see tests/test_unicode_paths.py).  Only the
         # Media Foundation backend (cv2.CAP_MSMF) fails on them, and it is
         # not selected for files by default.
-        self._cap = cv2.VideoCapture(str(path))
+        self._cap = cv2.VideoCapture(os_path(path))  # FFmpeg takes the long-path prefix
         if not self._cap.isOpened():
             raise ImageLoadError(f"Cannot open video: {path}")
         self._total = int(self._cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -425,9 +443,7 @@ def load_and_normalize(
     raw = imread_unicode(image_path, cv2.IMREAD_UNCHANGED)
     if raw is None:
         logger.warning("Cannot read image: %s", image_path)
-        raise ImageLoadError(
-            f"Cannot read image (file may be missing or corrupted): {image_path}"
-        )
+        raise ImageLoadError(read_failure(image_path))
 
     return normalize_frame(
         raw, sensitivity, gridx, gridy,
