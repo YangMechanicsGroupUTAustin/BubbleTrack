@@ -111,7 +111,8 @@ def _edge_job(case: HardCase, p: dict, read_frame: ReadFrame) -> edge_pipeline.E
         dr, dc = case.offset
         seed = (seed[0] - dr, seed[1] - dc)
     params = edge_pipeline.make_params(edge_definition=p.get("edge_definition", "steep"),
-                                       polarity=p.get("edge_polarity", "dark"), seed=seed)
+                                       polarity=p.get("edge_polarity", "dark"), seed=seed,
+                                       non_round=p.get("bubble_non_round", False))
     return edge_pipeline.EdgeJob(params=params, reference=reference,
                                  max_radius=case.detection.max_radius)
 

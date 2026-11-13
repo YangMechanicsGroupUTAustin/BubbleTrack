@@ -6,7 +6,8 @@ appears once it is relevant (after a fit, or when examples exist).
 
 The wall is always placed at the 50% crossing of the steep edge; the former
 "Outer extent" choice is no longer offered (``edge_definition`` stays
-"steep").  The bubble colour (dark by default) is in Advanced.
+"steep").  The bubble colour (dark by default), "Bubble may be non-round"
+(the radius definition, off by default) and tracking are in Advanced.
 """
 
 from __future__ import annotations
@@ -47,6 +48,17 @@ ML_SWITCH_TIP = ("On: Fit measures with ML assist.\n"
 ML_SWITCH_LOCKED_TIP = ("Not available yet: teach ML assist first (Teach…).\n"
                         "It needs one frame you verified, or a few brush strokes\n"
                         "on the bubble and on the background.")
+NON_ROUND_TEXT = "Bubble may be non-round"
+NON_ROUND_TIP = (
+    "Off (default): R is the circle that best fits the bubble wall.\n"
+    "  A bubble cut by the image edge is fitted on the wall you can see.\n"
+    "  If the outline is clearly not round, Review lists the frame.\n"
+    "On: R is the radius of a circle with the same area as the outline,\n"
+    "  for bubbles that are not round (oval, lobed, jetting).\n"
+    "  A bubble cut by the image edge gets a result only when its visible\n"
+    "  wall is round, so the hidden part can be completed; otherwise\n"
+    "  Review lists the frame with Auto's guess.\n"
+    "Changing this does not change results already measured: Fit again.")
 AUTO_POSITION_TEXT = "auto · click to set"
 NAME_WIDTH = 86  # the names column, so the values line up
 UNDO_BUTTON_WIDTH = 26
@@ -166,6 +178,10 @@ class EdgeOptionsBox(QGroupBox):
         row.addWidget(QLabel("Bubble:"))
         row.addWidget(self._polarity, 1)
         advanced.add_widget(polarity)
+        self._non_round_check = QCheckBox(NON_ROUND_TEXT)
+        self._non_round_check.setToolTip(NON_ROUND_TIP)
+        self._non_round_check.toggled.connect(self.options_changed)
+        advanced.add_widget(self._non_round_check)
         self._track_check = QCheckBox("Track across frames after Fit")
         self._track_check.setChecked(True)
         self._track_check.setToolTip(
@@ -224,16 +240,23 @@ class EdgeOptionsBox(QGroupBox):
     def polarity(self) -> str:
         return self._polarity.currentData()
 
+    def non_round(self) -> bool:
+        """"Bubble may be non-round": R from the outline's area instead of the circle."""
+        return self._non_round_check.isChecked()
+
     def tracking_enabled(self) -> bool:
         return self._track_check.isChecked()
 
-    def set_options(self, edge_definition: str, polarity: str) -> None:
-        """Show *polarity* without emitting options_changed.
+    def set_options(self, edge_definition: str, polarity: str, non_round: bool = False) -> None:
+        """Show *polarity* and *non_round* without emitting options_changed.
 
         *edge_definition* is accepted for older sessions and presets but not
         offered: the wall is always the steep edge (see :meth:`edge_definition`).
         """
         _select(self._polarity, polarity)
+        self._non_round_check.blockSignals(True)
+        self._non_round_check.setChecked(bool(non_round))
+        self._non_round_check.blockSignals(False)
 
     def set_reference_text(self, text: str, *, user_set: bool = False) -> None:
         """The reference line; 'Auto' (back to automatic) only after 'Use this frame'."""

@@ -32,6 +32,7 @@ PERSIST_KEYS: frozenset[str] = frozenset({
     "detection_mode",
     "edge_definition",
     "edge_polarity",
+    "bubble_non_round",
     "area_max_regions",
     "gradient_boundary",
     "temporal_refine",
@@ -162,6 +163,7 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "detection_mode": _as_detection_mode,
     "edge_definition": _one_of(EDGE_DEFINITIONS),
     "edge_polarity": _one_of(EDGE_POLARITIES),
+    "bubble_non_round": _as_flag,                     # Auto > Advanced: Bubble may be non-round
     "area_max_regions": _int_in(1, 20),               # Max regions spin box
     "gradient_boundary": _as_gradient_boundary,       # Gradient Ring 1-3
     "temporal_refine": _as_flag,

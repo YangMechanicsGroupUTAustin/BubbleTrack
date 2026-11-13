@@ -41,9 +41,12 @@ def _params_class():
 
 def make_params(*, edge_definition: str = "steep", polarity: str = "dark",
                 seed: tuple[float, float] | None = None,
-                prior: tuple[float, float, float] | None = None):
+                prior: tuple[float, float, float] | None = None,
+                non_round: bool = False):
+    """``EdgeParams``; *non_round* ("Bubble may be non-round") makes R the outline's
+    area-equivalent radius instead of the circle through the wall."""
     return _params_class()(edge_definition=edge_definition, polarity=polarity,
-                           seed=seed, prior=prior)
+                           seed=seed, prior=prior, non_round=bool(non_round))
 
 
 def params_from_state(state, *, prior: tuple[float, float, float] | None = None):
@@ -56,7 +59,8 @@ def params_from_state(state, *, prior: tuple[float, float, float] | None = None)
     """
     seed = None if prior is not None else state.edge_seed
     return make_params(edge_definition=state.edge_definition, polarity=state.edge_polarity,
-                       seed=seed, prior=prior)
+                       seed=seed, prior=prior,
+                       non_round=getattr(state, "bubble_non_round", False))
 
 
 def read_raw(source) -> np.ndarray:
@@ -110,8 +114,8 @@ class EdgeFrameFit:
     flags: frozenset
     rejected_reason: str  # "" when accepted
     metrics: dict = field(default_factory=dict)  # subset of state.FIT_METRIC_KEYS
-    # Rejected for low confidence only: the circle and outline the engine found
-    # (display-only until accepted, see ``model.suggestion``); None otherwise.
+    # Rejected for low confidence or as unmeasurable: the radius and outline the
+    # engine found (display-only until accepted, see ``model.suggestion``); None otherwise.
     suggestion: Suggestion | None = None
 
 
@@ -135,9 +139,10 @@ def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
 
 
-def _low_confidence_guess(res, confidence: float, metrics: dict,
-                          max_radius: float) -> Suggestion | None:
-    """The circle of a fit rejected only for its confidence (a plausible radius)."""
+def _rejected_guess(res, confidence: float, metrics: dict,
+                    max_radius: float) -> Suggestion | None:
+    """The candidate of a fit rejected for its confidence or as unmeasurable (a plausible
+    radius): its radius follows the definition, so Accept stores what is drawn."""
     if not (0 < float(res.radius) <= max_radius):
         return None
     xy = np.asarray(res.edge_xy, dtype=np.float64).reshape(-1, 2)
@@ -151,7 +156,8 @@ def fit_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
 
     *min_confidence* replaces the engine's confidence gate for the
     acceptance only (a user-drawn circle is itself evidence, see
-    ``guided_fit``); below the engine's gate it still reports the circle fit.
+    ``guided_fit``); a frame the engine could not measure
+    (``clipped_unmeasurable``) is rejected whatever its confidence.
     """
     return fit_from_result(detect(raw, gridx, gridy, job), job, min_confidence=min_confidence)
 
@@ -161,13 +167,22 @@ def detect(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int], job:
     return _engine()(raw, gridx, gridy, reference=job.reference, params=job.params)
 
 
+UNMEASURABLE_REASON = "cut by the image edge: its area can't be measured"
+
+
 def fit_from_result(res, job: EdgeJob, *, min_confidence: float | None = None) -> EdgeFrameFit:
     """The acceptance rules of :func:`fit_edge` applied to an engine result *res*
     (an ``EdgeResult``), e.g. one that ML assist also needs as it is."""
+    from bubbletrack.model.edge.result import FLAG_UNMEASURABLE
+
     confidence = float(res.confidence)
-    passed = res.accepted if min_confidence is None else confidence >= min_confidence
+    unmeasurable = FLAG_UNMEASURABLE in res.flags
+    passed = not unmeasurable and (res.accepted if min_confidence is None
+                                   else confidence >= min_confidence)
     if not np.isfinite(res.radius):
         reason = "no bubble found"
+    elif unmeasurable:
+        reason = UNMEASURABLE_REASON
     elif not passed:
         reason = f"low confidence ({confidence:.2f})"
     elif not (0 < res.radius <= job.max_radius):
@@ -176,7 +191,7 @@ def fit_from_result(res, job: EdgeJob, *, min_confidence: float | None = None) -
         reason = ""
     if reason:
         metrics = _metrics(res)
-        guess = (_low_confidence_guess(res, confidence, metrics, job.max_radius)
+        guess = (_rejected_guess(res, confidence, metrics, job.max_radius)
                  if np.isfinite(res.radius) and not passed else None)
         return EdgeFrameFit(-1.0, float("nan"), float("nan"), np.empty((0, 2)),
                             res.mask, confidence, frozenset(res.flags), reason,

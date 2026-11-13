@@ -20,7 +20,6 @@ Per frame (guarded policy, see ``model.teach.measure``):
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass, field, replace
 
 import numpy as np
@@ -177,7 +176,7 @@ def storable(out, plain: EdgeFrameFit, job: EdgeJob) -> MLFrameFit:
 def _outline_fit(out) -> EdgeFrameFit:
     region = out.region
     terms = region.terms or {}
-    metrics = {"area_px": math.pi * float(out.radius) ** 2}
+    metrics = {"area_px": float(region.area)}
     metrics.update({k: float(terms[k]) for k in ("solidity", "circularity") if k in terms})
     contour = np.asarray(region.contour, dtype=np.float64).reshape(-1, 2)
     return EdgeFrameFit(float(out.radius), float(out.rc), float(out.cc), contour, region.mask,

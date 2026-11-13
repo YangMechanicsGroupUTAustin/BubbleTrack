@@ -34,6 +34,8 @@ class TestCategories:
         ("jump", "jump"),
         ("low_confidence", "low_confidence"),
         ("non_circular", "shape"), ("multiple_edges", "shape"),
+        ("clipped_not_round", "clipped"), ("clipped_unmeasurable", "clipped"),
+        ("clipped_completed", "clipped"),
         ("collapse", "collapse"),
         ("before", "before"),
         ("something_new", "other"),
@@ -51,7 +53,7 @@ class TestCategories:
         assert category_of(_item(0, "fragmented", "shoulder")) == "shape"
 
     def test_a_handful_of_named_categories_in_plain_words(self):
-        assert 5 <= len(CATEGORIES) <= 9
+        assert 5 <= len(CATEGORIES) <= 10  # 10: "Cut by the image edge" (owner, 2026-11-13)
         assert category_label("lost") == "Auto lost the bubble"
         assert category_label("low_confidence") == "Not sure: low confidence"
         assert category_label("other") == "Worth a look"

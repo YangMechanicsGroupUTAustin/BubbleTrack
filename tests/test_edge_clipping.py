@@ -1,7 +1,9 @@
 """Clipped bubbles (owner decision 2) and fragments (decision 3) through ``detect_edge``.
 
-A bubble cut by the ROI border is measured as its visible area (outline closed along the
-border) plus the part of its robust circle fit outside the ROI: flag ``clipped_completed``.
+With "Bubble may be non-round" (``EdgeParams(non_round=True)``, the area definition) a bubble
+cut by the ROI border is measured as its visible area (outline closed along the border) plus the
+part of its robust circle fit outside the ROI: flag ``clipped_completed``.  (The default circle
+definition fits the visible arcs only: ``test_edge_non_round``.)
 
 Measured (edge-1.1.0, R = 60 synthetic bubble with rim, ring and saturated spot, with
 reference): |R - 60| / 60 <= 0.15 % and |R - r_circle| / r_circle <= 0.01 % for clip
@@ -22,6 +24,7 @@ from bubbletrack.model.edge import EdgeParams, detect_edge
 
 FULL = ((1, H), (1, W))
 R = 60.0
+AREA = EdgeParams(non_round=True)
 
 
 @lru_cache(maxsize=None)
@@ -48,7 +51,7 @@ def _check_completed(res, rc0: float, cc0: float, roi_rows=(1, H), roi_cols=(1, 
 def test_round_bubble_clipped_at_the_top_equals_its_circle(frac):
     rc0, cc0 = R * (1 - 2 * frac), 200.0
     img, ref = _clipped(rc0, cc0)
-    res = detect_edge(img, *FULL, reference=ref)
+    res = detect_edge(img, *FULL, reference=ref, params=AREA)
     _check_completed(res, rc0, cc0)
     assert res.accepted
 
@@ -56,13 +59,13 @@ def test_round_bubble_clipped_at_the_top_equals_its_circle(frac):
 @pytest.mark.parametrize("rc0, cc0", [(24.0, 24.0), (220.0, 372.0)], ids=["top_left", "bottom_right"])
 def test_round_bubble_clipped_in_a_corner(rc0, cc0):
     img, ref = _clipped(rc0, cc0)
-    _check_completed(detect_edge(img, *FULL, reference=ref), rc0, cc0)
+    _check_completed(detect_edge(img, *FULL, reference=ref, params=AREA), rc0, cc0)
 
 
 def test_bubble_clipped_by_the_roi_edge_rather_than_the_image():
     img, ref = _clipped(100.0, 200.0)
     rows, cols = (71, 250), (1, 400)                    # ROI starts 30 px below the top of the bubble
-    res = detect_edge(img, rows, cols, reference=ref)
+    res = detect_edge(img, rows, cols, reference=ref, params=AREA)
     _check_completed(res, 100.0, 200.0, rows, cols)
     assert res.mask.shape == (180, 400)
 
@@ -71,7 +74,7 @@ def test_confidence_falls_as_more_of_the_bubble_is_extrapolated():
     conf = []
     for frac in (0.3, 0.6, 0.75):
         img, ref = _clipped(R * (1 - 2 * frac), 200.0)
-        res = detect_edge(img, *FULL, reference=ref)
+        res = detect_edge(img, *FULL, reference=ref, params=AREA)
         conf.append(res.confidence)
         assert res.provenance["confidence_terms"]["completion"] <= 1.0
     assert conf[0] >= 0.9 and conf[0] > conf[1] > conf[2]
@@ -79,7 +82,7 @@ def test_confidence_falls_as_more_of_the_bubble_is_extrapolated():
 
 def test_unclipped_bubble_is_not_completed():
     img, ref = _clipped(125.0, 200.0)
-    res = detect_edge(img, *FULL, reference=ref)
+    res = detect_edge(img, *FULL, reference=ref, params=AREA)
     assert res.radius_kind == "area" and not {"clipped", "clipped_completed"} & res.flags
     assert res.radius == pytest.approx(R, rel=0.003)
 
@@ -129,8 +132,9 @@ def test_thin_crescent_whose_centroid_lies_in_the_bite():
 
     img, radii = render_masks([(crescent, 0.06)])
     ref = render_masks([], seed=99)[0]
-    first = detect_edge(img, *FULL, reference=ref)
+    first = detect_edge(img, *FULL, reference=ref, params=AREA)
     assert first.radius == pytest.approx(radii[0], rel=0.01) and first.accepted
     assert not first.mask[int(round(first.rc - 1)), int(round(first.cc - 1))]
-    res = detect_edge(img, *FULL, reference=ref, params=EdgeParams(prior=(first.rc, first.cc, first.radius)))
+    res = detect_edge(img, *FULL, reference=ref,
+                      params=EdgeParams(prior=(first.rc, first.cc, first.radius), non_round=True))
     assert res.radius == pytest.approx(radii[0], rel=0.01) and res.accepted

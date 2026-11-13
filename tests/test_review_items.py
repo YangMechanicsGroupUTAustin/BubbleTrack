@@ -146,7 +146,9 @@ class TestOrderingAndMerge:
         state.fit_flags[0] = frozenset({"non_circular"})
         state.fit_flags[4] = frozenset({"non_circular"})
         items = build_review_items(state)
-        assert _frames(items) == [2, 3, 1, 0, 4]
+        # A circle > 5 % off its outline's area (non_circular, circle definition) outranks a
+        # confidence of 0.45: R itself may be off (owner, 2026-11-13).
+        assert _frames(items) == [2, 3, 0, 4, 1]
         severities = [i.severity for i in items]
         assert severities == sorted(severities, reverse=True)
 

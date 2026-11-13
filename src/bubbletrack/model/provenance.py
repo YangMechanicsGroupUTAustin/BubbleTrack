@@ -23,6 +23,12 @@ class FitSource(IntEnum):
     ML = 7  # ML assist's own outline (Auto found no wall): computed, always reviewed
 
 
+AREA_RADIUS_FLAG = "area_radius"
+"""Per-frame flag: this radius is the area-equivalent radius of the measured outline
+("Bubble may be non-round"); without it an Auto radius is the circle through the wall.
+Set by the Edge engine and ML assist; Review, the legend and exports read it."""
+
+
 GUIDED_COUNTS_AS_CONFIRMED = True
 """Owner decision (pending; default True): a circle fix is the user's decision.
 

@@ -44,7 +44,8 @@ def build_report_parameters(
     return {
         "Source": state.folder_path or state.video_path or "(none)",
         "Detection Mode": DETECTION_MODE_LABELS.get(state.detection_mode, state.detection_mode),
-        "Radius Definition": radius_definition(state.detection_mode, state.edge_definition),
+        "Radius Definition": radius_definition(state.detection_mode, state.edge_definition,
+                                               getattr(state, "bubble_non_round", False)),
         "Threshold": f"{state.img_thr:.2f}",
         "Removing Factor": str(state.removing_factor),
         "ROI": f"rows {state.gridx}, cols {state.gridy}",

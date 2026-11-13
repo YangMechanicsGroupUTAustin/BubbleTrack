@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG
 from bubbletrack.model.sequence.config import SequenceConfig
 from bubbletrack.model.sequence.types import (
     FLAG_CLOUD, FLAG_COLLAPSE, FLAG_DISAGREE, FLAG_JUMP, FLAG_LOST, FLAG_LOW_CONFIDENCE, FLAG_REACQUIRED,
@@ -24,6 +25,7 @@ REASON_WEIGHT = {
     FLAG_LOW_CONFIDENCE: 60.0,
     FLAG_DISAGREE: 50.0,       # the single-frame result was replaced (or the passes differ)
     "fragmented": 40.0,
+    "clipped_not_round": 36.0,
     "non_circular": 35.0,
     "clipped_completed": 30.0,
     FLAG_CLOUD: 20.0,          # where a cloud starts (tracking pauses)
@@ -40,7 +42,8 @@ def _reasons(i: int, frame: FrameSolution, prev: FrameSolution | None, near_coll
         first_cloud = FLAG_CLOUD in frame.flags and (prev is None or FLAG_CLOUD not in prev.flags)
         return [FLAG_CLOUD] if first_cloud else []
     out = [r for r in _SOLVER_REASONS if r in frame.flags]
-    out += [r for r in RAW_REVIEW_FLAGS if r in frame.flags]
+    out += [r for r in RAW_REVIEW_FLAGS if r in frame.flags
+            and not (r == "non_circular" and AREA_RADIUS_FLAG in frame.flags)]
     if near_collapse:
         out.append(FLAG_COLLAPSE)
     return out

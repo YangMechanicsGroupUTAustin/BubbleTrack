@@ -15,7 +15,7 @@ Coordinates are 0-based ROI pixels ``[row, col]``.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 import cv2
 import numpy as np
@@ -174,6 +174,29 @@ def ray_edges(e: np.ndarray, circle: tuple[float, float, float], contrast: float
     pts = np.column_stack([rc + np.sin(th[ii]) * r_edge, cc + np.cos(th[ii]) * r_edge])
     status[ii] = STATUS_EDGE
     return RayEdges(pts, status, multi, n_rays, lvl[found], ii)
+
+
+def without_points_near(edges: RayEdges, mask: np.ndarray, k: int) -> RayEdges:
+    """*edges* without the points within a ``k x k`` window of *mask* pixels.
+
+    Excluded pixels (saturated glare) are set to the background level in the edge
+    image, so a ray crossing them sees a step at their boundary that is not the
+    bubble wall.  Such rays count as clipped, like rays leaving the ROI.
+    """
+    if len(edges.points) == 0 or not mask.any():
+        return edges
+    grown = cv2.dilate(mask.astype(np.uint8), np.ones((k, k), np.uint8)) > 0
+    h, w = mask.shape
+    ri = np.clip(np.rint(edges.points[:, 0]), 0, h - 1).astype(int)
+    ci = np.clip(np.rint(edges.points[:, 1]), 0, w - 1).astype(int)
+    near = grown[ri, ci]
+    if not near.any():
+        return edges
+    status = edges.status.copy()
+    status[edges.rays[near]] = STATUS_CLIPPED
+    keep = ~near
+    return replace(edges, points=edges.points[keep], status=status, levels=edges.levels[keep],
+                   rays=edges.rays[keep])
 
 
 def _row_percentile(p: np.ndarray, cols: np.ndarray, q: float, min_count: int) -> tuple[np.ndarray, np.ndarray]:

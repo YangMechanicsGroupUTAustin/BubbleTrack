@@ -13,6 +13,11 @@ _POLARITIES = ("dark", "bright")
 _EDGE_CHOICES = ("outer", "inner")
 _NAN = float("nan")
 
+FLAG_UNMEASURABLE = "clipped_unmeasurable"
+"""Non-round mode: a bubble cut by the ROI border whose visible wall does not follow its
+circle, so its hidden area cannot be estimated: no result (``accepted`` is False), but
+``radius`` keeps the candidate (Auto's guess)."""
+
 
 def _is_real(x) -> bool:
     return isinstance(x, numbers.Real) and not isinstance(x, bool)
@@ -45,6 +50,9 @@ class EdgeParams:
     prior: tuple[float, float, float] | None = None
     """(rc, cc, R) expected circle (e.g. from a neighbouring frame), same coordinates."""
     confidence_gate: float = 0.3
+    non_round: bool = False
+    """The radius definition.  False (default): the robust circle through the bubble wall;
+    True ("Bubble may be non-round"): the area-equivalent radius ``sqrt(A / pi)`` of the outline."""
 
     def __post_init__(self) -> None:
         if self.edge_definition not in _DEFINITIONS:
@@ -57,6 +65,8 @@ class EdgeParams:
             raise ValueError(f"level must be in (0, 1), got {self.level!r}")
         if not (_is_real(self.confidence_gate) and 0.0 <= float(self.confidence_gate) <= 1.0):
             raise ValueError(f"confidence_gate must be in [0, 1], got {self.confidence_gate!r}")
+        if not isinstance(self.non_round, bool):
+            raise ValueError(f"non_round must be True or False, got {self.non_round!r}")
         if self.seed is not None:
             object.__setattr__(self, "seed", _finite_tuple(self.seed, 2, "seed"))
         if self.prior is not None:
@@ -75,25 +85,31 @@ class EdgeResult:
     """Measurement of one frame.  Coordinates are 1-based full-image ``[row, col]``.
 
     The bubble is the region enclosed by its outer iso-contour at the edge level,
-    whatever its shape; ``radius`` is its area-equivalent radius ``sqrt(A / pi)``.
+    whatever its shape.  ``radius`` follows ``EdgeParams.non_round``: the robust circle
+    through its wall (default), or the area-equivalent radius ``sqrt(A / pi)`` of the region.
     """
 
     radius: float
-    """Area-equivalent radius of the bubble region (per ``edge_definition``); NaN if nothing was found.
-    A region clipped by the ROI border or excluded pixels is completed with the circle fit
-    (``radius_kind == "area+circle_completion"``).  A frame below the confidence gate reports
-    the circle fit instead (``radius_kind == "circle"``, flag ``circle_fallback``)."""
+    """The bubble's radius under the chosen definition (per ``edge_definition``); NaN if nothing
+    was found.  Circle (default): the robust circle fit through the genuine wall points
+    (``radius_kind == "circle"``).  Non-round: the region's area-equivalent radius; a region
+    clipped by the ROI border or excluded pixels is completed with the circle fit when its
+    visible wall agrees with it (``radius_kind == "area+circle_completion"``), else the frame
+    is rejected (flag ``clipped_unmeasurable``) and ``radius`` is only Auto's guess."""
     rc: float
-    """Centre row: the area centroid, or the circle-fit centre when the region is clipped or untrusted."""
+    """Centre row: the circle-fit centre (circle definition, or a clipped region), else the
+    area centroid of the visible region."""
     cc: float
     radius_sigma: float
-    """Standard error of ``radius`` (outline noise plus the extrapolated part)."""
+    """Standard error of ``radius`` (circle: its fit covariance; area: outline noise plus the
+    extrapolated part)."""
     edge_xy: np.ndarray
     """(M, 2) points of the bubble outline on a genuine edge (ROI-border closure left out)."""
     confidence: float
     flags: frozenset[str]
     r_area: float
-    """Area-equivalent radius of the region (equals ``radius`` unless ``radius_kind == "circle"``)."""
+    """Area-equivalent radius of the region (circle-completed when clipped): the independent
+    check of the circle definition (flag ``non_circular`` beyond 5 %)."""
     outer_radius: float
     """Definition-B radius (NaN if undefined): the outer region's area-equivalent radius with
     ``edge_definition == "outer"``, else the circle fit of the outer-extent points."""
@@ -122,11 +138,13 @@ class EdgeResult:
     contour: np.ndarray = field(default_factory=_empty_points)
     """(N, 2) closed outline of the visible region, ROI-border closure included."""
     radius_kind: str = "area"
-    """"area", "area+circle_completion" or "circle" (fallback below the confidence gate)."""
+    """"circle", "area" or "area+circle_completion" (see ``radius``)."""
     centroid: tuple[float, float] = (_NAN, _NAN)
     """Area centroid of the full (completed) region."""
 
     @property
     def accepted(self) -> bool:
-        """True when a positive radius was found and its confidence passes the gate."""
-        return bool(np.isfinite(self.radius) and self.radius > 0 and self.confidence >= self.confidence_gate)
+        """True when a positive radius was found, its confidence passes the gate and it
+        could be measured (no ``clipped_unmeasurable``)."""
+        return bool(np.isfinite(self.radius) and self.radius > 0 and self.confidence >= self.confidence_gate
+                    and FLAG_UNMEASURABLE not in self.flags)

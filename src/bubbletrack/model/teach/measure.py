@@ -30,6 +30,7 @@ import numpy as np
 
 from bubbletrack.model.edge import EdgeParams, EdgeResult, detect_edge
 from bubbletrack.model.edge.engine import engine_view
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG
 from bubbletrack.model.teach.config import MeasureConfig
 from bubbletrack.model.teach.model import MLModel
 from bubbletrack.model.teach.region import MLRegion, ml_region
@@ -107,16 +108,19 @@ def _from_plain(auto: EdgeResult, region: MLRegion | None, guided: EdgeResult | 
                     auto.confidence_gate)
 
 
-def _from_region(region: MLRegion, guided: EdgeResult | None, gate: float) -> MLResult:
-    flags = {FLAG_OUTLINE} | ({"clipped"} if region.clipped else set())
+def _from_region(region: MLRegion, guided: EdgeResult | None, gate: float,
+                 non_round: bool = False) -> MLResult:
+    flags = ({FLAG_OUTLINE} | ({"clipped"} if region.clipped else set())
+             | ({AREA_RADIUS_FLAG} if non_round else set()))
     return MLResult(region.radius, region.rc, region.cc, region.confidence, SOURCE_ML, frozenset(flags),
                     region, guided, gate)
 
 
 def select_result(region: MLRegion | None, guided: EdgeResult | None, *, auto: EdgeResult | None = None,
-                  config: MeasureConfig = MeasureConfig()) -> MLResult:
+                  config: MeasureConfig = MeasureConfig(), non_round: bool = False) -> MLResult:
     """Apply the measurement policy to ML's region, Auto guided by it and (guarded
-    policy) plain Auto's own result *auto*."""
+    policy) plain Auto's own result *auto*.  *non_round* marks ML's own outline as
+    measured by its area (``area_radius``), like Auto's results in that mode."""
     gate = config.confidence_gate
     if config.policy == "prior":
         return _none(region, guided, gate) if guided is None else _from_auto(guided, region, frozenset())
@@ -128,7 +132,7 @@ def select_result(region: MLRegion | None, guided: EdgeResult | None, *, auto: E
         return _from_auto(guided, region, frozenset())
     if keep_plain:
         return _from_plain(auto, region, guided, config)
-    return _from_region(region, guided, gate)
+    return _from_region(region, guided, gate, non_round)
 
 
 def measure_frame(model: MLModel, raw: np.ndarray, *, params: EdgeParams = EdgeParams(),
@@ -145,13 +149,13 @@ def measure_frame(model: MLModel, raw: np.ndarray, *, params: EdgeParams = EdgeP
     gx, gy = model.gridx, model.gridy
     view = engine_view(raw, gx, gy, reference=model.reference, params=params) if cfg.refine else None
     region = ml_region(pred.probability, view, origin=(gx[0], gy[0]), seed=params.seed, prior=params.prior,
-                       config=cfg)
+                       config=cfg, non_round=params.non_round)
     guided = None
     if region is not None and cfg.policy != "contour":
         guided = detect_edge(raw, gx, gy, reference=model.reference,
                              params=replace(params, prior=(region.rc, region.cc, region.radius)))
     if cfg.policy == "guarded" and auto is None:
         auto = detect_edge(raw, gx, gy, reference=model.reference, params=params)
-    res = select_result(region, guided, auto=auto, config=cfg)
+    res = select_result(region, guided, auto=auto, config=cfg, non_round=params.non_round)
     flags = res.flags | ({FLAG_UNFAMILIAR} if pred.novelty > cfg.novelty_warn else set())
     return replace(res, flags=flags, novelty=pred.novelty)

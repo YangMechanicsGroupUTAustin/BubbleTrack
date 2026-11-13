@@ -3,6 +3,9 @@
 A reference must be bubble-free: "Use this frame" runs the same test the
 automatic choice applies to its candidates (``edge_pipeline.frame_has_bubble``)
 and asks before accepting a frame that seems to hold a bubble.
+
+"Bubble may be non-round" (Advanced) changes the radius definition of the next
+fit only: results already measured keep theirs, so the header says to fit again.
 """
 
 from __future__ import annotations
@@ -10,6 +13,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
+import numpy as np
 from PyQt6.QtWidgets import QMessageBox
 
 from bubbletrack.controller import edge_support
@@ -26,6 +30,14 @@ NO_REFERENCE_NEEDED = "none needed (bubble from frame 1)"
 NO_REFERENCE_FOUND = "not found — results may be less accurate"
 REFERENCE_QUESTION = ("Frame {n} seems to contain a bubble; the reference must be "
                       "bubble-free. Use it anyway?")
+NON_ROUND_ON = "Bubble may be non-round: on (R from the outline's area)"
+NON_ROUND_OFF = "Bubble may be non-round: off (R from the circle through the wall)"
+FIT_AGAIN = " — Fit again to apply"
+
+
+def non_round_status(on: bool, has_results: bool) -> str:
+    """The header line after "Bubble may be non-round" changed."""
+    return (NON_ROUND_ON if on else NON_ROUND_OFF) + (FIT_AGAIN if has_results else "")
 
 # Whether a source's first frame holds a bubble (read once per source).
 _first_frame_bubble: dict[tuple, bool] = {}
@@ -152,3 +164,13 @@ class EdgeSetup(BaseController):
     def clear(self) -> None:
         self._update(edge_seed=None)
         self.refresh_labels()
+
+    # -- radius definition ------------------------------------------------------ #
+
+    def announce_definition(self) -> None:
+        """After "Bubble may be non-round" changed: say which radius the next fit measures,
+        and that measured results keep theirs until fitted again (nothing is refitted)."""
+        radius = self.state.radius
+        fitted = radius is not None and bool(np.any(np.asarray(radius) > 0))
+        self.w.header.set_status(non_round_status(self.state.bubble_non_round, fitted),
+                                 _WARN if fitted else _OK)

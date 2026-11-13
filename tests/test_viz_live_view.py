@@ -40,7 +40,7 @@ def test_auto_live_frame_looks_like_the_result(auto_app):
 
     show_live_frame(state, window, 3, mask)
 
-    assert window.original_panel.legend_texts() == ["outline (measured)", "equal-area circle",
+    assert window.original_panel.legend_texts() == ["outline (measured)", "fitted circle",
                                                     "ROI"]
     right = window.binary_panel
     assert right._title_label.text() == ENGINE_VIEW_TITLE

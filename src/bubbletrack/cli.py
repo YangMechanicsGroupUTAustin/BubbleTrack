@@ -64,6 +64,11 @@ def _build_parser() -> argparse.ArgumentParser:
              "default) or at the outer extent (outer)",
     )
     parser.add_argument(
+        "--non-round", action="store_true",
+        help="Auto (reference frame) mode, --mode edge: the bubble may be non-round, so R is the "
+             "area-equivalent radius of the outline (default: the circle through the wall)",
+    )
+    parser.add_argument(
         "--reference", type=int, default=None, metavar="FRAME",
         help="Auto (reference frame) mode, --mode edge: 1-based bubble-free reference frame "
              "(default: chosen automatically)",
@@ -290,7 +295,8 @@ def _process_frames_edge(images: list[str], args: argparse.Namespace,
     print("Reference frame: "
           + (f"{ref_idx + 1}" if ref_idx is not None else "none (surface fallback)"))
     job = edge_pipeline.EdgeJob(
-        params=edge_pipeline.make_params(edge_definition=args.edge_definition),
+        params=edge_pipeline.make_params(edge_definition=args.edge_definition,
+                                         non_round=args.non_round),
         reference=reference, max_radius=max_radius,
     )
     n = len(images)

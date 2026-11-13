@@ -170,21 +170,23 @@ class TestLegendOnPanel:
 
 # -- what the fit overlay puts in the key -------------------------------------------
 
-def _fitted(mode: str = "edge", source: FitSource = FitSource.AUTO) -> AppState:
+def _fitted(mode: str = "edge", source: FitSource = FitSource.AUTO, flags=frozenset()) -> AppState:
     state = update_state(AppState.create_empty(), detection_mode=mode).with_results_initialized(3)
     state.radius[1] = 30.0
     state.circle_fit_par[1] = [60.0, 80.0]
     state.circle_xy[1] = _circle(120)
     state.fit_source[1] = source
+    state.fit_flags[1] = frozenset(flags)
     return state
 
 
-@pytest.mark.parametrize("mode, source, circle", [
-    ("edge", FitSource.AUTO, "equal-area circle"),
-    ("edge", FitSource.MANUAL, "fitted circle"),  # a circle through clicked points
-    ("intensity", FitSource.AUTO, "fitted circle"),  # classic modes fit a circle
+@pytest.mark.parametrize("mode, source, flags, circle", [
+    ("edge", FitSource.AUTO, (), "fitted circle"),  # Auto's default: the circle through the wall
+    ("edge", FitSource.AUTO, ("area_radius",), "equal-area circle"),  # "Bubble may be non-round"
+    ("edge", FitSource.MANUAL, (), "fitted circle"),  # a circle through clicked points
+    ("intensity", FitSource.AUTO, (), "fitted circle"),  # classic modes fit a circle
 ])
-def test_fit_overlay_names_its_circle(panel, mode, source, circle):
+def test_fit_overlay_names_its_circle(panel, mode, source, flags, circle):
     panel.set_image(np.zeros((150, 200)))
-    draw_fit_overlay(_fitted(mode, source), panel, 1)
+    draw_fit_overlay(_fitted(mode, source, flags), panel, 1)
     assert panel.legend_texts() == ["outline (measured)", circle]

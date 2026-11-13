@@ -61,6 +61,8 @@ class Region:
     fragment_area: float
     n_lobes: int
     anchor: str
+    hidden_arc: float = 0.0
+    """Fraction of the fitted circle's circumference outside the valid region (0 unless ``clipped``)."""
 
     @property
     def edge(self) -> np.ndarray:
@@ -260,4 +262,4 @@ def find_region(img: np.ndarray, level: float, exclude: np.ndarray, candidate: t
     return Region(mask=main, contour=contour, edge_mask=~closing, lengths=lengths,
                   visible=visible, hidden=hidden, perimeter=perimeter, hull_area=hull, clipped=clipped,
                   completed=completed, others=others, fragment_count=n_frag, fragment_area=frag_area,
-                  n_lobes=n_lobes, anchor=how)
+                  n_lobes=n_lobes, anchor=how, hidden_arc=len(arc) / cfg.arc_samples)
