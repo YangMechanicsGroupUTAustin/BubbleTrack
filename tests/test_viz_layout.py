@@ -71,11 +71,11 @@ class TestSplitter:
         assert 0.40 <= share <= 0.50, (images, chart_pane, strip)
 
     def test_saved_sizes_win_over_the_default(self, gui, temp_settings, qapp):
+        # A saved split the chart pane can honour: its minimum (chart 260 px +
+        # key-frame strip, ~384 px) clamps anything smaller, as it should.
         QSettings(temp_settings, QSettings.Format.IniFormat).setValue(
-            mw.SPLITTER_SETTINGS_KEY, [500, 200])
+            mw.SPLITTER_SETTINGS_KEY, [700, 400])
         window, _ = gui
-        # Tall enough that the chart pane's minimum (chart 260 px + key-frame strip)
-        # does not override the saved split, as it does on a 900 px screen.
         window.resize(1440, 1100)
         window.show()
         qapp.processEvents()
