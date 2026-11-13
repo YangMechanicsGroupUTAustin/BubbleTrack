@@ -14,57 +14,17 @@ from PyQt6.QtWidgets import (
 )
 
 from bubbletrack.model.conventions import roi_to_slice
+from bubbletrack.ui.brush_stroke import BrushStroke
 from bubbletrack.ui.circle_drag import CircleDrag, dashed_pen
-
-# A polyline whose length exceeds this multiple of its convex-hull perimeter
-# is not a traced contour (raster-ordered edge pixels zig-zag across the shape).
-_CONTOUR_LENGTH_RATIO = 2.0
-_MIN_CONTOUR_POINTS = 8
+from bubbletrack.ui.contour_shape import is_ordered_contour  # noqa: F401 (public here too)
 
 _VIEW_STYLE = {
     "normal": "border:1px solid rgba(255,255,255,0.06); border-radius:8px; background:#0c0d12;",
     "point": "border:2px solid #6366f1; border-radius:8px; background:#0c0d12;",
     "circle": "border:2px solid #6366f1; border-radius:8px; background:#0c0d12;",
+    "paint": "border:2px solid #22c55e; border-radius:8px; background:#0c0d12;",
     "roi": "border:2px solid #f59e0b; border-radius:8px; background:#0c0d12;",
 }
-
-
-def _hull_perimeter(points: np.ndarray) -> float:
-    """Perimeter of the convex hull of (N, 2) points (monotone chain)."""
-    pts = np.unique(np.asarray(points, dtype=float), axis=0)
-    if len(pts) < 3:
-        return 0.0
-    pts = pts[np.lexsort((pts[:, 1], pts[:, 0]))]
-
-    def half(seq):
-        out: list = []
-        for p in seq:
-            while len(out) >= 2:
-                (ax, ay), (bx, by) = out[-2], out[-1]
-                if (bx - ax) * (p[1] - ay) - (by - ay) * (p[0] - ax) > 0:
-                    break
-                out.pop()
-            out.append(p)
-        return out
-
-    hull = np.array(half(pts)[:-1] + half(pts[::-1])[:-1])
-    closed = np.vstack([hull, hull[:1]])
-    return float(np.sum(np.hypot(*np.diff(closed, axis=0).T)))
-
-
-def is_ordered_contour(points: np.ndarray | None) -> bool:
-    """True when *points* trace a closed outline in order (draw as a polyline).
-
-    Edge pixels collected in raster order jump back and forth across the
-    shape, so their path is many times longer than the outline itself.
-    """
-    if points is None or len(points) < _MIN_CONTOUR_POINTS:
-        return False
-    pts = np.asarray(points, dtype=float)
-    closed = np.vstack([pts, pts[:1]])
-    length = float(np.sum(np.hypot(*np.diff(closed, axis=0).T)))
-    hull = _hull_perimeter(pts)
-    return hull > 0 and length <= _CONTOUR_LENGTH_RATIO * hull
 
 
 def _cosmetic_pen(colour: str, width: float) -> QPen:
@@ -92,11 +52,17 @@ class ImagePanel(QWidget):
         Emitted in *circle* mode on release: scene (x, y) of the press (the
         centre), the radius to the release point and whether it was dragged
         (False: a click, radius 0).
+    stroke_drawn(object)
+        Emitted in *paint* mode on release: the stroke's scene (x, y) points.
+    brush_scrolled(int)
+        Mouse wheel in *paint* mode (+1 / -1 per notch; Ctrl+wheel zooms).
     """
 
     point_clicked = pyqtSignal(float, float)
     roi_selected = pyqtSignal(int, int, int, int)
     circle_drawn = pyqtSignal(float, float, float, bool)
+    stroke_drawn = pyqtSignal(object)
+    brush_scrolled = pyqtSignal(int)
     select_roi_clicked = pyqtSignal()
 
     def __init__(self, title: str = "Image", parent: QWidget | None = None):
@@ -115,8 +81,9 @@ class ImagePanel(QWidget):
 
         self._pixmap_item: QGraphicsPixmapItem | None = None
         self._overlay_items: list = []
-        self._mode = "normal"  # "normal" | "point" | "circle" | "roi"
+        self._mode = "normal"  # "normal" | "point" | "circle" | "paint" | "roi"
         self.circle_drag = CircleDrag(self._scene)
+        self.brush = BrushStroke(self._scene)
         self._image_size: tuple[int, int] | None = None  # (h, w)
         self._auto_fit = True  # follow the panel size until the user zooms
 
@@ -254,6 +221,15 @@ class ImagePanel(QWidget):
         self._scene.addItem(item)
         self._overlay_items.append(item)
 
+    def draw_rgba_overlay(self, rgba: np.ndarray) -> None:
+        """Lay an (H, W, 4) uint8 image over the frame (scene pixel = array pixel)."""
+        img = np.ascontiguousarray(rgba, dtype=np.uint8)
+        h, w = img.shape[:2]
+        qimg = QImage(img.tobytes(), w, h, 4 * w, QImage.Format.Format_RGBA8888)
+        item = self._scene.addPixmap(QPixmap.fromImage(qimg))
+        item.setZValue(1)
+        self._overlay_items.append(item)
+
     def draw_roi_rect(self, gridx: tuple[int, int], gridy: tuple[int, int],
                       colour: str = "#10b981"):
         """Draw an ROI rectangle (1-indexed coords)."""
@@ -282,22 +258,26 @@ class ImagePanel(QWidget):
         return self._mode
 
     def set_mode(self, mode: str):
-        """Set interaction mode: 'normal', 'point', 'circle' or 'roi'.
+        """Set interaction mode: 'normal', 'point', 'circle', 'paint' or 'roi'.
 
         | Mode   | Cursor       | Drag              | Border        |
         |--------|-------------|-------------------|---------------|
         | normal | default     | ScrollHandDrag    | subtle border |
         | point  | CrossCursor | NoDrag            | #6366f1 indigo|
         | circle | CrossCursor | draws a circle    | #6366f1 indigo|
+        | paint  | CrossCursor | paints a stroke   | #22c55e green |
         | roi    | CrossCursor | RubberBandDrag    | #f59e0b amber |
         """
         self._mode = mode
         if mode != "circle":
             self.circle_drag.cancel()
+        if mode != "paint":
+            self.brush.cancel()
+            self.brush.hide_hover()
         if mode == "roi":
             self._view.setDragMode(QGraphicsView.DragMode.RubberBandDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
-        elif mode in ("point", "circle"):
+        elif mode in ("point", "circle", "paint"):
             self._view.setDragMode(QGraphicsView.DragMode.NoDrag)
             self._view.setCursor(Qt.CursorShape.CrossCursor)
         else:
@@ -356,7 +336,16 @@ class _PanZoomView(QGraphicsView):
         self.setRenderHint(self.renderHints())
 
     def wheelEvent(self, event: QWheelEvent):
-        self._panel.zoom_by(1.15 if event.angleDelta().y() > 0 else 1 / 1.15)
+        up = event.angleDelta().y() > 0
+        ctrl = bool(event.modifiers() & Qt.KeyboardModifier.ControlModifier)
+        if self._panel._mode == "paint" and not ctrl:
+            self._panel.brush_scrolled.emit(1 if up else -1)
+            return
+        self._panel.zoom_by(1.15 if up else 1 / 1.15)
+
+    def leaveEvent(self, event) -> None:  # noqa: N802 (Qt override)
+        self._panel.brush.hide_hover()
+        super().leaveEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
@@ -372,15 +361,29 @@ class _PanZoomView(QGraphicsView):
         if self._panel._mode == "circle" and left:
             self._panel.circle_drag.press(self.mapToScene(event.pos()), event.position())
             return
+        if self._panel._mode == "paint" and left:
+            self._panel.brush.press(self.mapToScene(event.pos()))
+            return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if self._panel.circle_drag.active:
             self._panel.circle_drag.move(self.mapToScene(event.pos()))
             return
+        if self._panel._mode == "paint":
+            pos = self.mapToScene(event.pos())
+            self._panel.brush.hover(pos)
+            self._panel.brush.move(pos)
+            return
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent):
+        brush = self._panel.brush
+        if brush.active and event.button() == Qt.MouseButton.LeftButton:
+            points = brush.release(self.mapToScene(event.pos()))
+            if points:
+                self._panel.stroke_drawn.emit(points)
+            return
         drag = self._panel.circle_drag
         if drag.active and event.button() == Qt.MouseButton.LeftButton:
             drawn = drag.release(self.mapToScene(event.pos()), event.position())

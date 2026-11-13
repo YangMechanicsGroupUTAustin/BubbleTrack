@@ -120,9 +120,18 @@ class BatchWorker(QThread):
         max_radius: float = float("inf"),
         video_path: str | None = None,
         edge_job=None,
+        ml_job=None,
+        ml_stored=None,
+        frames=None,
     ):
         super().__init__()
+        # Explicit frames to process (any order / gaps) instead of start..end.
+        self._frames = tuple(range(start, end + 1)) if frames is None else tuple(frames)
         self._edge_job = edge_job  # EdgeJob when detection_mode == "edge"
+        # ML assist (Edge only): each pool worker trains the model from the
+        # MLJob once; ml_stored = {frame: StoredAuto} plain-Auto results to reuse.
+        self._ml_job = ml_job if edge_job is not None else None
+        self._ml_stored = dict(ml_stored or {})
         self._images = images
         self._video_path = video_path  # decode frames here instead of by path
         self._start = start        # 0-indexed
@@ -147,6 +156,8 @@ class BatchWorker(QThread):
         self._stop = True
 
     def _frame_args(self, i: int, source) -> tuple:
+        if self._ml_job is not None:
+            return (i, source, self._gridx, self._gridy, self._edge_job, self._ml_stored.get(i))
         if self._edge_job is not None:
             return (i, source, self._gridx, self._gridy, self._edge_job)
         # Tuple order MUST match _process_single_frame.
@@ -159,6 +170,16 @@ class BatchWorker(QThread):
             self._area_max_regions, self._max_radius,
         )
 
+    def _task(self) -> tuple:
+        """(per-frame function, executor keyword arguments) of this run."""
+        if self._ml_job is not None:
+            from bubbletrack.model import ml_pipeline
+            return ml_pipeline.process_frame, {"initializer": ml_pipeline.init_worker,
+                                               "initargs": (self._ml_job,)}
+        if self._edge_job is not None:
+            return _process_single_frame_edge, {}
+        return _process_single_frame, {}
+
     def _emit_failure(self, idx: int, exc: Exception) -> None:
         logger.error("Frame %d failed: %s", idx, exc)
         self.frame_error.emit(idx, str(exc))
@@ -167,7 +188,7 @@ class BatchWorker(QThread):
         )
 
     def run(self):
-        total = self._end - self._start + 1
+        total = len(self._frames)
         n_workers = min(4, os.cpu_count() or 1)
         logger.info(
             "Batch processing frames %d-%d with %d workers",
@@ -187,14 +208,13 @@ class BatchWorker(QThread):
 
         # Bounded submission: only a few frames are in flight at once, so
         # memory stays flat for long sequences and decoded video frames.
-        frame_iter = iter(range(self._start, self._end + 1))
+        frame_iter = iter(self._frames)
         max_in_flight = 2 * n_workers
         done_count = 0
         try:
             executor = ThreadPoolExecutor if self.inline else ProcessPoolExecutor
-            process = (_process_single_frame_edge if self._edge_job is not None
-                       else _process_single_frame)
-            with executor(max_workers=n_workers) as pool:
+            process, pool_kw = self._task()
+            with executor(max_workers=n_workers, **pool_kw) as pool:
                 pending: dict = {}
 
                 def submit_next() -> bool:

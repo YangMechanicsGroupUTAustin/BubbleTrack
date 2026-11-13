@@ -66,6 +66,10 @@ class AutoController(BaseController):
         self._autosave_failed = False
         self._edge_job = None  # the run's EdgeJob, reused by tracking
         self._run_notes: list[str] = []  # e.g. what tracking changed
+        self._ml_run = False  # the run measures with ML assist
+        self._run_frames: tuple[int, ...] = ()  # frames of the current / last run
+        # ML assist for Fit All: () -> (MLJob | None, note); set by MLAssistController.
+        self.ml_job_provider = None
 
     # -- run state -------------------------------------------------------- #
 
@@ -128,7 +132,42 @@ class AutoController(BaseController):
             except Exception as exc:
                 self.w.header.set_status(f"Cannot prepare Auto fit: {exc}", "#ef4444")
                 return
+        ml_job, ml_note = None, ""
+        if edge_job is not None and self.ml_job_provider is not None:
+            ml_job, ml_note = self.ml_job_provider()  # ML assist is on: Fit All uses it
+        self._launch(start_idx, end_idx, protected, edge_job, ml_job=ml_job,
+                     notes=[ml_note] if ml_note else [])
 
+    def run_ml_assist(self, ml_job, *, protected: frozenset[int], stored: dict,
+                      frames=None) -> bool:
+        """ML assist's Apply: re-measure *frames* (default: all) but *protected*.
+
+        *stored* ({frame: StoredAuto}) are the plain-Auto results to reuse.
+        Runs like Fit All (progress, Stop, tracking); False if it cannot start.
+        """
+        if not self.state.images or self.state.detection_mode != "edge":
+            return False
+        if self.is_busy():
+            self.w.header.set_status("A fit is already running", "#f59e0b")
+            return False
+        try:
+            edge_job = edge_support.build_job(self.state, self._get_max_radius())
+        except Exception as exc:
+            self.w.header.set_status(f"Cannot prepare ML assist: {exc}", "#ef4444")
+            return False
+        n = len(self.state.images)
+        todo = sorted({int(i) for i in (range(n) if frames is None else frames)
+                       if 0 <= int(i) < n} - set(protected))
+        if not todo:
+            self.w.header.set_status("Nothing to measure: every frame is confirmed", "#f59e0b")
+            return False
+        self._launch(todo[0], todo[-1], frozenset(protected), edge_job,
+                     ml_job=ml_job, stored=stored, frames=todo)
+        return True
+
+    def _launch(self, start_idx: int, end_idx: int, protected: frozenset[int], edge_job, *,
+                ml_job=None, stored: dict | None = None, notes=(), frames=None) -> None:
+        """Start the background run of frames start_idx..end_idx, or of *frames*."""
         worker = BatchWorker(
             images=self.state.images,
             start=start_idx,
@@ -150,6 +189,9 @@ class AutoController(BaseController):
             video_path=(self.state.video_path
                         if self.state.video_reader is not None else None),
             edge_job=edge_job,
+            ml_job=ml_job,
+            ml_stored=stored,
+            frames=frames,
         )
         # Every slot is bound to *this* worker: results from an older run
         # (e.g. one still draining after Stop) can never reach new arrays.
@@ -165,7 +207,9 @@ class AutoController(BaseController):
         self._worker = worker
         self._tracker = None
         self._edge_job = edge_job
-        self._run_notes = []
+        self._run_notes = list(notes)
+        self._ml_run = ml_job is not None and edge_job is not None
+        self._run_frames = tuple(range(start_idx, end_idx + 1) if frames is None else frames)
         self._protected = protected
         self._stop_requested = False
         self._frame_errors = 0
@@ -271,6 +315,9 @@ class AutoController(BaseController):
         if self.state.fit_confidence is not None:
             self.state.fit_confidence[idx] = meta.get("confidence", np.nan)
         edge_support.store_meta(self.state, idx, meta)
+        source = meta.get("source")  # ML assist: AUTO or ML for a stored result
+        if source is not None and self.state.fit_source is not None and self.state.radius[idx] > 0:
+            self.state.fit_source[idx] = source
 
     def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
         if worker is self._worker:
@@ -323,6 +370,7 @@ class AutoController(BaseController):
         else:
             eta_text = "Calculating..."
         self.w.left_panel.automatic_tab.set_progress(current, total, eta_text)
+        self.bus.emit("run_progress", current, total)
 
     def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi,
                             rc: float, cc: float, count: int) -> None:
@@ -452,6 +500,9 @@ class AutoController(BaseController):
         scores = refresh_chart(self.state, self.w)
 
         notes = list(self._run_notes)
+        if self._ml_run and self.state.radius is not None:
+            from bubbletrack.model.ml_assist import run_counts, run_summary
+            notes.append(run_summary(run_counts(self.state, self._run_frames)))
         if self._frame_errors:
             notes.append(f"{self._frame_errors} frame(s) could not be read")
         if self._autosave_failed:
@@ -473,6 +524,9 @@ class AutoController(BaseController):
         # frames it re-measured.
         self.bus.emit("tracking_review", tuple(review))
         self._results_changed()
+        self.bus.emit("run_finished", {"stopped": stopped, "ml": self._ml_run,
+                                       "edge": self._edge_job is not None,
+                                       "frames": self._run_frames})
 
     # ------------------------------------------------------------------ #
     #  Batch processing of many sources (image folders and videos)

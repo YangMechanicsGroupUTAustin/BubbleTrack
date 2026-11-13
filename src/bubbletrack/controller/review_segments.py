@@ -39,7 +39,12 @@ CATEGORIES: tuple[Category, ...] = (
     Category("shape", "Irregular shape", frozenset({
         "non_circular", "multiple_edges", "fragmented", "clipped_completed", "shoulder"})),
     Category("collapse", "Near collapse", frozenset({"collapse"})),
+    Category("ml", "ML result", frozenset({"ml_outline", "ml_disagrees"})),
 )
+# A result's source decides its row whatever else is flagged: every ML assist
+# result to check (its own outline, or Auto's where ML saw the bubble elsewhere)
+# stays in one run instead of splitting by reason; the tooltip names the reason.
+SOURCE_CATEGORIES: tuple[tuple[str, str], ...] = (("ml_outline", "ml"), ("ml_disagrees", "ml"))
 OTHER = Category("other", "Other", frozenset())
 _BY_REASON = {reason: c.key for c in CATEGORIES for reason in c.reasons}
 _LABELS = {c.key: c.label for c in (*CATEGORIES, OTHER)}
@@ -90,7 +95,11 @@ class ReviewSegment:
 
 
 def category_of(item: ReviewItem) -> str:
-    """The category of an item's most severe reason that can list a frame."""
+    """The category of an item's most severe reason that can list a frame
+    (a source category, e.g. ML result, first)."""
+    for reason, key in SOURCE_CATEGORIES:
+        if reason in item.reasons:
+            return key
     deciding = next((r for r in item.reasons if r not in CONTEXT_REASONS),
                     item.reasons[0] if item.reasons else "")
     return _BY_REASON.get(deciding, OTHER.key)

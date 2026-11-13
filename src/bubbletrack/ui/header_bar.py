@@ -33,3 +33,6 @@ class HeaderBar(QWidget):
     def set_status(self, text: str, colour: str = "#10b981"):
         self._status_label.setText(text)
         self._status_dot.setStyleSheet(f"color:{colour}; font-size:10px;")
+
+    def status_text(self) -> str:
+        return self._status_label.text()

@@ -29,7 +29,9 @@ FRAMES_DIR = "frames"
 ROLE_SELECTED = "selected"    # the frames the user reported
 ROLE_CONTEXT = "context"      # neighbours, for tracking and for the eye
 ROLE_REFERENCE = "reference"  # Auto mode's bubble-free reference frame only
-ROLES = (ROLE_SELECTED, ROLE_CONTEXT, ROLE_REFERENCE)
+ROLE_EXAMPLE = "example"      # a frame ML assist was taught on (replays retrain from it)
+ROLES = (ROLE_SELECTED, ROLE_CONTEXT, ROLE_REFERENCE, ROLE_EXAMPLE)
+_NOT_MEASURED = (ROLE_REFERENCE, ROLE_EXAMPLE)
 
 LABEL_BUBBLE = "bubble"          # the user's circle is the right answer
 LABEL_NO_BUBBLE = "no_bubble"    # right answer: no result on this frame
@@ -121,8 +123,8 @@ class HardCase:
         return next((f for f in self.frames if f.index == index), None)
 
     def measured_frames(self) -> tuple[CaseFrame, ...]:
-        """Selected and context frames in frame order (not the reference-only one)."""
-        return tuple(sorted((f for f in self.frames if f.role != ROLE_REFERENCE),
+        """Selected and context frames in frame order (not reference or example frames)."""
+        return tuple(sorted((f for f in self.frames if f.role not in _NOT_MEASURED),
                             key=lambda f: f.index))
 
 

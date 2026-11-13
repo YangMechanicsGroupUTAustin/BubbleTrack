@@ -189,6 +189,10 @@ class ReviewPanel(QWidget):
     def texts(self) -> list[str]:
         return [segment_text(s, self._images) for s in self._visible]
 
+    def add_banner(self, widget: QWidget) -> None:
+        """Show *widget* (e.g. a hint) between the summary line and the list."""
+        self.layout().insertWidget(1, widget)
+
     # -- type filter ------------------------------------------------------- #
 
     def hidden_categories(self) -> frozenset[str]:

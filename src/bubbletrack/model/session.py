@@ -77,7 +77,28 @@ def session_parameters(state) -> dict:
         "um2px": state.um2px,
         "fps": state.fps,
         "rmax_fit_length": state.rmax_fit_length,
+        "ml_assist": bool(getattr(state, "ml_assist", False)),
+        "ml_examples": examples_to_json(getattr(state, "ml_examples", None)),
     }
+
+
+def examples_to_json(examples) -> dict | None:
+    """ML assist examples (``MLExamples``) as plain JSON data, None stays None."""
+    return None if examples is None else examples.to_dict()
+
+
+def examples_from_json(data):
+    """``MLExamples`` from :func:`examples_to_json` data; None when absent or unreadable
+    (a damaged entry must not stop a session from loading: it is logged and dropped)."""
+    if data is None:
+        return None
+    from bubbletrack.model.teach.examples import MLExamples  # numpy only, but lazy
+
+    try:
+        return MLExamples.from_dict(data)
+    except (ValueError, TypeError) as exc:
+        logger.warning("ML assist examples could not be read (dropped): %s", exc)
+        return None
 
 
 def save_session(filepath: str, state) -> None:
@@ -200,6 +221,10 @@ def load_session(filepath: str) -> dict:
         data["edge_seed"] = tuple(float(v) for v in data["edge_seed"])
     if data.get("fit_source") is not None:
         data["fit_source"] = np.array(data["fit_source"], dtype=np.int8)
+    if "ml_examples" in data:
+        data["ml_examples"] = examples_from_json(data["ml_examples"])
+    if "ml_assist" in data:
+        data["ml_assist"] = data["ml_assist"] is True and data.get("ml_examples") is not None
 
     # Reconstruct tuples from lists
     if "gridx" in data and isinstance(data["gridx"], list):

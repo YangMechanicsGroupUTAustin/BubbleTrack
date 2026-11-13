@@ -20,6 +20,7 @@ class FitSource(IntEnum):
     NEIGHBOR = 4  # refit with a circle prior from neighbouring frames
     TRACKED = 5  # re-measured by the sequence solver near its tracked circle
     GUIDED = 6  # drawn circle, wall measured by Auto (the Manual tab's "Drag a circle")
+    ML = 7  # ML assist's own outline (Auto found no wall): computed, always reviewed
 
 
 GUIDED_COUNTS_AS_CONFIRMED = True
