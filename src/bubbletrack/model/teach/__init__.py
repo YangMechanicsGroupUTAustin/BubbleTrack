@@ -45,13 +45,14 @@ from bubbletrack.model.teach.measure import (
 from bubbletrack.model.teach.model import MLError, MLModel, MLUnavailableError, Prediction, TrainInfo, train_model
 from bubbletrack.model.teach.region import MLRegion, ml_region
 from bubbletrack.model.teach.sampling import circle_masks, training_pixels
+from bubbletrack.model.teach.selftrain import SelfTrainConfig, SelfTrainPlan, plan_self_training
 from bubbletrack.model.teach.suggest import suggest_frames
 
 __all__ = [
     "BACKGROUND", "BUBBLE", "FLAG_DISAGREES", "FLAG_GUIDED", "FLAG_OUTLINE", "FLAG_UNFAMILIAR", "LABELS",
     "SOURCE_AUTO", "SOURCE_AUTO_ML", "SOURCE_ML", "SOURCE_NONE", "ExampleConfig", "FeatureConfig", "FeatureStack",
     "ForestConfig", "FrameStrokes", "MLConfig", "MLError", "MLExamples", "MLModel", "MLRegion", "MLResult",
-    "MLUnavailableError", "MeasureConfig", "Prediction", "TrainInfo", "circle_masks", "compute_features",
-    "feature_names", "measure_frame", "ml_region", "select_result", "stroke_pixels", "suggest_frames",
-    "train_model", "training_pixels", "wall_agrees",
+    "MLUnavailableError", "MeasureConfig", "Prediction", "SelfTrainConfig", "SelfTrainPlan", "TrainInfo",
+    "circle_masks", "compute_features", "feature_names", "measure_frame", "ml_region", "plan_self_training",
+    "select_result", "stroke_pixels", "suggest_frames", "train_model", "training_pixels", "wall_agrees",
 ]
