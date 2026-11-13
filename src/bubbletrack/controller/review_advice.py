@@ -95,10 +95,11 @@ def advise(state: AppState, frame: int, item: ReviewItem | None,
         return Advice(NONE, NOT_FLAGGED)
     if any(reason in item.reasons for reason in _LIKELY_WRONG):
         return Advice(FIX, f"{problem} Fix it if the outline is off the bubble wall.")
+    # The circle may be off the wall here: the text says when to accept, no button is pushed.
     if category == "clipped" and CLIPPED_NOT_ROUND in item.reasons:
-        return Advice(ACCEPT, f"{problem} {CLIPPED_NOT_ROUND_TEXT}")
+        return Advice(NONE, f"{problem} {CLIPPED_NOT_ROUND_TEXT}")
     if category == "shape" and NON_CIRCULAR in item.reasons:
-        return Advice(ACCEPT, f"{problem} {NOT_ROUND_TEXT}")
+        return Advice(NONE, f"{problem} {NOT_ROUND_TEXT}")
     return Advice(ACCEPT, f"{problem} Accept it if the outline sits on the bubble wall.")
 
 

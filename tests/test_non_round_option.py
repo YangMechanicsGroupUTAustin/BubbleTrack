@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from bubbletrack.controller.display_mixin import EQUAL_AREA_CIRCLE, FITTED_CIRCLE, circle_legend
-from bubbletrack.controller.review_advice import ACCEPT, FIX, advise
+from bubbletrack.controller.review_advice import FIX, NONE, advise
 from bubbletrack.controller.review_queue import GUESS, build_review_items
 from bubbletrack.controller.review_segments import build_segments, category_label, category_of
 from bubbletrack.model.config import load_config, save_config, validate_config
@@ -163,11 +163,15 @@ def test_a_well_fitting_clipped_frame_is_information_only():
 
 def test_advice_in_plain_words(flagged):
     state, items = flagged
+    # The circle may be off the wall: no button is recommended, the text says
+    # when to accept (Accept stays available) and when to change the setting.
     oval = advise(state, 0, items[0])
-    assert oval.action == ACCEPT and oval.text.startswith("Outline not round here.")
+    assert oval.action == NONE and oval.can_accept
+    assert oval.text.startswith("Outline not round here.")
     assert 'tick "Bubble may be non-round"' in oval.text and "Fit again" in oval.text
     cut = advise(state, 6, items[6])
-    assert cut.action == ACCEPT and cut.text.startswith("Cut by the image edge here.")
+    assert cut.action == NONE and cut.can_accept
+    assert cut.text.startswith("Cut by the image edge here.")
     assert "circle may be off" in cut.text
     unmeasurable = advise(state, 12, items[12])
     assert unmeasurable.action == FIX and unmeasurable.guess and unmeasurable.can_accept
