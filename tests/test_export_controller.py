@@ -63,7 +63,9 @@ class _FakePanel:
         )
 
 
-def _make_controller(radius: np.ndarray):
+def _make_controller(radius: np.ndarray, *, physical_set: bool = True):
+    """A controller over *radius*; with *physical_set*, frame rate and scale count
+    as set for the recording (as after a session restored them)."""
     n = len(radius)
     state = AppState(
         folder_path="",
@@ -76,12 +78,15 @@ def _make_controller(radius: np.ndarray):
     window = SimpleNamespace(
         status_bar=SimpleNamespace(update_scale=lambda _scale: None),
     )
+    bus = EventBus()
     ctrl = ec.ExportController(
-        EventBus(),
+        bus,
         lambda: holder["state"],
         lambda s: holder.update(state=s),
         window,
     )
+    if physical_set:
+        bus.emit(ec.SESSION_RESTORED)
     return ctrl
 
 
@@ -231,3 +236,14 @@ class TestExportMetadata:
 
         rows = list(load_workbook(str(out))["Metadata"].iter_rows(values_only=True))
         self._check_meta(dict(rows[1:]), panel)
+
+    def test_pixel_export_without_a_set_scale_records_it_as_unknown(self, tmp_path):
+        import json
+
+        panel = _FakePanel(fmt="csv", fps=1e6, scale=3.2, fit_length=7)
+        ctrl = _make_controller(_smooth_radius(), physical_set=False)
+        ctrl.export_pixel(panel, str(tmp_path / "px.csv"))
+        meta = json.loads((tmp_path / "px.meta.json").read_text(encoding="utf-8"))
+        assert meta["fps"] is None and meta["um2px"] is None
+        header = (tmp_path / "px.csv").read_text(encoding="utf-8").splitlines()[0]
+        assert "Radius_um" not in header and "Time_s" not in header

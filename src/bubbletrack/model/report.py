@@ -24,6 +24,7 @@ def build_report_parameters(
     *,
     fps: float | None = None,
     um2px: float | None = None,
+    physical_set: bool = True,
 ) -> dict[str, str]:
     """Return the "Parameters" section of the report as label -> text.
 
@@ -34,6 +35,9 @@ def build_report_parameters(
     fps, um2px : float or None
         Post-processing values as shown in the panel.  When given they are
         printed instead of the (possibly stale) values stored in *state*.
+    physical_set : bool
+        False when frame rate and scale were not set for this recording:
+        they print as "not set" rather than as values nobody chose.
     """
     fps_value = state.fps if fps is None else fps
     um2px_value = state.um2px if um2px is None else um2px
@@ -44,8 +48,8 @@ def build_report_parameters(
         "Threshold": f"{state.img_thr:.2f}",
         "Removing Factor": str(state.removing_factor),
         "ROI": f"rows {state.gridx}, cols {state.gridy}",
-        "FPS": f"{fps_value:.0f} Hz",
-        "Scale": f"{um2px_value:.2f} um/px",
+        "FPS": f"{fps_value:.0f} Hz" if physical_set else "not set",
+        "Scale": f"{um2px_value:.2f} um/px" if physical_set else "not set",
     }
 
 
@@ -118,6 +122,7 @@ def generate_report(
     *,
     fps: float | None = None,
     um2px: float | None = None,
+    physical_set: bool = True,
 ) -> None:
     """Generate a PDF report with parameters, statistics, and R-t chart.
 
@@ -131,6 +136,8 @@ def generate_report(
         Optional path to a chart screenshot to embed.
     fps, um2px : float or None
         Panel values to print; default to the values stored in *state*.
+    physical_set : bool
+        False prints frame rate and scale as "not set".
 
     Raises
     ------
@@ -149,7 +156,8 @@ def generate_report(
     pdf.cell(0, 6, f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     pdf.ln(10)
 
-    _print_section(pdf, "Parameters", build_report_parameters(state, fps=fps, um2px=um2px))
+    _print_section(pdf, "Parameters", build_report_parameters(
+        state, fps=fps, um2px=um2px, physical_set=physical_set))
 
     # Statistics
     if state.radius is not None:
