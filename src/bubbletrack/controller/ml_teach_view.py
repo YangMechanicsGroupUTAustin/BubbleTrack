@@ -10,10 +10,18 @@ from bubbletrack.controller.ml_preview import FramePreview
 from bubbletrack.model.ml_pipeline import FLAG_DISAGREES, FLAG_UNFAMILIAR
 from bubbletrack.model.teach import MLExamples
 from bubbletrack.ui.image_compare import CompareMode
-from bubbletrack.ui.ml_images import OUTLINE_COLOUR, stroke_overlay, thumbnail, tint_image, view_grey
+from bubbletrack.ui.ml_images import (
+    BACKGROUND_COLOUR, BUBBLE_COLOUR, OUTLINE_COLOUR, stroke_overlay, thumbnail, tint_image,
+    view_grey,
+)
 from bubbletrack.ui.ml_teach_panel import THUMB_SIZE
+from bubbletrack.ui.overlay_legend import LegendEntry
 
 PREVIEW_TITLE = "ML assist: P(bubble)"
+# Colour key lines of the teaching pictures.
+PAINTED_BUBBLE_KEY = LegendEntry("painted: bubble", BUBBLE_COLOUR, "fill")
+PAINTED_BACKGROUND_KEY = LegendEntry("painted: background", BACKGROUND_COLOUR, "fill")
+PROBABILITY_KEY = LegendEntry("green = likely bubble", BUBBLE_COLOUR, "fill")
 SOURCE_TEXT = {"auto_ml": "Auto (ML-guided)", "auto": "Auto", "ml": "ML outline", "none": "no result"}
 
 
@@ -50,7 +58,9 @@ def draw_strokes(window, state, idx: int) -> None:
         return
     overlay = stroke_overlay(state.cur_img.shape[:2], strokes.bubble, strokes.background)
     if overlay is not None:
-        window.original_panel.draw_rgba_overlay(overlay)
+        keys = ((PAINTED_BUBBLE_KEY,) if strokes.bubble else ()) + \
+            ((PAINTED_BACKGROUND_KEY,) if strokes.background else ())
+        window.original_panel.draw_rgba_overlay(overlay, keys)
 
 
 def show_preview(window, state, preview: FramePreview) -> None:
@@ -63,6 +73,8 @@ def show_preview(window, state, preview: FramePreview) -> None:
     panel = window.binary_panel
     panel.set_title(PREVIEW_TITLE)
     panel.set_image_rgb(rgb)
+    if preview.probability is not None:
+        panel.add_legend_entry(PROBABILITY_KEY)
     fit = preview.fit.fit
     if fit.radius > 0 and len(fit.edge_xy):
         panel.draw_fit_outline(np.asarray(fit.edge_xy, float) - roi_origin(state), OUTLINE_COLOUR)

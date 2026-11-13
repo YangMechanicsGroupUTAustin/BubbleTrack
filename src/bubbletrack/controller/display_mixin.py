@@ -19,10 +19,14 @@ from bubbletrack.model.detection import detect_bubble_with_mode, measure_detecti
 from bubbletrack.model.export import locate_rmax
 from bubbletrack.model.image_io import load_and_normalize, normalize_frame
 from bubbletrack.model.quality import compute_all_quality_scores
+from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.sequence import detect_cycles
 from bubbletrack.model.state import AppState, update_state
 from bubbletrack.ui.image_compare import CompareMode, create_overlay, create_wipe
+from bubbletrack.ui.overlay_legend import (
+    CIRCLE_COLOUR, OUTLINE_COLOUR, PAINT_BUBBLE_COLOUR, LegendEntry,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -190,6 +194,8 @@ def display_frame(
             else:
                 composite = create_wipe(cur_img, full_bin)
             window.original_panel.set_image_rgb(composite)
+            if mode is CompareMode.OVERLAY:
+                window.original_panel.add_legend_entry(MASK_TINT_KEY)
         else:
             # Image only (default) or side by side: the raw frame on the left;
             # the mask panel is filled either way (it is hidden in IMAGE mode)
@@ -233,6 +239,9 @@ def run_display_hooks(window, state: AppState, idx: int) -> None:
 MASK_TITLE = "Binary Mask"
 ENGINE_VIEW_TITLE = "Auto view: frame \u00f7 reference"
 _VIEW_WHITE = 1.25  # view value shown as white: background (1.0) is light grey
+MASK_TINT_KEY = LegendEntry("mask", PAINT_BUBBLE_COLOUR, "fill")  # the overlay view's green tint
+EQUAL_AREA_CIRCLE = "equal-area circle"  # Auto: R = sqrt(area / pi) of the outline
+FITTED_CIRCLE = "fitted circle"  # classic modes and clicked points: a circle fit
 
 
 def engine_view_or_none(state: AppState, idx: int) -> np.ndarray | None:
@@ -262,9 +271,15 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
     xy = state.circle_xy[idx] if state.circle_xy is not None else None
     origin = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
     if xy is not None and state.radius is not None and state.radius[idx] > 0:
-        panel.draw_fit_outline(np.asarray(xy, dtype=float) - origin, "#ef4444")
+        panel.draw_fit_outline(np.asarray(xy, dtype=float) - origin, OUTLINE_COLOUR)
     else:  # no result: Auto's rejected guess, if any, dashed
         suggestion_view.draw_guess(state, panel, idx, offset=origin)
+
+
+def circle_legend(state: AppState, idx: int) -> str:
+    """What frame *idx*'s drawn circle is: Auto's equal-area circle or a fitted one."""
+    manual = state.fit_source is not None and state.fit_source[idx] == FitSource.MANUAL
+    return EQUAL_AREA_CIRCLE if state.detection_mode == "edge" and not manual else FITTED_CIRCLE
 
 
 def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
@@ -282,9 +297,10 @@ def draw_fit_overlay(state: AppState, panel, idx: int) -> None:
     if not is_area and state.circle_fit_par is not None \
             and np.isfinite(state.circle_fit_par[idx]).all():
         rc, cc = state.circle_fit_par[idx]
-        panel.draw_circle(rc, cc, state.radius[idx], "#6366f1")
+        panel.draw_circle(rc, cc, state.radius[idx], CIRCLE_COLOUR,
+                          legend=circle_legend(state, idx))
     if state.circle_xy is not None and state.circle_xy[idx] is not None:
-        panel.draw_fit_outline(state.circle_xy[idx], "#ef4444")
+        panel.draw_fit_outline(state.circle_xy[idx], OUTLINE_COLOUR)
 
 
 def chart_scores(state: AppState) -> tuple[np.ndarray, str] | None:
