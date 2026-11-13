@@ -167,7 +167,8 @@ class AppController:
 
     def _on_undo(self) -> None:
         """Ctrl+Z: the last clicked edge point while selecting points, else the
-        newest manual fix (points or circle), clear or automatic re-track."""
+        newest manual fix (points or circle), clear, accepted guess or
+        automatic re-track."""
         if not self.manual_ctrl.undo_last_point():
             self.circle_ctrl.undo()
 
@@ -629,6 +630,12 @@ class AppController:
                 display_frame(self._state, self.w, idx, self._set_state, self._image_cache)
         elif self._state.fit_confidence is not None:
             self._state.fit_confidence[idx] = fit.confidence
+        if fit.radius <= 0 and self._state.radius[idx] <= 0:
+            # Nothing to keep: the new attempt's guess (or none) replaces the old one.
+            edge_support.store_meta(self._state, idx, {"flags": fit.flags, "metrics": fit.metrics,
+                                                       "suggestion": fit.suggestion})
+            if self._state.image_no == idx:
+                display_frame(self._state, self.w, idx, self._set_state, self._image_cache)
         text, colour = edge_support.status_text(idx, fit)
         if fit.radius <= 0 and self._state.radius[idx] > 0:
             text += f"; kept previous result (r = {self._state.radius[idx]:.1f} px)"

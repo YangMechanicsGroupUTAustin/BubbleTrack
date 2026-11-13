@@ -19,6 +19,7 @@ from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.state import clear_frame_result
+from bubbletrack.model.suggestion import set_suggestion
 from bubbletrack.model.undo import UndoStack
 from bubbletrack.ui.manual_tab import TOOL_POINTS
 
@@ -144,6 +145,7 @@ class ManualController(BaseController):
                 self.state.region_count[idx] = 0
             if self.state.fit_source is not None:
                 self.state.fit_source[idx] = FitSource.MANUAL
+            set_suggestion(self.state, idx, None)  # the user's fit replaces Auto's guess
             self._history.push(record_edit(self.state, f"manual fit on frame {idx + 1}", before))
 
             # Clear old overlays before drawing new results

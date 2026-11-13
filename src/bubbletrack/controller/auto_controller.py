@@ -331,6 +331,7 @@ class AutoController(BaseController):
             return  # keep the user's manual fit
 
         state = self.state
+        edge_support.clear_suggestion(state, idx)  # an Edge run's frame_meta brings the new guess
         state.radius[idx] = radius
         if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
             state.circle_fit_par[idx] = [rc, cc]

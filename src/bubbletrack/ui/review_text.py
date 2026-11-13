@@ -13,7 +13,7 @@ from collections.abc import Sequence
 
 import numpy as np
 
-from bubbletrack.controller.review_queue import ReviewItem
+from bubbletrack.controller.review_queue import GUESS, ReviewItem
 from bubbletrack.controller.review_segments import ReviewSegment
 
 _TRAILING_DIGITS = re.compile(r"(\d+)$")
@@ -28,6 +28,7 @@ REASON_LABELS: dict[str, str] = {
     "lost": "lost track",
     "cloud": "bubble cloud",
     "rejected": "no result",
+    GUESS: "Auto's guess available",
     "disagree": "changed by tracking",
     "reacquired": "found again after a loss",
     "jump": "sudden jump",
@@ -110,7 +111,8 @@ def tooltip_lines(segment: ReviewSegment, images: Sequence[str]) -> list[str]:
     if segment.is_single:
         item = segment.items[0]
         why = ", ".join(reason_text(r, item.confidence) for r in item.reasons)
-        return [segment_title(segment, images), segment.label, f"Why: {why}"]
+        return [segment_title(segment, images), segment.label, f"Why: {why}",
+                *guess_lines(segment)]
     first, last = file_tag(images, segment.start), file_tag(images, segment.end)
     head = segment_title(segment, images)
     if first and last:
@@ -121,8 +123,22 @@ def tooltip_lines(segment: ReviewSegment, images: Sequence[str]) -> list[str]:
     conf = [i.confidence for i in segment.items if np.isfinite(i.confidence)]
     if conf:
         lines.append(f"Confidence {min(conf):.2f}{DASH}{max(conf):.2f}")
+    lines.extend(guess_lines(segment))
     lines.append(STEP_HINT)
     return lines
+
+
+def guess_lines(segment: ReviewSegment) -> list[str]:
+    """What Accept does on a row with Auto's guesses (none: no line)."""
+    guessed = sum(GUESS in item.reasons for item in segment.items)
+    if not guessed:
+        return []
+    if segment.is_single:
+        return ["Accept (A) stores Auto's guess (dashed outline) as the result"]
+    empty = sum("rejected" in item.reasons and GUESS not in item.reasons
+                for item in segment.items)  # no result and no guess: "no bubble"
+    text = f"Accept (A) stores Auto's guess on {guessed} frame{'s' if guessed != 1 else ''}"
+    return [text + (f"; {empty} without one are locked as no bubble" if empty else "")]
 
 
 def detail_text(item: ReviewItem | None, frame: int, images: Sequence[str],

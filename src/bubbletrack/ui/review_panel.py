@@ -46,7 +46,8 @@ class ReviewPanel(QWidget):
 
     ACTIONS = ("accept", "refit", "refit_neighbors", "circle", "manual", "delete", "skip")
     _BUTTONS = (  # (action, label, tooltip), laid out in pairs
-        ("accept", "Accept (A)", "Keep the results of the whole row and lock them against Fit All"),
+        ("accept", "Accept (A)", "Keep the results of the whole row and lock them against Fit All "
+                                 "(a frame showing Auto's dashed guess gets the guess)"),
         ("skip", "Skip (S)", "Leave the row as it is and drop it from the queue"),
         ("refit", "Refit (R)", "Run detection again on every frame of the row"),
         ("refit_neighbors", "Neighbours (N)",

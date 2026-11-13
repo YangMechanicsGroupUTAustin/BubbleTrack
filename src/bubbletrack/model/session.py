@@ -12,6 +12,9 @@ from pathlib import Path
 
 import numpy as np
 
+from bubbletrack.model.suggestion import from_json as suggestions_from_json
+from bubbletrack.model.suggestion import to_json as suggestion_json
+
 logger = logging.getLogger(__name__)
 
 SESSION_VERSION = "3.1"  # 3.1 adds circle_xy + fit_source; 3.0 files still load
@@ -120,6 +123,8 @@ def save_session(filepath: str, state) -> None:
             [sorted(flags) for flags in state.fit_flags]
             if state.fit_flags is not None else None
         ),
+        # Auto's rejected guesses (optional key: older files load without it)
+        "fit_suggestion": suggestion_json(getattr(state, "fit_suggestion", None)),
         "fit_locked": (
             [bool(v) for v in state.fit_locked] if state.fit_locked is not None else None
         ),
@@ -185,6 +190,8 @@ def load_session(filepath: str) -> dict:
         data["fit_metrics"] = {k: _from_json_array(v) for k, v in data["fit_metrics"].items()}
     if data.get("fit_flags") is not None:
         data["fit_flags"] = [frozenset(flags) for flags in data["fit_flags"]]
+    if data.get("fit_suggestion") is not None:
+        data["fit_suggestion"] = suggestions_from_json(data["fit_suggestion"])
     if data.get("fit_locked") is not None:
         data["fit_locked"] = np.array(data["fit_locked"], dtype=bool)
     if data.get("fit_confidence") is not None:

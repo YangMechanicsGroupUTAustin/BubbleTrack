@@ -15,6 +15,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QDockWidget, QMenu
 
+from bubbletrack.controller import suggestion_actions
 from bubbletrack.controller.review_queue import (
     ReviewItem, build_review_items, next_after_action,
 )
@@ -146,15 +147,22 @@ class ReviewController:
     # -- actions on a row (each returns False if it did nothing) ----------- #
 
     def _accept(self, segment: ReviewSegment) -> bool:
-        locked = self._state().fit_locked
+        state = self._state()
+        locked = state.fit_locked
         if locked is None:
             return False
+        # A frame showing Auto's guess gets the guess as its result (an
+        # undoable edit); every other listed frame is locked as it is.
+        promotion = suggestion_actions.promote_guesses(state, segment)
         # Every listed frame, with or without a result ("no bubble here"), as
         # a single-frame Accept does; the range lock adds the span's other
         # fitted frames and updates the chart and the autosave.
         locked[list(segment.frames)] = True  # provenance (fit_source) is left as it was
         self._app._on_lock_range(segment.start, segment.end, locked=True)
-        self.w.header.set_status(f"{span_text(segment)} accepted and locked", _OK)
+        text = f"{span_text(segment)} accepted and locked"
+        if promotion is not None:
+            text = suggestion_actions.finish_promotion(self._app, promotion, text)
+        self.w.header.set_status(text, _OK)
         return True
 
     def _refit(self, segment: ReviewSegment) -> bool:
