@@ -48,14 +48,13 @@ def _starts_with_bubble(state: AppState) -> bool:
 
 
 def reference_label(state: AppState) -> str:
-    """'Frame 2 (auto)', 'Frame 11 (set)', or why there is none."""
+    """'Frame 2 (auto)', 'Frame 11' (chosen: its × goes back to Auto), or why there is none."""
     if not state.images:
         return "auto"
     idx = edge_support.reference_index(state)
     if idx is None:
         return NO_REFERENCE_NEEDED if _starts_with_bubble(state) else NO_REFERENCE_FOUND
-    origin = "set" if state.reference_frame is not None else "auto"
-    return f"Frame {idx + 1} ({origin})"
+    return f"Frame {idx + 1}" + ("" if state.reference_frame is not None else " (auto)")
 
 
 def position_label(state: AppState) -> str:

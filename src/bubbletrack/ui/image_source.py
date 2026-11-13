@@ -72,18 +72,20 @@ class _DropZone(QWidget):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("loaded", False)
         self.setMinimumHeight(80)
+        # No taller than its content (the centring stretches must not grow it).
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 10, 8, 10)
         layout.setSpacing(2)
-        layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addStretch(1)
 
         self._icon_label = QLabel(icon)
         self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._icon_label.setStyleSheet(
             "font-size: 22px; background: transparent; border: none;"
         )
-        layout.addWidget(self._icon_label)
+        layout.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._prompt_label = QLabel(prompt)
         self._prompt_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -91,7 +93,8 @@ class _DropZone(QWidget):
         # A long name must not widen the zone (it is elided to fit instead).
         self._prompt_label.setSizePolicy(QSizePolicy.Policy.Ignored,
                                          QSizePolicy.Policy.Preferred)
-        layout.addWidget(self._prompt_label)
+        layout.addWidget(self._prompt_label)  # full width; the label centres its text
+        layout.addStretch(1)
         self._summary: list[str] = []
 
     # -- Public state API --

@@ -56,10 +56,11 @@ def test_frame_has_bubble_uses_the_reference_search_test():
 
 def test_every_button_has_a_tooltip_and_the_new_names(qapp):
     box = EdgeOptionsBox()
-    texts = {b.text(): b.toolTip() for b in box.findChildren(QPushButton)}
+    texts = {b.accessibleName() or b.text(): b.toolTip() for b in box.findChildren(QPushButton)}
     for name in ("Use this frame", "Auto", "Click bubble", "Clear", "Teach…"):
         assert texts.get(name), f"{name!r} has no tooltip"
     assert "Use current" not in texts
+    assert box.auto_reference_button.text() == box.clear_seed_button.text() == "×"
 
 
 def test_lines_show_value_and_hide_buttons_with_nothing_to_undo(qapp):
@@ -68,23 +69,23 @@ def test_lines_show_value_and_hide_buttons_with_nothing_to_undo(qapp):
     assert box.seed_text() == AUTO_POSITION_TEXT
     assert box.use_frame_button.isVisible() and not box.auto_reference_button.isVisible()
     assert box.pick_button.isVisible() and not box.clear_seed_button.isVisible()
-    assert not box.ml_line.isVisible()  # nothing to teach before a fit
-    box.set_reference_text("Frame 11 (set)", user_set=True)
+    assert not box.ml_line_visible()  # nothing to teach before a fit
+    box.set_reference_text("Frame 11", user_set=True)
     box.set_seed_text("x 200, y 125", user_set=True)
     box.set_ml_state("Off · not taught yet", False, False, relevant=True)
     assert box.auto_reference_button.isVisible() and box.clear_seed_button.isVisible()
-    assert box.ml_line.isVisible() and not box.ml_switch.isEnabled()
+    assert box.ml_line_visible() and not box.ml_switch.isEnabled()
     assert "teach" in box.ml_switch.toolTip().lower()  # why the switch is off
 
 
 def test_reference_and_position_each_fit_on_one_line(qapp):
-    """Name, value and buttons share a row (no second row of buttons)."""
+    """Name, then value and buttons on the same row (no second row of buttons)."""
     box = EdgeOptionsBox()
     grid = box.layout()
-    for row in (0, 1):
-        assert grid.itemAtPosition(row, 0) is not None and grid.itemAtPosition(row, 2) is not None
-    assert grid.itemAtPosition(0, 2).layout().indexOf(box.use_frame_button) >= 0
-    assert grid.itemAtPosition(1, 2).layout().indexOf(box.pick_button) >= 0
+    line = grid.itemAtPosition(0, 1).layout()
+    assert line.indexOf(box._reference_label) >= 0 and line.indexOf(box.use_frame_button) >= 0
+    line = grid.itemAtPosition(1, 1).layout()
+    assert line.indexOf(box._seed_label) >= 0 and line.indexOf(box.pick_button) >= 0
 
 
 # -- the reference --------------------------------------------------------------- #
@@ -109,7 +110,7 @@ def test_use_it_anyway_sets_the_reference_with_a_warning(gui, make_sequence, ask
     asked.answer = True
     _box(window).use_current_reference_clicked.emit()
     assert controller._get_state().reference_frame == 3
-    assert _box(window).reference_text() == "Frame 4 (set)"
+    assert _box(window).reference_text() == "Frame 4"  # chosen: its × goes back to Auto
     assert _box(window).auto_reference_button.isVisibleTo(_box(window))
     assert "bubble" in _status(window)
     _box(window).auto_reference_clicked.emit()
@@ -169,9 +170,9 @@ def test_ml_line_appears_after_a_fit(gui, make_sequence):
     window, controller = gui
     controller.file_ctrl.on_folder_selected(str(make_sequence("A", 3)))
     box = _box(window)
-    assert not box.ml_line.isVisibleTo(box)
+    assert not box.ml_line_visible()
     state = controller._get_state()
     state.radius[:] = np.array([20.0, 30.0, 40.0])
     controller.ml.refresh_state_line()
-    assert box.ml_line.isVisibleTo(box)
+    assert box.ml_line_visible()
     assert box.ml_switch.text() == "Off · not taught yet" and not box.ml_switch.isEnabled()

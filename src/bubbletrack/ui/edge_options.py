@@ -48,6 +48,8 @@ ML_SWITCH_LOCKED_TIP = ("Not available yet: teach ML assist first (Teach…).\n"
                         "It needs one frame you verified, or a few brush strokes\n"
                         "on the bubble and on the background.")
 AUTO_POSITION_TEXT = "auto · click to set"
+NAME_WIDTH = 86  # the names column, so the values line up
+UNDO_BUTTON_WIDTH = 26
 
 
 def _combo(items: tuple[tuple[str, str], ...]) -> QComboBox:
@@ -70,6 +72,14 @@ def _button(text: str, tip: str, slot) -> QPushButton:
     button.setObjectName("secondaryBtn")
     button.setToolTip(tip)
     button.clicked.connect(slot)
+    return button
+
+
+def _undo_button(name: str, tip: str, slot) -> QPushButton:
+    """A small '×' that undoes a choice; *name* is what it is called (tooltip, a11y)."""
+    button = _button("×", f"{name}: {tip}", slot)
+    button.setAccessibleName(name)
+    button.setFixedWidth(UNDO_BUTTON_WIDTH)
     return button
 
 
@@ -103,39 +113,43 @@ class EdgeOptionsBox(QGroupBox):
         grid = QGridLayout(self)
         grid.setHorizontalSpacing(6)
         grid.setVerticalSpacing(6)
+        grid.setColumnMinimumWidth(0, NAME_WIDTH)
         grid.setColumnStretch(1, 1)
 
         self._reference_label = _value(REFERENCE_TIP)
         self.use_frame_button = _button("Use this frame", USE_FRAME_TIP,
                                         self.use_current_reference_clicked)
-        self.auto_reference_button = _button("Auto", AUTO_REFERENCE_TIP,
-                                             self.auto_reference_clicked)
+        self.auto_reference_button = _undo_button("Auto", AUTO_REFERENCE_TIP,
+                                                  self.auto_reference_clicked)
         self._add_line(grid, 0, _name("Reference", REFERENCE_TIP), self._reference_label,
                        self.use_frame_button, self.auto_reference_button)
 
         self._seed_label = _value(POSITION_TIP)
         self.pick_button = _button("Click bubble", PICK_TIP, self.pick_seed_clicked)
-        self.clear_seed_button = _button("Clear", CLEAR_POSITION_TIP, self.clear_seed_clicked)
+        self.clear_seed_button = _undo_button("Clear", CLEAR_POSITION_TIP,
+                                              self.clear_seed_clicked)
         self._add_line(grid, 1, _name("Bubble position", POSITION_TIP), self._seed_label,
                        self.pick_button, self.clear_seed_button)
 
-        self.ml_line = self._build_ml_assist()
-        grid.addWidget(self.ml_line, 2, 0, 1, 3)
+        self._ml_widgets = self._build_ml_assist()
+        self._add_line(grid, 2, *self._ml_widgets)
         self.advanced = self._build_advanced()
-        grid.addWidget(self.advanced, 3, 0, 1, 3)
+        grid.addWidget(self.advanced, 3, 0, 1, 2)
         self.set_reference_text("Auto", user_set=False)
         self.set_seed_text(AUTO_POSITION_TEXT, user_set=False)
 
     @staticmethod
-    def _add_line(grid: QGridLayout, row: int, name: QLabel, value: QLabel,
+    def _add_line(grid: QGridLayout, row: int, name: QLabel, value: QWidget,
                   *buttons: QPushButton) -> None:
+        """Name | value and its buttons: each line's value gets the room its
+        own buttons leave (a shared buttons column would squeeze every value)."""
         grid.addWidget(name, row, 0, Qt.AlignmentFlag.AlignVCenter)
-        grid.addWidget(value, row, 1, Qt.AlignmentFlag.AlignVCenter)
-        actions = QHBoxLayout()
-        actions.setSpacing(4)
+        line = QHBoxLayout()
+        line.setSpacing(4)
+        line.addWidget(value, 1)
         for button in buttons:
-            actions.addWidget(button)
-        grid.addLayout(actions, row, 2)
+            line.addWidget(button)
+        grid.addLayout(line, row, 1)
 
     def _build_advanced(self) -> CollapsibleSection:
         """Collapsed: options that rarely need changing."""
@@ -163,22 +177,21 @@ class EdgeOptionsBox(QGroupBox):
         advanced.add_widget(self._track_check)
         return advanced
 
-    def _build_ml_assist(self) -> QWidget:
+    def _build_ml_assist(self) -> tuple[QLabel, QCheckBox, QPushButton]:
         """'ML assist  [ ] Off · 2 examples  [Teach…]', hidden until relevant."""
-        line = QWidget()
-        row = QHBoxLayout(line)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.setSpacing(6)
         self.ml_switch = QCheckBox("Off")
         self.ml_switch.setToolTip(ML_SWITCH_LOCKED_TIP)
         self.ml_switch.setEnabled(False)
         self.ml_switch.toggled.connect(self.ml_switch_toggled)
         self.ml_button = _button("Teach…", ML_ASSIST_TIP, self.ml_assist_clicked)
-        row.addWidget(_name("ML assist", ML_ASSIST_TIP))
-        row.addWidget(self.ml_switch, 1)
-        row.addWidget(self.ml_button)
-        line.hide()
-        return line
+        widgets = (_name("ML assist", ML_ASSIST_TIP), self.ml_switch, self.ml_button)
+        for widget in widgets:
+            widget.hide()
+        return widgets
+
+    def ml_line_visible(self) -> bool:
+        """The ML assist line is shown (relevant: after a fit, or with examples)."""
+        return not self.ml_switch.isHidden()
 
     def set_ml_state(self, text: str, on: bool, can_switch: bool, colour: str = "",
                      *, relevant: bool = True) -> None:
@@ -194,7 +207,8 @@ class EdgeOptionsBox(QGroupBox):
         self.ml_switch.setStyleSheet(f"color:{colour};" if colour else "")
         self.ml_switch.setEnabled(can_switch)
         self.ml_switch.setToolTip(ML_SWITCH_TIP if can_switch else ML_SWITCH_LOCKED_TIP)
-        self.ml_line.setVisible(bool(relevant))
+        for widget in self._ml_widgets:
+            widget.setVisible(bool(relevant))
 
     def set_ml_available(self, available: bool, tip: str = "") -> None:
         """Without scikit-learn the button is disabled and says why."""
