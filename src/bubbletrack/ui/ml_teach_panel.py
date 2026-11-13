@@ -1,22 +1,28 @@
-"""ML assist's teaching panel (a dock): suggested frames, brushes, quality, Apply.
+"""ML assist's teaching panel (a dock): two good frames, then Train and apply.
 
 ::
 
-    Paint a few strokes: green on the bubble, red on what is not ...
-    Look at these frames
-    [preview]      [preview]
-    Frame 12 ✓        Frame 40
-    [Looks right ✓]  [Looks right ✓]
-    [Bubble (B)] [Background (G)] [Eraser (E)]   Size [ 5 ] px
-    [Undo stroke] [Clear frame]
-    2 verified frames, 3 strokes — ready
-    Frame 12: Auto (ML-guided), R = 40.2 px
-    [Apply to all frames]  [Close]
+    Teach ML assist with two good frames
+    Step 1 of 2: confirm 2 frames where the outline is right — 1 of 2 done
+    Is the red outline on the bubble wall?
+    [picture]            [picture]
+    Frame 40 · R = 38 px  Frame 120 · Auto's guess, R = 21 px
+    ✓ Confirmed           [Looks right ✓]
+                          [Looks wrong ✗]
+    One more: judge the other frame, which differs from frame 40.
+    ▸ Paint examples by hand (optional)
+    [progress] [Stop]
+    [Train and apply]  [Close]
 
-The panel only shows things and reports requests; the controller decides.
+Painting by hand is folded away; opened, it holds the brushes (B / G / E),
+the brush size, Undo stroke and Clear frame.  The panel only shows things and
+reports requests; the controller decides.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QMouseEvent, QPixmap
@@ -33,16 +39,30 @@ TOOL_TIPS = {
     "background": "Paint on what is not the bubble: speckle, walls, debris (G)",
     "eraser": "Remove painted strokes (E)",
 }
-HELP_TEXT = ("Paint a few strokes on a frame: green on the bubble, red on what is not. "
-             "Frames you verified count automatically. The right panel shows what ML sees.")
-THUMB_SIZE = (132, 88)
+TITLE = "Teach ML assist with two good frames"
+QUESTION = "Is the red outline on the bubble wall?"
+PAINT_TITLE = "Paint examples by hand (optional)"
+PAINT_HELP = ("Green on the bubble, red on what is not. A painted frame counts as an example "
+              "once it has both. Nothing is trained until Train and apply.")
+THUMB_SIZE = (132, 96)
 _OK, _WARN, _DIM = "#10b981", "#f59e0b", "#a1a1aa"
-_CHECK = "✓"
+_CHECK, _CROSS = "✓", "✗"
 LOOKS_RIGHT = f"Looks right {_CHECK}"
-IN_REVIEW = "will be listed in Review for you to check"
+LOOKS_WRONG = f"Looks wrong {_CROSS}"
+CONFIRMED = f"{_CHECK} Confirmed"
 # The active brush stands out (the shared button style has no checked look).
 _TOOL_STYLE = ("QPushButton:checked { background:#6366f1; color:#ffffff;"
                " border:1px solid #818cf8; font-weight:bold; }")
+
+
+@dataclass(frozen=True, eq=False)
+class CardView:
+    """What one card shows: a frame to judge, or a confirmed example."""
+
+    frame: int
+    caption: str
+    confirmed: bool = False
+    pixmap: QPixmap | None = None
 
 
 class _Thumb(QLabel):
@@ -55,12 +75,13 @@ class _Thumb(QLabel):
 
 
 class _Card(QFrame):
-    """One suggested frame: preview, caption and 'Looks right ✓'."""
+    """One frame: picture, caption, then Looks right / Looks wrong or "✓ Confirmed"."""
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("mlCard")
-        self.setStyleSheet("QFrame#mlCard { border:1px solid rgba(255,255,255,0.08); border-radius:6px; }")
+        self.setStyleSheet("QFrame#mlCard { border:1px solid rgba(255,255,255,0.08);"
+                           " border-radius:6px; }")
         box = QVBoxLayout(self)
         box.setContentsMargins(4, 4, 4, 4)
         box.setSpacing(3)
@@ -69,52 +90,79 @@ class _Card(QFrame):
         self.thumb.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.thumb.setStyleSheet("background:#0c0d12; border:none;")
         self.thumb.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.thumb.setToolTip("Show this frame")
+        self.thumb.setToolTip("Show this frame in the image")
         self.caption = QLabel()
+        self.caption.setWordWrap(True)
         self.caption.setStyleSheet(f"color:{_DIM}; font-size:11px; border:none;")
-        self.correct = QPushButton(LOOKS_RIGHT)
-        self.correct.setObjectName("secondaryBtn")
-        self.correct.setToolTip("The result on this frame is right: accept (lock) it,\n"
-                                "and ML assist learns from it")
-        for widget in (self.thumb, self.caption, self.correct):
+        self.status = QLabel(CONFIRMED)
+        self.status.setStyleSheet(f"color:{_OK}; font-weight:bold; border:none;")
+        self.right = QPushButton(LOOKS_RIGHT)
+        self.right.setToolTip("The red outline sits on the bubble wall: confirm this frame\n"
+                              "(it is accepted and locked, and ML assist learns from it)")
+        self.wrong = QPushButton(LOOKS_WRONG)
+        self.wrong.setObjectName("secondaryBtn")
+        self.wrong.setToolTip("The outline is off: show another frame instead\n"
+                              "(nothing is changed on this one)")
+        for widget in (self.thumb, self.caption, self.status, self.right, self.wrong):
             box.addWidget(widget)
         self.frame: int | None = None
+        self.confirmed = False
+
+    def show_view(self, view: CardView | None, *, enabled: bool = True) -> None:
+        self.frame = None if view is None else view.frame
+        self.setVisible(view is not None)
+        if view is None:
+            return
+        self.confirmed = view.confirmed
+        if view.pixmap is not None:
+            self.thumb.setPixmap(view.pixmap)
+        else:
+            self.thumb.clear()
+            self.thumb.setText("…")
+        self.caption.setText(view.caption)
+        self.status.setVisible(view.confirmed)
+        for button in (self.right, self.wrong):
+            button.setVisible(not view.confirmed)
+            button.setEnabled(enabled)
 
 
 class MLTeachPanel(QWidget):
     """What the teaching mode shows; signals report what the user asked for."""
 
+    confirm_requested = pyqtSignal(int)  # Looks right on a frame
+    reject_requested = pyqtSignal(int)  # Looks wrong on a frame
+    frame_activated = pyqtSignal(int)
+    train_clicked = pyqtSignal()
+    close_clicked = pyqtSignal()
+    stop_clicked = pyqtSignal()
+    paint_toggled = pyqtSignal(bool)
     tool_changed = pyqtSignal(str)  # one of TOOLS
     brush_size_changed = pyqtSignal(int)
     undo_clicked = pyqtSignal()
     clear_frame_clicked = pyqtSignal()
-    apply_clicked = pyqtSignal()
-    close_clicked = pyqtSignal()
-    stop_clicked = pyqtSignal()
-    frame_activated = pyqtSignal(int)
-    accept_requested = pyqtSignal(int)
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("MLTeachPanel")
         self.setMinimumWidth(290)
-        self._ready = False
+        self._train_ok = False
         self._running = False
+        self._next_warn = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 6, 8, 8)
-        layout.setSpacing(8)
-        help_label = QLabel(HELP_TEXT)
-        help_label.setWordWrap(True)
-        help_label.setStyleSheet(f"color:{_DIM};")
-        layout.addWidget(help_label)
-        layout.addWidget(self._section("Look at these frames"))
+        layout.setSpacing(6)
+        title = QLabel(TITLE)
+        title.setObjectName("sectionTitle")
+        layout.addWidget(title)
+        self._step = self._line("font-weight:600;")
+        self._question = self._line(f"color:{_DIM};")
+        self._question.setText(QUESTION)
+        layout.addWidget(self._step)
+        layout.addWidget(self._question)
         layout.addLayout(self._build_cards())
-        layout.addLayout(self._build_tools())
-        layout.addLayout(self._build_edit_row())
-        self._quality = self._line()
-        self._preview = self._line()
-        layout.addWidget(self._quality)
-        layout.addWidget(self._preview)
+        self._next = self._line()
+        layout.addWidget(self._next)
+        layout.addWidget(self._build_paint())
         layout.addLayout(self._build_progress())
         layout.addStretch(1)
         layout.addLayout(self._build_bottom())
@@ -123,16 +171,12 @@ class MLTeachPanel(QWidget):
     # -- construction ------------------------------------------------------- #
 
     @staticmethod
-    def _section(text: str) -> QLabel:
-        label = QLabel(text)
-        label.setObjectName("sectionTitle")
-        return label
-
-    @staticmethod
-    def _line() -> QLabel:
+    def _line(style: str = "") -> QLabel:
         label = QLabel()
         label.setWordWrap(True)
         label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        if style:
+            label.setStyleSheet(style)
         return label
 
     def _build_cards(self) -> QHBoxLayout:
@@ -140,12 +184,39 @@ class MLTeachPanel(QWidget):
         row.setSpacing(6)
         self._cards = [_Card(), _Card()]
         for card in self._cards:
-            card.thumb.clicked.connect(lambda c=card: self._activate(c))
-            card.correct.clicked.connect(lambda _checked, c=card: self._accept(c))
+            card.thumb.clicked.connect(lambda c=card: self._emit(self.frame_activated, c))
+            card.right.clicked.connect(lambda _on, c=card: self._emit(self.confirm_requested, c))
+            card.wrong.clicked.connect(lambda _on, c=card: self._emit(self.reject_requested, c))
             row.addWidget(card)
             card.hide()
         row.addStretch(1)
         return row
+
+    def _build_paint(self) -> QWidget:
+        box = QWidget()
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(4)
+        self.paint_toggle = QPushButton()
+        self.paint_toggle.setObjectName("collapseToggle")
+        self.paint_toggle.setCheckable(True)
+        self.paint_toggle.setToolTip("Brushes for frames without a good outline (rarely needed)")
+        self.paint_toggle.toggled.connect(self._on_paint_toggled)
+        outer.addWidget(self.paint_toggle)
+        self._paint_body = QWidget()
+        body = QVBoxLayout(self._paint_body)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(4)
+        help_label = self._line(f"color:{_DIM};")
+        help_label.setText(PAINT_HELP)
+        body.addWidget(help_label)
+        body.addLayout(self._build_tools())
+        body.addLayout(self._build_edit_row())
+        self._paint_summary = self._line(f"color:{_DIM};")
+        body.addWidget(self._paint_summary)
+        outer.addWidget(self._paint_body)
+        self._on_paint_toggled(False)
+        return box
 
     def _build_tools(self) -> QGridLayout:
         grid = QGridLayout()
@@ -197,6 +268,7 @@ class MLTeachPanel(QWidget):
         self._progress.setTextVisible(False)
         self._stop_btn = QPushButton("Stop")
         self._stop_btn.setObjectName("dangerBtn")
+        self._stop_btn.setToolTip("Stop: the frames measured so far keep ML assist's results")
         self._stop_btn.clicked.connect(self.stop_clicked)
         row.addWidget(self._progress, 1)
         row.addWidget(self._stop_btn)
@@ -204,61 +276,88 @@ class MLTeachPanel(QWidget):
 
     def _build_bottom(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        self._apply_btn = QPushButton("Apply to all frames")
-        self._apply_btn.setToolTip("Measure every frame you have not confirmed with ML assist\n"
-                                   "(manual, circle-fixed and locked frames are kept).\n"
-                                   f"ML's own outlines {IN_REVIEW}.")
-        self._apply_btn.clicked.connect(self.apply_clicked)
+        self.train_button = QPushButton("Train and apply")
+        self.train_button.clicked.connect(self.train_clicked)
         self._close_btn = QPushButton("Close")
         self._close_btn.setObjectName("secondaryBtn")
-        self._close_btn.setToolTip("Leave the teaching mode (your strokes are kept)")
+        self._close_btn.setToolTip("Leave ML assist (your confirmed frames and strokes are kept)")
         self._close_btn.clicked.connect(self.close_clicked)
-        row.addWidget(self._apply_btn, 1)
+        row.addWidget(self.train_button, 1)
         row.addWidget(self._close_btn)
         return row
 
-    # -- suggested frames ---------------------------------------------------- #
+    # -- the step, the cards, the next step --------------------------------- #
 
-    def set_suggestions(self, frames) -> None:
-        frames = list(frames)[:len(self._cards)]
-        for card, frame in zip(self._cards, frames + [None] * len(self._cards)):
-            card.frame = frame
-            card.setVisible(frame is not None)
-            if frame is not None:
-                card.thumb.clear()
-                card.thumb.setText("…")
-                card.caption.setText(f"Frame {frame + 1}")
+    def set_step(self, text: str) -> None:
+        self._step.setText(text)
 
-    def suggestions(self) -> list[int]:
+    def step_text(self) -> str:
+        return self._step.text()
+
+    def question_text(self) -> str:
+        return self._question.text()
+
+    def set_cards(self, views: Sequence[CardView | None]) -> None:
+        """Up to two cards; None hides a card.  The question shows while one asks."""
+        views = list(views)[:len(self._cards)]
+        views += [None] * (len(self._cards) - len(views))
+        for card, view in zip(self._cards, views):
+            card.show_view(view, enabled=not self._running)
+        self._question.setVisible(any(v is not None and not v.confirmed for v in views))
+
+    def card_frames(self) -> list[int]:
         return [c.frame for c in self._cards if c.frame is not None]
 
-    def set_card(self, frame: int, *, caption: str | None = None, pixmap: QPixmap | None = None,
-                 verified: bool | None = None, can_accept: bool | None = None) -> None:
-        card = next((c for c in self._cards if c.frame == frame), None)
-        if card is None:
-            return
-        if pixmap is not None:
-            card.thumb.setPixmap(pixmap)
-        if caption is not None or verified is not None:
-            text = caption if caption is not None else card.caption.text().rstrip(f" {_CHECK}")
-            card.caption.setText(text + (f" {_CHECK}" if verified else ""))
-            card.caption.setToolTip("Verified: an example for ML assist" if verified else "")
-        if can_accept is not None:
-            card.correct.setEnabled(can_accept)
+    def _card(self, frame: int) -> _Card | None:
+        return next((c for c in self._cards if c.frame == frame), None)
 
     def card_caption(self, frame: int) -> str:
-        card = next((c for c in self._cards if c.frame == frame), None)
+        card = self._card(frame)
         return "" if card is None else card.caption.text()
 
-    def _activate(self, card: _Card) -> None:
-        if card.frame is not None:
-            self.frame_activated.emit(card.frame)
+    def card_confirmed(self, frame: int) -> bool:
+        card = self._card(frame)
+        return card is not None and card.confirmed
 
-    def _accept(self, card: _Card) -> None:
+    def _emit(self, signal, card: _Card) -> None:
         if card.frame is not None:
-            self.accept_requested.emit(card.frame)
+            signal.emit(card.frame)
 
-    # -- tools, lines and run state ---------------------------------------------- #
+    def set_next(self, text: str, warn: bool = False) -> None:
+        self._next.setText(text)
+        self._next_warn = bool(warn)
+        self._next.setStyleSheet(f"color:{_WARN};" if warn else "")
+
+    def next_text(self) -> str:
+        return self._next.text()
+
+    def next_is_warning(self) -> bool:
+        return self._next_warn
+
+    def set_train(self, enabled: bool, tip: str) -> None:
+        self._train_ok = bool(enabled)
+        self.train_button.setToolTip(tip)
+        self.train_button.setEnabled(self._train_ok and not self._running)
+
+    # -- painting by hand ----------------------------------------------------- #
+
+    def set_painting(self, open_: bool) -> None:
+        """Open or fold "Paint examples by hand" (as a click would)."""
+        self.paint_toggle.setChecked(bool(open_))
+
+    def painting_open(self) -> bool:
+        return self.paint_toggle.isChecked()
+
+    def _on_paint_toggled(self, open_: bool) -> None:
+        self._paint_body.setVisible(open_)
+        self.paint_toggle.setText(f"  {'▾' if open_ else '▸'} {PAINT_TITLE}")
+        self.paint_toggled.emit(bool(open_))
+
+    def set_paint_summary(self, text: str) -> None:
+        self._paint_summary.setText(text)
+
+    def paint_summary(self) -> str:
+        return self._paint_summary.text()
 
     def set_tool(self, tool: str) -> None:
         self._tool_buttons[tool].setChecked(True)
@@ -274,32 +373,15 @@ class MLTeachPanel(QWidget):
     def brush_size(self) -> int:
         return int(self._size.value())
 
-    def set_quality(self, text: str, ready: bool) -> None:
-        self._quality.setText(text)
-        self._quality.setStyleSheet(f"color:{_OK if ready else _WARN};")
-        self._ready = bool(ready)
-        self._apply_btn.setEnabled(self._ready and not self._running)
-
-    def set_quality_tip(self, text: str) -> None:
-        self._quality.setToolTip(text)
-
-    def quality_text(self) -> str:
-        return self._quality.text()
-
-    def set_preview(self, text: str, warn: bool = False) -> None:
-        self._preview.setText(text)
-        self._preview.setStyleSheet(f"color:{_WARN if warn else _DIM};")
-
-    def preview_text(self) -> str:
-        return self._preview.text()
+    # -- runs ------------------------------------------------------------------ #
 
     def set_running(self, running: bool) -> None:
-        """While a run (Fit All, Apply, re-track) writes results: no painting, Stop shown."""
-        self._running = running
+        """While a run writes results: no judging or painting, Stop shown."""
+        self._running = bool(running)
         for widget in (*self._tool_buttons.values(), self._size, self._undo_btn, self._clear_btn,
-                       *(c.correct for c in self._cards)):
+                       *(b for c in self._cards for b in (c.right, c.wrong))):
             widget.setEnabled(not running)
-        self._apply_btn.setEnabled(self._ready and not running)
+        self.train_button.setEnabled(self._train_ok and not running)
         self._progress.setVisible(running)
         self._stop_btn.setVisible(running)
         if not running:

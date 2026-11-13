@@ -239,24 +239,6 @@ def test_default_brush_scales_with_the_bubble():
     assert M.default_brush(state) == 9
 
 
-def test_preview_line_names_the_source_and_warnings():
-    from bubbletrack.controller.ml_preview import FramePreview
-    from bubbletrack.controller.ml_teach_view import describe
-    from bubbletrack.model.ml_pipeline import MLFrameFit
-
-    def line(source, ml_source, flags, frame=4, protected=frozenset()):
-        fit = PLAIN_OK.__class__(22.0, 50.0, 60.0, np.ones((5, 2)), None, 0.81, frozenset(flags), "")
-        return describe(FramePreview(frame, MLFrameFit(fit, source, ml_source), np.ones((4, 4))), protected)
-
-    assert line(FitSource.AUTO, "auto_ml", {"ml_guided"}) == (
-        "Frame 5: Auto (ML-guided), R = 22.0 px (confidence 0.81)", False)
-    assert line(FitSource.ML, "ml", {"ml_outline"})[0].endswith(
-        "— will be listed in Review for you to check")
-    assert "elsewhere" in line(FitSource.AUTO, "auto", {"ml_disagrees"})[0]
-    text, warn = line(FitSource.AUTO, "auto", {"ml_unfamiliar"}, protected=frozenset({4}))
-    assert warn and "your result here is kept" in text and "unlike the taught ones" in text
-
-
 def test_run_summary_and_state_line():
     state = _state()
     state.fit_source[1] = FitSource.ML

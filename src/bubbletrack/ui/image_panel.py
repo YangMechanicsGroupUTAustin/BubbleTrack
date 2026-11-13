@@ -49,6 +49,9 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
         Emitted in *paint* mode on release: the stroke's scene (x, y) points.
     brush_scrolled(int)
         Mouse wheel in *paint* mode (+1 / -1 per notch; Ctrl+wheel zooms).
+    mode_changed(str)
+        The mouse mode changed (one tool owns the mouse at a time; a tool
+        waiting for the image takes it back when it returns to "normal").
     """
 
     point_clicked = pyqtSignal(float, float)
@@ -56,6 +59,7 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
     circle_drawn = pyqtSignal(float, float, float, bool)
     stroke_drawn = pyqtSignal(object)
     brush_scrolled = pyqtSignal(int)
+    mode_changed = pyqtSignal(str)
     select_roi_clicked = pyqtSignal()
 
     def __init__(self, title: str = "Image", parent: QWidget | None = None):
@@ -183,6 +187,7 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
         | paint  | CrossCursor | paints a stroke   | #22c55e green |
         | roi    | CrossCursor | RubberBandDrag    | #f59e0b amber |
         """
+        changed = mode != self._mode
         self._mode = mode
         if mode != "circle":
             self.circle_drag.cancel()
@@ -199,6 +204,8 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
             self._view.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
             self._view.unsetCursor()
         self._view.setStyleSheet(_VIEW_STYLE.get(mode, _VIEW_STYLE["normal"]))
+        if changed:
+            self.mode_changed.emit(mode)
 
     # -- ROI label --
     def set_roi_text(self, gridx: tuple[int, int], gridy: tuple[int, int]) -> None:

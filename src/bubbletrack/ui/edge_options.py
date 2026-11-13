@@ -38,15 +38,13 @@ PICK_TIP = "Then click once on the bubble in the image."
 CLEAR_POSITION_TIP = "Forget the clicked position: Auto finds the bubble by itself."
 ML_ASSIST_TIP = (
     "ML assist helps Auto on hard recordings (blood, speckle, low contrast).\n"
-    "Teach it with a few frames: the frames you verified count automatically\n"
-    "(manual fits, circle fixes, accepted frames); a few brush strokes help more.\n"
-    "Apply re-measures every frame you have not confirmed; ML's own outlines\n"
-    "are listed in Review for you to check.")
+    "Teach…: confirm two different frames where the outline is right (frames\n"
+    "you verified in Review count too), then Train and apply: it measures the\n"
+    "frames to check; ML's own outlines are listed in Review for you to check.")
 ML_SWITCH_TIP = ("On: Fit measures with ML assist.\n"
                  "Off: plain Auto (fit again to return to Auto's results).")
-ML_SWITCH_LOCKED_TIP = ("Not available yet: teach ML assist first (Teach…).\n"
-                        "It needs one frame you verified, or a few brush strokes\n"
-                        "on the bubble and on the background.")
+ML_SWITCH_LOCKED_TIP = ("Not available yet: teach ML assist first (Teach…):\n"
+                        "confirm two different frames where the outline is right.")
 AUTO_POSITION_TEXT = "auto · click to set"
 NAME_WIDTH = 86  # the names column, so the values line up
 UNDO_BUTTON_WIDTH = 26
