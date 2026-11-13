@@ -39,3 +39,28 @@ jobs:
 
       - name: Run tests
         run: python -m pytest -q
+
+  # The pinned job above guards the golden results; this one installs the
+  # newest releases a user gets from `pip install`, on the owner's platform,
+  # so API removals (e.g. scikit-image 0.26 dropping num_workers) show up here
+  # before they reach users.
+  pytest-latest:
+    name: pytest (macos-latest, newest dependencies)
+    runs-on: macos-latest
+    env:
+      QT_QPA_PLATFORM: offscreen
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install package with the newest dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install --upgrade -e . pytest
+          python -m pip list | grep -iE "numpy|scipy|scikit|opencv|pyqt"
+
+      - name: Run tests
+        run: python -m pytest -q

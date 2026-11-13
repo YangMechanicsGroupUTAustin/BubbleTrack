@@ -1,5 +1,8 @@
 """Version shims for scikit-image APIs whose signatures changed.
 
+scikit-image 0.26 removed ``feature.multiscale_basic_features(num_workers=)``;
+:func:`multiscale_basic_features_compat` passes it only where it exists.
+
 scikit-image 0.26 deprecated ``morphology.remove_small_objects(min_size=N)``
 (removed in 2.0) in favour of ``max_size=M``.  The two differ by one pixel:
 
@@ -26,6 +29,28 @@ def _accepts_max_size(func: Callable) -> bool:
         return "max_size" in inspect.signature(func).parameters
     except (TypeError, ValueError):  # builtins / C functions without a signature
         return False
+
+
+def _accepts(func: Callable, name: str) -> bool:
+    """Return True if *func* takes a keyword argument called *name*."""
+    try:
+        return name in inspect.signature(func).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def multiscale_basic_features_compat(image: np.ndarray, *, num_workers: int | None = None,
+                                     func: Callable | None = None, **kwargs) -> np.ndarray:
+    """``skimage.feature.multiscale_basic_features`` on any scikit-image version.
+
+    *num_workers* is passed only to versions that accept it (removed in 0.26);
+    *func* is for tests.
+    """
+    if func is None:
+        from skimage.feature import multiscale_basic_features as func
+    if num_workers is not None and _accepts(func, "num_workers"):
+        kwargs["num_workers"] = num_workers
+    return func(image, **kwargs)
 
 
 def remove_small_objects_compat(mask: np.ndarray, min_size: int) -> np.ndarray:

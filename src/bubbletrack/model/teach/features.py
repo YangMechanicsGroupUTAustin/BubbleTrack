@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
-from skimage.feature import multiscale_basic_features
+from bubbletrack.model.skimage_compat import multiscale_basic_features_compat
 
 from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge import EdgeParams
@@ -89,9 +89,10 @@ def compute_features(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | N
     step = 2 if config.half_resolution else 1
     if step == 2:
         planes = [_bin2(p) for p in planes]
-    feats = [multiscale_basic_features(p, intensity=True, edges=True, texture=config.texture,
-                                       sigma_min=config.sigma_min / step, sigma_max=config.sigma_max / step,
-                                       num_sigma=config.num_sigma, num_workers=config.num_workers)
+    feats = [multiscale_basic_features_compat(
+                 p, intensity=True, edges=True, texture=config.texture,
+                 sigma_min=config.sigma_min / step, sigma_max=config.sigma_max / step,
+                 num_sigma=config.num_sigma, num_workers=config.num_workers)
              for p in planes]
     values = np.concatenate(feats, axis=-1).astype(np.float32, copy=False)
     return FeatureStack(values=values, step=step, roi_shape=(int(roi_shape[0]), int(roi_shape[1])))
