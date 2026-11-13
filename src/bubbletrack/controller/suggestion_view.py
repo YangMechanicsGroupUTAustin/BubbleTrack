@@ -2,7 +2,8 @@
 
 Drawn on the image panel and on the Auto view while the frame has no result;
 the panel's colour key names it, its tooltip and the header say what it is
-and how to accept it.  No chart marker: a guess is not a result.
+and point to Review, whose card says whether to accept it, fix the frame or
+mark it "no bubble".  No chart marker: a guess is not a result.
 """
 
 from __future__ import annotations
@@ -24,10 +25,10 @@ GUESS_STATUS_COLOUR = "#a1a1aa"
 
 
 def guess_text(suggestion: Suggestion) -> str:
-    """'Auto's guess (confidence 0.24) — press A in Review to accept'."""
+    """'Auto's guess (not accepted, confidence 0.24) — see Review'."""
     conf = suggestion.confidence
-    score = f" (confidence {conf:.2f})" if np.isfinite(conf) else ""
-    return f"Auto's guess{score} — press A in Review to accept"
+    score = f", confidence {conf:.2f}" if np.isfinite(conf) else ""
+    return f"Auto's guess (not accepted{score}) — see Review"
 
 
 def draw_guess(state: AppState, panel, idx: int, offset: np.ndarray | None = None) -> bool:

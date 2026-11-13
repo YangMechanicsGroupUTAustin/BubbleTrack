@@ -237,17 +237,19 @@ class TestRowActions:
         controller._on_undo()  # one Ctrl+Z undoes the whole Accept all
         assert not state.fit_locked.any()
 
-    def test_accept_all_keeps_frames_without_a_result(self, review):
+    def test_accept_all_leaves_frames_without_a_result(self, review):
+        """They may be bubbles Auto missed: Fix or No bubble decides."""
         _, controller, rc = review
         state = _flag(controller, rc)
-        state.radius[[3, 4]] = -1.0  # rejected detections ("no result")
-        state.fit_confidence[[3, 4]] = 0.1
-        rc.refresh()
-        assert rc.panel.texts() == ["Frames 4–5 · No result · 2 frames"]
-        rc.panel.step(1)
-        assert rc.panel.card.buttons["accept_all"].text() == "Accept all 2"
+        state.radius[[3, 4]] = -1.0  # no result on two of the lost frames
+        rc.set_extra([ReviewItem(f, ("lost",), 100) for f in (2, 3, 4, 5)])
+        controller.file_ctrl.on_frame_changed(2)
+        assert rc.panel.current_segment().frames == (2, 3, 4, 5)
+        assert rc.panel.card.buttons["accept_all"].text() == "Accept 2 of 4"
         rc.perform("accept_all")
-        assert state.fit_locked[[3, 4]].all() and rc.count == 0
+        assert state.fit_locked[[2, 5]].all() and not state.fit_locked[[3, 4]].any()
+        assert rc.panel.frames() == [3, 4] and _shown(controller) == 3  # left to settle
+        assert rc.panel.feedback.text().endswith("2 empty frames left to fix or mark).")
 
     def test_no_bubble_on_all_marks_the_rows_frames_only(self, review):
         _, controller, rc = review

@@ -1,4 +1,4 @@
-"""FileController — folder/video loading, frame navigation, side-panel mode."""
+"""FileController — folder/video loading and frame navigation."""
 
 from __future__ import annotations
 
@@ -19,15 +19,13 @@ from bubbletrack.model.image_io import (
     normalize_frame,
     scan_folder,
 )
-from bubbletrack.model.state import update_state
 from bubbletrack.ui.frame_scrubber import frame_file_labels
-from bubbletrack.ui.tab_bar import TabBar, mode_label
 
 logger = logging.getLogger(__name__)
 
 
 class FileController(BaseController):
-    """Handles folder selection, frame navigation, and the side-panel mode."""
+    """Handles folder selection and frame navigation."""
 
     def __init__(self, bus: EventBus, get_state, set_state, window,
                  set_max_radius, cache: ImageCache | None = None,
@@ -160,12 +158,6 @@ class FileController(BaseController):
             return
         self._show_frame(idx)
 
-    def on_tab_frame_selected(self, idx: int) -> None:
-        """Frame selected from a frame spinbox (the manual-fix tools)."""
-        if not self._valid_frame(idx):
-            return
-        self._show_frame(idx)
-
     # -- helpers ------------------------------------------------------------ #
 
     def _valid_frame(self, idx: int) -> bool:
@@ -174,15 +166,14 @@ class FileController(BaseController):
     def _show_frame(self, idx: int) -> None:
         """Make *idx* the current frame and keep every frame control in sync.
 
-        Callers include the scrubber itself, the manual-fix spinbox, the chart
-        and the arrow-key shortcuts, so all of them are updated here.
+        Callers include the scrubber itself, the chart, Review and the
+        arrow-key shortcuts, so all of them are updated here.
         """
         self._update(image_no=idx)
         scrubber = self.w.frame_scrubber
         scrubber.blockSignals(True)
         scrubber.set_value(idx)
         scrubber.blockSignals(False)
-        self.w.left_panel.manual_tab.set_frame_value(idx)
         self.bus.emit("frame_changed", idx)
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 
@@ -193,7 +184,6 @@ class FileController(BaseController):
         scrubber emits a frame change to the old last frame and the shown
         frame, state.image_no and the scrubber disagree.
         """
-        lp = self.w.left_panel
         scrubber = self.w.frame_scrubber
         # "Frame 12/91 · _023": the file number next to every frame index
         labels = frame_file_labels(self.state.images)
@@ -204,18 +194,9 @@ class FileController(BaseController):
         scrubber.set_range(n)
         scrubber.set_value(0)
         scrubber.blockSignals(False)
-        lp.manual_tab.set_frame_range(n)
-        lp.manual_tab.set_frame_value(0)
         self.w.original_panel.set_roi_text(self.state.gridx, self.state.gridy)
         self.w.radius_chart.clear()
         self.w.radius_chart.set_total_frames(n)
         self.w.status_bar.update_frame(frame_to_display(0), n)
         self.w.status_bar.update_format(file_ext)
         self.bus.emit("source_loaded", n)
-
-    def on_tab_changed(self, idx: int) -> None:
-        """Side-panel mode switched (measure / manual fix): leave interactive modes."""
-        self.w.original_panel.set_mode("normal")
-        self.w.left_panel.manual_tab.reset()
-        self.w.status_bar.update_mode(mode_label(TabBar.name_of(idx)))
-        self.bus.emit("tab_changed", idx)

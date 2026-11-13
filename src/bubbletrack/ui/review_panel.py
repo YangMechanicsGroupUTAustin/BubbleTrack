@@ -2,18 +2,11 @@
 
 ::
 
-    12 of 48 frames to check        [All types ▾]
+    12 of 48 frames to check        [All kinds ▾]
     ●  Frames 120–180               [61]
        Auto lost the bubble
-    ●  Frame 44 · _054
-       Radius jumps
     ────────────────────────────────────────────
-    Frame 125 · _135                     6 of 61      (ReviewCard)
-    No result, but Auto has a guess ...
-    [ Accept the guess                         A ]
-    [ Fix with a circle                        F ]
-    [ No bubble here                           N ]
-    [ Accept all 61     ⇧A ] [ Skip row   S ] [⋯]
+    Frame 125 · _135 ... the frame on screen, its advice and actions (ReviewCard)
     ✓ Frame 124 accepted.                   [Undo]
 """
 
@@ -86,6 +79,7 @@ class ReviewPanel(QWidget):
         self._count = -1
         self._ever: set[int] = set()  # listed since the last reset_progress()
         self._advisor: Advisor | None = None
+        self._row_counter: Callable[[ReviewSegment], int] | None = None
         self._fix_label = "Fix with a circle"
 
         layout = QVBoxLayout(self)
@@ -190,6 +184,11 @@ class ReviewPanel(QWidget):
         self._advisor = advisor
         self.refresh_card()
 
+    def set_row_counter(self, counter: Callable[[ReviewSegment], int]) -> None:
+        """*counter(row)*: how many of its frames Accept all would store."""
+        self._row_counter = counter
+        self.refresh_card()
+
     def set_fix_label(self, text: str) -> None:
         """'Fix with a circle' (Auto engine) or 'Fix with edge points'."""
         if text != self._fix_label:
@@ -214,11 +213,20 @@ class ReviewPanel(QWidget):
         self.card.show_frame(
             frame_title(frame, self._images),
             position_text(segment) if segment is not None else "", advice,
-            row_count=segment.count if segment is not None else 0, fix_label=self._fix_label,
+            row_count=segment.count if segment is not None else 0,
+            accept_count=self._accept_count(segment), fix_label=self._fix_label,
             why=detail_text(item, frame, self._images, None) if item is not None else "")
+
+    def _accept_count(self, segment: ReviewSegment | None) -> int:
+        if segment is None:
+            return 0
+        return self._row_counter(segment) if self._row_counter is not None else segment.count
 
     def show_feedback(self, text: str, *, undo: bool = True) -> None:
         self.feedback.show_text(text, undo=undo)
+
+    def show_hint(self, text: str) -> None:
+        self.feedback.show_hint(text)
 
     def clear_feedback(self) -> None:
         self.feedback.clear()

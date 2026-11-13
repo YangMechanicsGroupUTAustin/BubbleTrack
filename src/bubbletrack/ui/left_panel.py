@@ -8,15 +8,11 @@ Settings asks for them (see MeasurePanel).
 from __future__ import annotations
 
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtWidgets import (
-    QGroupBox, QPushButton, QScrollArea, QVBoxLayout, QWidget,
-)
+from PyQt6.QtWidgets import QPushButton, QScrollArea, QVBoxLayout, QWidget
 
 from bubbletrack.ui.fit_controls import FitControls
 from bubbletrack.ui.image_source import ImageSource
-from bubbletrack.ui.manual_tab import ManualTab
 from bubbletrack.ui.measure_panel import MeasurePanel
-from bubbletrack.ui.tab_bar import MANUAL, PRETUNE, TabBar
 
 PANEL_WIDTH = 340
 
@@ -25,9 +21,7 @@ class LeftPanel(QWidget):
     """Fixed-width collapsible sidebar.
 
     The content scrolls; Fit and Export are pinned below it and never scroll
-    away.  ``tab_bar`` and ``manual_tab`` remain for manual fixing opened from
-    the Review panel: while the mode is Manual the fix tools replace the
-    Auto settings (Back returns).
+    away.  Fixing a frame happens in the Review dock.
     """
 
     export_clicked = pyqtSignal()
@@ -56,32 +50,15 @@ class LeftPanel(QWidget):
         layout.addWidget(self.image_source)
         self.measure_panel = MeasurePanel()
         layout.addWidget(self.measure_panel)
-        self.tab_bar = TabBar(self)  # not shown: the measuring / manual-fix mode
-        self.manual_tab = ManualTab()
-        layout.addWidget(self._build_manual_section())
         layout.addStretch()
         self.scroll_area.setWidget(content)
         outer.addWidget(self.scroll_area, 1)
         outer.addWidget(self._build_footer())
 
-        self.tab_bar.tab_changed.connect(self._on_mode_changed)
-        self._on_mode_changed(self.tab_bar.current_index())
-
     @property
     def pretune_tab(self) -> MeasurePanel:
         """Former name of :attr:`measure_panel` (kept for older callers)."""
         return self.measure_panel
-
-    def _build_manual_section(self) -> QGroupBox:
-        self.manual_section = QGroupBox("Fix frame by hand")
-        layout = QVBoxLayout(self.manual_section)
-        layout.addWidget(self.manual_tab)
-        self.manual_back_button = QPushButton("Back")
-        self.manual_back_button.setObjectName("secondaryBtn")
-        self.manual_back_button.setToolTip("Close the fix tools and return to the Auto settings")
-        self.manual_back_button.clicked.connect(lambda: self.tab_bar.select(PRETUNE))
-        layout.addWidget(self.manual_back_button)
-        return self.manual_section
 
     def _build_footer(self) -> QWidget:
         """Fit (with progress / Stop while running) and Export, always in view."""
@@ -99,8 +76,3 @@ class LeftPanel(QWidget):
         self.export_button.clicked.connect(self.export_clicked)
         footer.addWidget(self.export_button)
         return self.pinned_footer
-
-    def _on_mode_changed(self, idx: int) -> None:
-        manual = TabBar.name_of(idx) == MANUAL
-        self.manual_section.setVisible(manual)
-        self.measure_panel.setVisible(not manual)

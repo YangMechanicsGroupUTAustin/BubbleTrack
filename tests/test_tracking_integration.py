@@ -237,5 +237,5 @@ def test_tracking_review_reaches_the_queue_and_expires_on_edit(qapp, gui, drift_
     state.fit_flags[:] = [frozenset()] * len(state.radius)
     controller.bus.emit("tracking_review", (ReviewItem(7, ("lost",), 0),))
     assert 7 in rc.panel.frames()
-    controller._on_delete_point(7)  # the user dealt with it
+    controller._on_lock_range(7, 7, locked=True)  # the user accepted it
     assert 7 not in rc.panel.frames()

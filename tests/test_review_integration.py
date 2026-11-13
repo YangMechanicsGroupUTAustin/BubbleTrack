@@ -1,5 +1,5 @@
-"""The review dock is installed by the app controller, and deleting/clearing
-a frame clears its scoring so it is not mistaken for a rejected detection."""
+"""The review dock is installed by the app controller, and marking a frame
+"no bubble" clears its scoring so it is not mistaken for a rejected detection."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ def test_review_dock_installed(gui):
         controller.review.dock.parent() is window
 
 
-def test_chart_delete_clears_confidence_flags_metrics(gui, make_sequence):
+def test_no_bubble_clears_confidence_flags_metrics(gui, make_sequence):
     _, controller = gui
     _load(controller, make_sequence("A", 4))
     state = controller._get_state()
@@ -25,7 +25,7 @@ def test_chart_delete_clears_confidence_flags_metrics(gui, make_sequence):
     state.fit_confidence[1] = 0.2
     state.fit_flags[1] = frozenset({"non_circular"})
     state.fit_metrics["r_circle"][1] = 31.0
-    controller._on_delete_point(1)
+    controller._on_mark_no_bubble(1, 1)
     state = controller._get_state()
     assert np.isnan(state.fit_confidence[1])
     assert state.fit_flags[1] == frozenset()
@@ -33,16 +33,3 @@ def test_chart_delete_clears_confidence_flags_metrics(gui, make_sequence):
     assert all(item.frame != 1 for item in
                __import__("bubbletrack.controller.review_controller",
                           fromlist=["x"]).build_review_items(state))
-
-
-def test_manual_clear_clears_confidence_and_flags(gui, make_sequence):
-    _, controller = gui
-    _load(controller, make_sequence("A", 4))
-    state = controller._get_state()
-    state.radius[0] = 30.0
-    state.fit_confidence[0] = 0.2
-    state.fit_flags[0] = frozenset({"fragmented"})
-    controller.manual_ctrl.on_manual_clear()
-    state = controller._get_state()
-    assert np.isnan(state.fit_confidence[0])
-    assert state.fit_flags[0] == frozenset()

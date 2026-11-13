@@ -167,20 +167,6 @@ class TestSingleFrame:
         assert controller._get_state().edge_seed == pytest.approx((125.0, 200.0))
         assert controller.manual_ctrl._manual_points == []
 
-    def test_chart_refit_and_neighbor_refit_use_engine(self, gui, make_sequence, fake_engine):
-        _, controller = gui
-        _load(controller, make_sequence("A", 6))
-        _edge_mode(controller)
-        controller._on_refit_point(2)
-        assert controller._get_state().radius[2] == 40.0
-
-        state = controller._get_state()
-        state.radius[1], state.radius[3] = 30.0, 34.0
-        state.circle_fit_par[1] = state.circle_fit_par[3] = [120.0, 190.0]
-        controller._on_refit_point_with_neighbors(2)
-        prior = fake_engine.calls[-1]["params"].prior
-        assert prior == pytest.approx((120.0, 190.0, 32.0))
-        assert controller._get_state().fit_source[2] == FitSource.NEIGHBOR
 
 
 # -- Fit All -------------------------------------------------------------------------------

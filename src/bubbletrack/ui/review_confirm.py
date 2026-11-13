@@ -13,9 +13,8 @@ def accept_all_detail(empty: int) -> str:
     """The question's small print; *empty*: frames with no result and no guess."""
     if not empty:
         return DETAIL
-    frames = "1 frame has" if empty == 1 else f"{empty} frames have"
-    return (f"{DETAIL} {frames} neither a result nor a guess: "
-            "they are marked as no bubble.")
+    frames = "1 empty frame stays" if empty == 1 else f"{empty} empty frames stay"
+    return f"{DETAIL} {frames} for you to fix or mark."
 
 
 def accept_all_box(parent: QWidget | None, question: str, empty: int = 0) -> QMessageBox:

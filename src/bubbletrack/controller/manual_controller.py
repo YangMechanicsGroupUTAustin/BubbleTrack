@@ -11,21 +11,15 @@ import logging
 import numpy as np
 
 from bubbletrack.controller.base import BaseController
-from bubbletrack.controller.display_mixin import (
-    display_frame,
-    redraw_original,
-    refresh_chart,
-)
+from bubbletrack.controller.display_mixin import redraw_original, refresh_chart
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
-from bubbletrack.model.state import clear_frame_result
 from bubbletrack.model.suggestion import set_suggestion
 from bubbletrack.model.undo import UndoStack
-from bubbletrack.ui.circle_tool import TOOL_POINTS
 from bubbletrack.ui.fix_strip import FixView, NoFixView
 
 logger = logging.getLogger(__name__)
@@ -101,11 +95,6 @@ class ManualController(BaseController):
         self.w.header.set_status(
             "Manual selection cancelled: the frame changed", "#f59e0b",
         )
-
-    def on_tool_changed(self, tool: str) -> None:
-        """Leaving the "Click edge points" tool cancels a running selection."""
-        if tool != TOOL_POINTS:
-            self.cancel_selection()
 
     def cancel_selection(self) -> None:
         """Drop a running selection and its points (nothing is stored)."""
@@ -204,31 +193,3 @@ class ManualController(BaseController):
             self.w.original_panel.draw_points(pts, "#ef4444", 4.0)
         logger.info("Undo: %d points remaining", n)
         return True
-
-    def on_manual_clear(self) -> None:
-        self._end_selection()
-
-        # Mark the current frame as unprocessed, using the same sentinels as
-        # everywhere else (-1 / NaN): a 0 radius exported as a 0 um point.
-        idx = self.state.image_no
-        before = snapshot(self.state, [idx]) if self.state.radius is not None else None
-        clear_frame_result(self.state, idx)
-        if before is not None:
-            self._history.push(record_edit(self.state, f"clear of frame {idx + 1}", before))
-
-        display_frame(self.state, self.w, idx, self._set_state, self._cache)
-
-        # Refresh R-t chart
-        if self.state.radius is not None:
-            frames = np.arange(1, len(self.state.radius) + 1)
-            self.w.radius_chart.plot_all(frames, self.state.radius)
-
-        self.w.header.set_status("Ready", "#10b981")
-        self._results_changed()
-
-    def clear_points(self) -> None:
-        """Clear the manual points list (called on tab change)."""
-        self._selecting = False
-        self._manual_points.clear()
-        self._undo_stack.clear()
-        self._view.set_point_count(0)

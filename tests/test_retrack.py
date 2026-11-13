@@ -152,7 +152,6 @@ def test_edit_starts_a_retrack_after_the_debounce_and_locks_editing(qapp, app):
     assert controller.retrack.is_running()
     assert not lp.measure_panel.isEnabled()
     assert controller.review.panel.isEnabled()  # Review goes on: an edit restarts it
-    assert lp.manual_tab.isEnabled()  # fixes there cancel and restart the re-track
     assert lp.fit_controls.stop_button.isVisibleTo(lp) and lp.fit_controls.stop_button.isEnabled()
     assert "Re-tracking" in lp.fit_controls.progress_text()
     worker.finish()
@@ -190,7 +189,6 @@ def test_ctrl_z_undoes_the_whole_retrack(qapp, app):
 def test_undoing_the_edit_during_a_retrack_drops_its_result(qapp, app):
     window, controller = app
     state = controller._get_state()
-    window.left_panel.tab_bar.select("Manual")
     controller.file_ctrl.on_frame_changed(3)
     before = {i: capture(state, i) for i in range(N)}
     controller.circle_ctrl._store_guided(3, EdgeFrameFit(33.0, 100.0, 150.0, np.zeros((0, 2)),
@@ -303,7 +301,6 @@ def test_a_finishing_run_is_not_an_edit(qapp, app):
 
 def test_a_circle_fix_triggers_a_retrack(qapp, app):
     window, controller = app
-    window.left_panel.tab_bar.select("Manual")
     controller.file_ctrl.on_frame_changed(4)
     controller.circle_ctrl._store_guided(4, EdgeFrameFit(36.0, 100.0, 150.0, np.zeros((0, 2)),
                                                          None, 0.9, frozenset(), ""))

@@ -9,7 +9,7 @@ import pytest
 
 from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.state import update_state
+from bubbletrack.model.state import clear_frame_result, update_state
 
 N = 10
 
@@ -38,30 +38,6 @@ def app(gui, make_sequence):
     return window, controller, state, events
 
 
-def test_delete_range_keeps_locked_frames(app):
-    window, controller, state, events = app
-    state.fit_locked[4] = True
-    window.radius_chart.delete_range_requested.emit(3, 5)
-    assert list(state.radius[3:6]) == [-1.0, pytest.approx(42.2, abs=0.1), -1.0]
-    assert state.fit_source[3] == FitSource.NONE and np.isnan(state.fit_confidence[5])
-    assert state.radius[2] > 0 and state.radius[6] > 0
-    assert "1 locked kept" in window.header._status_label.text()
-    assert len(events) == 1
-
-
-def test_delete_range_of_only_locked_frames_changes_nothing(app):
-    window, _, state, events = app
-    state.fit_locked[2:4] = True
-    window.radius_chart.delete_range_requested.emit(2, 3)
-    assert (state.radius[2:4] > 0).all() and events == []
-
-
-def test_delete_range_is_clipped_to_the_sequence(app):
-    window, _, state, _ = app
-    window.radius_chart.delete_range_requested.emit(8, 50)
-    assert (state.radius[8:] == -1.0).all() and state.radius[7] > 0
-
-
 def test_lock_range_locks_fitted_frames_only_and_unlock_releases(app):
     window, _, state, events = app
     state.radius[6] = -1.0
@@ -72,15 +48,11 @@ def test_lock_range_locks_fitted_frames_only_and_unlock_releases(app):
     assert len(events) == 2
 
 
-@pytest.mark.parametrize("erase", ["chart_delete", "manual_clear"])
-def test_erasing_a_locked_frame_unlocks_it(app, erase):
+def test_erasing_a_locked_frame_unlocks_it(app):
     """Otherwise Fit All would skip the now-empty frame forever."""
-    _, controller, state, _ = app
+    _, _, state, _ = app
     state.fit_locked[0] = True
-    if erase == "chart_delete":
-        controller._on_delete_point(0)
-    else:
-        controller.manual_ctrl.on_manual_clear()  # current frame is 0
+    clear_frame_result(state, 0)
     assert state.radius[0] == -1.0 and not state.fit_locked[0]
 
 

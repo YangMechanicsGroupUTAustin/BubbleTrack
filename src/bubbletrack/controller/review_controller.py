@@ -42,6 +42,9 @@ logger = logging.getLogger(__name__)
 
 _WARN = "#f59e0b"
 _FRAME_ACTIONS = frozenset({"accept", "fix", "no_bubble"})
+NOTHING_TO_ACCEPT = "Nothing to accept here — F to fix, N if there is no bubble"
+NOTHING_TO_ACCEPT_IN_ROW = ("Nothing to accept in this row — F to fix a frame, "
+                            "Shift+N if there is no bubble")
 
 
 class ReviewController:
@@ -62,6 +65,8 @@ class ReviewController:
         self.flow = ReviewFlow(app, panel, self._go, self._unskip)
 
         panel.set_advisor(self._advice)
+        panel.set_row_counter(
+            lambda segment: len(review_actions.acceptable(self._state(), segment.frames)))
         panel.frame_activated.connect(self._go)
         panel.action_requested.connect(self.perform)
         panel.segment_changed.connect(self._show_range)
@@ -69,6 +74,7 @@ class ReviewController:
         app.bus.subscribe("run_state_changed", self._on_run_state)
         app.bus.subscribe("source_loaded", self._on_source_loaded)
         app.bus.subscribe("frame_changed", self._on_frame_changed)
+        app.bus.subscribe("run_finished", self._on_run_finished)
         app.bus.subscribe(RESULTS_CHANGED, lambda *_: self.refresh())
 
         self.shortcuts = ReviewShortcuts(window, {
@@ -138,6 +144,10 @@ class ReviewController:
         segment = self.panel.current_segment()
         if segment is None and action in ReviewPanel.ROW_ACTIONS:
             return
+        hint = self._nothing_to_accept(action, segment, frame)
+        if hint:
+            self.flow.hint(hint)  # Accept never means "no bubble"
+            return
         logger.info("Review: %s on frame %d (%s)", action, frame + 1,
                     span_text(segment) if segment is not None else "no row")
         old = self.panel.frames()
@@ -199,6 +209,16 @@ class ReviewController:
         self.memory.dismiss(self._state(), segment.frames)  # skip
         return f"{span_text(segment)} skipped: left as it is"
 
+    def _nothing_to_accept(self, action: str, segment: ReviewSegment | None,
+                           frame: int) -> str:
+        """The hint when Accept (all) would find nothing to store, else ''."""
+        state = self._state()
+        if action == "accept" and review_actions.is_empty(state, frame):
+            return NOTHING_TO_ACCEPT
+        if action == "accept_all" and not review_actions.acceptable(state, segment.frames):
+            return NOTHING_TO_ACCEPT_IN_ROW
+        return ""
+
     def _confirm_accept_all(self, segment: ReviewSegment) -> bool:
         """Ask once if Accept all would store guesses the user has not displayed."""
         state = self._state()
@@ -209,9 +229,10 @@ class ReviewController:
         # A re-track must not land under the question (its results would be
         # accepted unseen); the edit restarts its countdown anyway.
         self._app.retrack.cancel()
-        empty = sum(review_actions.is_empty(state, f) for f in segment.frames)
+        frames = len(review_actions.acceptable(state, segment.frames))
         if not review_confirm.ask_accept_all(
-                self.w, accept_all_question(segment.count, len(unseen)), empty=empty):
+                self.w, accept_all_question(frames, len(unseen)),
+                empty=segment.count - frames):
             return False
         return not self._fit_run and segment in self.panel.segments()
 
@@ -277,6 +298,17 @@ class ReviewController:
                 self.flow.clear()
         self.shortcuts.sync()
         self.fix_keys.sync()
+
+    def _on_run_finished(self, info: dict) -> None:
+        """After a Fit of every frame, start at the top of the list."""
+        state = self._state()
+        if len(info.get("frames", ())) != len(state.images or ()):
+            return  # a range refit: stay where the user was
+        rows = self.panel.segments()
+        if rows and self.panel.select_frame(rows[0].frames[0], keep_row=False):
+            summary = self.w.header.status()  # the run's "Done — ..." stays in view
+            self._go(rows[0].frames[0])
+            self.w.header.set_status(*summary)
 
     def _on_dock_visibility(self, _visible: bool) -> None:
         self.shortcuts.sync()

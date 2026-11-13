@@ -383,6 +383,24 @@ class TestRunLock:
         assert state.fit_locked[2] and controller._get_state().image_no == 5
         controller.bus.emit("run_state_changed", False)
 
+    def test_after_a_fit_review_starts_at_the_top_row(self, review):
+        window, controller, rc = review
+        _flag(controller, rc, f2=0.1, f5=0.3)
+        controller.file_ctrl.on_frame_changed(7)
+        n = len(controller._get_state().images)
+        window.header.set_status("Done — 1 frame(s) could not be read", "#f59e0b")
+        controller.bus.emit("run_finished", {"stopped": False, "frames": tuple(range(n))})
+        assert controller._get_state().image_no == 2
+        assert rc.panel.current_segment().frames == (2,)
+        assert window.header.status() == ("Done — 1 frame(s) could not be read", "#f59e0b")
+
+    def test_after_a_range_refit_review_stays(self, review):
+        window, controller, rc = review
+        _flag(controller, rc, f2=0.1, f5=0.3)
+        controller.file_ctrl.on_frame_changed(5)
+        controller.bus.emit("run_finished", {"stopped": False, "frames": (4, 5, 6)})
+        assert controller._get_state().image_no == 5
+
     def test_real_fit_all_locks_then_refreshes(self, qapp, review):
         window, controller, rc = review
         controller.auto_ctrl.on_auto_fit()

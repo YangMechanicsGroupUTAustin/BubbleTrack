@@ -234,6 +234,15 @@ class TestRuns:
         assert rc.fix.strip.isEnabled()
 
 
+def test_the_status_bar_says_manual_while_fixing(app):
+    window, controller, rc = app
+    rc.panel.step(1)
+    rc.perform("fix")
+    assert window.status_bar._mode_label.text() == "Mode: Manual"
+    rc.fix.cancel()
+    assert window.status_bar._mode_label.text() == "Mode: Measure"
+
+
 def test_the_fix_tools_do_not_use_the_old_manual_tab():
     """The Manual tab left the panel: nothing of Review's fixing may reach for it."""
     for module in (fix_mode, manual_controller, circle_controller, review_controller,

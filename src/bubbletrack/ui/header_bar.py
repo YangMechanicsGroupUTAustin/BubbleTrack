@@ -21,6 +21,7 @@ class HeaderBar(QWidget):
         layout.addWidget(title)
 
         # Status indicator
+        self._status_colour = "#10b981"
         self._status_dot = QLabel("\u25CF")
         self._status_dot.setStyleSheet("color:#10b981; font-size:10px;")
         layout.addWidget(self._status_dot)
@@ -32,7 +33,12 @@ class HeaderBar(QWidget):
 
     def set_status(self, text: str, colour: str = "#10b981"):
         self._status_label.setText(text)
+        self._status_colour = colour
         self._status_dot.setStyleSheet(f"color:{colour}; font-size:10px;")
 
     def status_text(self) -> str:
         return self._status_label.text()
+
+    def status(self) -> tuple[str, str]:
+        """(text, colour) on show, e.g. to put a run's summary back."""
+        return self._status_label.text(), self._status_colour

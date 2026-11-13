@@ -9,6 +9,8 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QWidget
 
 from bubbletrack.ui.frame_scrubber import format_frame_text, label_for
 
+MEASURE_MODE = "Measure"  # the status bar's mode outside fitting and fixing
+
 
 class StatusBar(QWidget):
     def __init__(self, parent: QWidget | None = None):
@@ -35,7 +37,7 @@ class StatusBar(QWidget):
 
         layout.addStretch()
 
-        self._mode_label = QLabel("Mode: Measure")
+        self._mode_label = QLabel(f"Mode: {MEASURE_MODE}")
         layout.addWidget(self._mode_label)
 
     def set_frame_labels(self, labels: Sequence[str]) -> None:

@@ -46,7 +46,10 @@ class ReviewFlow:
             return ""
         panel = self._panel
         new = panel.frames()
-        target = None if frame is None else next_in_segment(segment, frame, set(new))
+        # After a row action, frames it left (e.g. empty ones after Accept
+        # all) are next; after a frame action, the row's next frame.
+        after = segment.start - 1 if frame is None else frame
+        target = next_in_segment(segment, after, set(new))
         moved = ""
         if target is None:
             target = next_after_action(old, segment.end, new)
@@ -70,6 +73,11 @@ class ReviewFlow:
         self._panel.show_feedback(status.replace(UNDO_HINT, "") + _ENDINGS.get(moved, "."),
                                   undo=bool(self._skip) or self._edit is not None)
         self._app.w.header.set_status(status, _OK)
+
+    def hint(self, text: str) -> None:
+        """A short note in the feedback line (nothing was done: no Undo)."""
+        self.clear()
+        self._panel.show_hint(text)
 
     def check_stale(self) -> None:
         """Drop the line once the history no longer ends with its action."""

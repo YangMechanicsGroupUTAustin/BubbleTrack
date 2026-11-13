@@ -18,7 +18,7 @@ from bubbletrack.model.suggestion import Suggestion, set_suggestion, shown_sugge
 # Auto-selected reference per source; choosing reads several frames.
 _reference_cache: dict[tuple, int | None] = {}
 _reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference frame
-GUESS_HINT = "Auto's guess is shown dashed (A in Review accepts it)"
+GUESS_HINT = "Auto's guess is shown dashed (see Review)"
 
 
 def _source_key(state: AppState) -> tuple:

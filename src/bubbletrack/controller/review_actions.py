@@ -1,10 +1,12 @@
 """Review's result edits: Accept (A), Accept all (Shift+A), No bubble (N, Shift+N).
 
 Each is one undoable edit in the shared ``ResultHistory`` (Ctrl+Z, like a
-fix).  Row actions touch exactly the row's frames ("Accept all 23" means
-those 23), never other rows' frames inside its span.  Nothing here deletes
-a result: "no bubble" is the explicit way to say a frame is empty.  Each
-function returns the status text, or None if nothing changed.
+fix).  Row actions touch exactly the row's frames, never other rows'
+frames inside its span.  Accept stores results and Auto's guesses only: an
+empty frame (no result, no guess) may be a bubble Auto missed, so it stays
+for Fix or No bubble; "No bubble" is the only way to say a frame is empty,
+and nothing here deletes a result.  Each function returns the status text,
+or None if nothing changed.
 """
 
 from __future__ import annotations
@@ -20,7 +22,8 @@ from bubbletrack.model.result_history import record_edit, snapshot
 from bubbletrack.model.suggestion import shown_suggestion
 from bubbletrack.ui.review_text import span_text
 
-__all__ = ["UNDO_HINT", "accept_frame", "accept_segment", "is_empty", "mark_no_bubble"]
+__all__ = ["UNDO_HINT", "acceptable", "accept_frame", "accept_segment", "is_empty",
+           "mark_no_bubble"]
 
 
 def is_empty(state, frame: int) -> bool:
@@ -28,14 +31,17 @@ def is_empty(state, frame: int) -> bool:
     return not state.radius[frame] > 0 and shown_suggestion(state, frame) is None
 
 
+def acceptable(state, frames: Iterable[int]) -> list[int]:
+    """The *frames* Accept would store: those with a result or a guess."""
+    return [f for f in frames if not is_empty(state, f)]
+
+
 def accept_frame(app, frame: int) -> str | None:
     """Accept *frame*: the guess it shows (that guess only), else its result,
-    locked against Fit All.  An empty frame means "no bubble" (as N)."""
+    locked against Fit All.  None for an empty frame (nothing to accept)."""
     state = app._get_state()
-    if state.fit_locked is None:
+    if state.fit_locked is None or is_empty(state, frame):
         return None
-    if is_empty(state, frame):
-        return mark_no_bubble(app, [frame], f"Frame {frame + 1}")
     promotion = suggestion_actions.accept_shown_guess(state, frame)
     if promotion is not None:
         app._on_lock_range(frame, frame, locked=True)  # chart, autosave
@@ -51,16 +57,15 @@ def accept_frame(app, frame: int) -> str | None:
 
 
 def accept_segment(app, segment: ReviewSegment) -> str | None:
-    """Accept every frame of *segment*: each guess shown becomes the frame's
-    result, every frame is locked; frames with nothing to accept are
-    "no bubble" (locked empty)."""
+    """Accept *segment*'s frames that have a result or a guess: each guess
+    becomes the frame's result, and they are locked.  Empty frames stay as
+    they are (listed, for Fix or No bubble).  None if nothing changed."""
     state = app._get_state()
     locked = state.fit_locked
-    if locked is None:
+    frames = acceptable(state, segment.frames) if locked is not None else []
+    if not frames:
         return None
-    frames = list(segment.frames)
     before = snapshot(state, frames)
-    empty = [f for f in frames if is_empty(state, f)]
     stored = [f for f in suggestion_actions.guessed_frames(state, segment)
               if edge_support.accept_suggestion(state, f)]
     locked[frames] = True  # fit_source kept
@@ -69,9 +74,11 @@ def accept_segment(app, segment: ReviewSegment) -> str | None:
         return None
     app.history.push(edit)
     _changed(app, state, stored)
-    text = f"{span_text(segment)} accepted and locked"
+    left = segment.count - len(frames)
+    text = (f"{span_text(segment)} accepted and locked" if not left
+            else f"{len(frames)} of {span_text(segment).lower()} accepted and locked")
     notes = ([f"{len(stored)} of Auto's guesses stored"] if stored else []) + \
-        ([f"{len(empty)} empty frame(s) marked as no bubble"] if empty else [])
+        ([f"{left} empty frame{'s' if left != 1 else ''} left to fix or mark"] if left else [])
     return text + (f" ({'; '.join(notes)})" if notes else "") + UNDO_HINT
 
 
