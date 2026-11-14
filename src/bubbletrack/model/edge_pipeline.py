@@ -133,10 +133,30 @@ def _metrics(res) -> dict:
 
 def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
               job: EdgeJob) -> np.ndarray:
-    """The ROI as the engine sees it (frame / reference); see ``engine_view``."""
-    from bubbletrack.model.edge.engine import engine_view
+    """The ROI as the engine sees it (frame / reference), for display; see ``engine_view``.
 
-    return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
+    Where the reference frame is too dark or clipped the engine ignores the pixels and its
+    image holds a flat background value there; the display shows the frame's own brightness
+    instead (scaled so its background is ~1, like the view), so white stays white and no flat
+    patch is drawn.  The measurement is unchanged.
+    """
+    from bubbletrack.model.conventions import clamp_roi, roi_to_slice
+    from bubbletrack.model.edge.engine import engine_view, unusable_mask
+    from bubbletrack.model.edge.normalize import to_gray_frame
+
+    image = engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
+    if job.reference is None:
+        return image
+    blind = unusable_mask(job.reference, gridx, gridy)
+    if not blind.any():
+        return image
+    frame = to_gray_frame(raw).values
+    gx, gy = clamp_roi((int(gridx[0]), int(gridx[1])), (int(gridy[0]), int(gridy[1])),
+                       frame.shape[0], frame.shape[1])
+    own = np.asarray(frame[roi_to_slice(gx, gy)], dtype=np.float32)
+    seen = ~blind & np.isfinite(own)
+    level = float(np.median(own[seen] if seen.any() else own))
+    return np.where(blind, own / max(level, 1e-6), image).astype(np.float32)
 
 
 def _rejected_guess(res, confidence: float, metrics: dict,
