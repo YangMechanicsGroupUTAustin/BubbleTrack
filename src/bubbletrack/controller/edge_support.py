@@ -18,7 +18,6 @@ from bubbletrack.model.suggestion import Suggestion, set_suggestion, shown_sugge
 # Auto-selected reference per source; choosing reads several frames.
 _reference_cache: dict[tuple, int | None] = {}
 _reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference frame
-_unusable_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference and ROI
 GUESS_HINT = "Auto's guess is shown dashed (see Review)"
 
 
@@ -48,22 +47,6 @@ def reference_raw(state: AppState) -> np.ndarray | None:
         _reference_raw_cache.clear()
         _reference_raw_cache[key] = edge_pipeline.read_raw(current_source(state, idx))
     return _reference_raw_cache[key]
-
-
-def unusable_pixels(state: AppState) -> np.ndarray | None:
-    """The ROI's pixels Auto cannot use with the reference frame (bool, read-only; None
-    without a reference).  They depend on the reference and the ROI only, so they are
-    computed once per source, reference and ROI: scrubbing frames reuses them."""
-    idx = reference_index(state)
-    if idx is None:
-        return None
-    key = (*_source_key(state), idx, tuple(state.gridx), tuple(state.gridy))
-    if key not in _unusable_cache:
-        mask = edge_pipeline.unusable_pixels(reference_raw(state), state.gridx, state.gridy)
-        mask.flags.writeable = False
-        _unusable_cache.clear()
-        _unusable_cache[key] = mask
-    return _unusable_cache[key]
 
 
 def build_job(state: AppState, max_radius: float, *,

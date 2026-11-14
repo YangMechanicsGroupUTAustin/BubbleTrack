@@ -2,8 +2,7 @@
 
 Each colour means one thing everywhere: red = the measured outline, indigo =
 the circle with the result's radius, yellow dashes = Auto's guess (not a
-result), cyan dashes = a circle you drew (not stored), green box = the ROI,
-violet fill (Auto view) = pixels the reference frame leaves unusable.
+result), cyan dashes = a circle you drew (not stored), green box = the ROI.
 An image panel adds one key entry per kind of
 overlay it draws (:func:`default_text` names the known colours) and shows the
 key in a small, mouse-transparent box fixed to the viewport: it does not move
@@ -28,7 +27,6 @@ USER_CIRCLE_COLOUR = "#22d3ee"  # your drawn circle, not stored (cyan dashes: ne
 FOUND_COLOUR = "#a1a1aa"  # what Auto found instead of a drawn circle (grey)
 PAINT_BUBBLE_COLOUR = "#22c55e"  # ML assist: painted bubble / P(bubble) tint
 PAINT_BACKGROUND_COLOUR = "#ef4444"  # ML assist: painted background
-UNUSABLE_COLOUR = "#a855f7"  # Auto view: too dark or saturated in the reference (violet fill)
 
 KINDS = ("line", "dash", "dots", "box", "fill")
 
@@ -43,7 +41,6 @@ _DEFAULT_TEXTS: dict[tuple[str, str], str] = {
     (FOUND_COLOUR, "line"): "Auto found (not stored)",
     (FOUND_COLOUR, "dots"): "Auto found (not stored)",
     (ROI_COLOUR, "box"): "ROI",
-    (UNUSABLE_COLOUR, "fill"): "not usable (reference)",
 }
 # Key order: lines (results first, then the guess and the circle tool), then
 # patches in the order they were added, the ROI box last.

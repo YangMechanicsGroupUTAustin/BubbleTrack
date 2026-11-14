@@ -139,14 +139,6 @@ def view_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
     return engine_view(raw, gridx, gridy, reference=job.reference, params=job.params)
 
 
-def unusable_pixels(reference: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int]) -> np.ndarray:
-    """The ROI's pixels Auto cannot use with *reference* (too dark or saturated there);
-    see ``engine.unusable_mask``."""
-    from bubbletrack.model.edge import engine
-
-    return engine.unusable_mask(reference, gridx, gridy)
-
-
 def _rejected_guess(res, confidence: float, metrics: dict,
                     max_radius: float) -> Suggestion | None:
     """The candidate of a fit rejected for its confidence or as unmeasurable (a plausible

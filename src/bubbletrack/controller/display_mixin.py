@@ -11,7 +11,7 @@ import logging
 
 import numpy as np
 
-from bubbletrack.controller import suggestion_view, unusable_view
+from bubbletrack.controller import suggestion_view
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
@@ -264,7 +264,6 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
 
     A flat, even background means the reference frame matches this frame;
     blotches or texture mean it does not (moved sample, changed lighting).
-    Pixels the reference leaves unusable are filled in violet (``unusable_view``).
     """
     panel = window.binary_panel
     panel.set_title(ENGINE_VIEW_TITLE, ENGINE_VIEW_TIP)
@@ -273,9 +272,6 @@ def show_engine_view(state: AppState, window, idx: int, view: np.ndarray | None 
     if view is None:
         return
     panel.set_image(np.clip(view / _VIEW_WHITE, 0.0, 1.0).astype(np.float32))
-    note, why = unusable_view.title_note(unusable_view.draw_unusable(state, panel))
-    if note:
-        panel.set_title(ENGINE_VIEW_TITLE, f"{ENGINE_VIEW_TIP}\n\n{why}", note)
     xy = state.circle_xy[idx] if state.circle_xy is not None else None
     origin = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
     if xy is not None and state.radius is not None and state.radius[idx] > 0:

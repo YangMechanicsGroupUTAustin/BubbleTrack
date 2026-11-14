@@ -90,10 +90,6 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
         self._title_label = ElidedLabel(title)
         self._title_label.setObjectName("sectionTitle")
         top.addWidget(self._title_label)
-        self._title_note = ElidedLabel("")  # amber (style.qss), e.g. "· 27 % not usable"
-        self._title_note.setObjectName("titleNote")
-        self._title_note.hide()
-        top.addWidget(self._title_note)
         top.addStretch()
 
         self._roi_label = ElidedLabel("")  # like the title: never widens the panel
@@ -131,21 +127,10 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
 
     # -- Public API --
 
-    def set_title(self, title: str, tooltip: str = "", note: str = "") -> None:
-        """The panel's title (cut with "…" when narrow) and what it shows, on hover.
-
-        A *note* follows the title in amber: a warning about what the panel shows (the
-        tooltip explains it).  Every call sets it, so no note outlives its title.
-        """
+    def set_title(self, title: str, tooltip: str = "") -> None:
+        """The panel's title (cut with "…" when narrow) and what it shows, on hover."""
         self._title_label.setText(title)
         self._title_label.setToolTip(tooltip)
-        self._title_note.setText(note)
-        self._title_note.setToolTip(tooltip if note else "")
-        self._title_note.setVisible(bool(note))
-
-    def title_note(self) -> str:
-        """The amber note after the title ("" when none)."""
-        return self._title_note.text()
 
     def set_image(self, img: np.ndarray):
         """Display a greyscale or binary image (float [0,1] or bool)."""

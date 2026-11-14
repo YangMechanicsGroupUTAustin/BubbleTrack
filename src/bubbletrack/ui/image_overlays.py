@@ -95,16 +95,14 @@ class OverlayDrawingMixin:
         else:
             self.draw_points(points, colour, 2.0, legend=legend)
 
-    def draw_rgba_overlay(self, rgba: np.ndarray, legend: tuple[LegendEntry, ...] = (), *,
-                          z: float = 1.0) -> None:
+    def draw_rgba_overlay(self, rgba: np.ndarray, legend: tuple[LegendEntry, ...] = ()) -> None:
         """Lay an (H, W, 4) uint8 image over the frame (scene pixel = array pixel);
-        *legend* lists what its colours mean.  *z* 1 lays it over the line overlays
-        (which are at 0); between -1 (the frame) and 0 it lies under them."""
+        *legend* lists what its colours mean."""
         img = np.ascontiguousarray(rgba, dtype=np.uint8)
         h, w = img.shape[:2]
         qimg = QImage(img.tobytes(), w, h, 4 * w, QImage.Format.Format_RGBA8888)
         item = self._scene.addPixmap(QPixmap.fromImage(qimg))
-        item.setZValue(z)
+        item.setZValue(1)
         self._overlay_items.append(item)
         for entry in legend:
             self._legend.add(entry)
