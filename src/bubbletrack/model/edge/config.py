@@ -40,9 +40,7 @@ class NormalizeConfig:
     """Minimum local weight of kept pixels for the local correction to apply."""
 
     ref_blur_sigma: float = 1.0
-    ref_invalid_level: float = 0.12
-    """Reference pixels darker than this fraction of its median carry no usable light."""
-    ref_invalid_dilate_px: int = 5
+    """Gaussian scale (px) of the reference before the division (no reference pixel is excluded)."""
     gain_min_pixels: int = 100
     """Minimum valid pixels to estimate the frame-to-reference gain (flicker)."""
 

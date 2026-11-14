@@ -3,8 +3,9 @@
 Pipeline (ROI-local, 0-based pixel coordinates inside; 1-based full-image
 coordinates in and out, i.e. pixel ``(i, j)`` has coordinate ``(i+1, j+1)``):
 
-A  normalise by the reference frame (gain + residual surface) or, without one,
-   by a robust background surface;  B  coarse mask at 50 % contrast;
+A  normalise by the reference frame (gain + residual surface; every pixel keeps its
+   ratio, only non-finite ones are invalid) or, without one, by a robust background
+   surface;  B  coarse mask at 50 % contrast;
 E  candidate selection;  C  sub-pixel edges along ~2*pi*R rays;
 D  robust circle fit of the ray edges (finds the bubble) and the outer extent;
 G  the bubble as a region: outer iso-contour at the median ray-edge level,
@@ -27,9 +28,7 @@ from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge.config import DEFAULT_CONFIG, EdgeConfig
 from bubbletrack.model.edge.definition import FrameStats, measure
 from bubbletrack.model.edge.fit import CircleFit, fit_circle
-from bubbletrack.model.edge.normalize import (
-    normalize_frame_roi, reference_invalid, reference_unusable, to_gray_frame,
-)
+from bubbletrack.model.edge.normalize import normalize_frame_roi, to_gray_frame
 from bubbletrack.model.edge.outline import Outline, RayPoints, background_noise, measure_outline
 from bubbletrack.model.edge.quality import FitStats, confidence, fit_stats, measurement_flags
 from bubbletrack.model.edge.rays import (
@@ -46,8 +45,15 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.3.0"
-"""1.3.0: the default radius is the least-squares (Taubin, one outlier pass) circle through the
+ENGINE_VERSION = "edge-1.4.0"
+"""1.4.0: no reference pixel is excluded any more (owner decision 2026-11-14).  Up to 1.3.0,
+stage A marked the pixels where the blurred reference was darker than 0.12 x its median or
+lay in a saturated blob, widened by 5 px, as invalid: they were set to the background 1.0
+and later stages dropped edges next to them and completed regions touching them.  Now every
+pixel holds its real frame / reference ratio; only non-finite (NaN / inf) pixels of the frame
+or the reference are invalid.  The frame's own saturated blobs are still excluded for a dark
+bubble.
+1.3.0: the default radius is the least-squares (Taubin, one outlier pass) circle through the
 bubble outline instead of the robust circle through the ray edges (owner decision 2026-11-13)."""
 
 __all__ = ["ENGINE_VERSION", "EdgeParams", "EdgeResult", "detect_edge", "detect_edge_with_config"]
@@ -211,28 +217,15 @@ def engine_view(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
     return image
 
 
-def unusable_mask(reference: np.ndarray, gridx, gridy, *, config: EdgeConfig = DEFAULT_CONFIG) -> np.ndarray:
-    """The ROI's pixels the engine cannot use with this reference frame (bool, ROI-sized).
-
-    Too dark (no light), saturated or not finite in the reference, widened a little: every
-    frame's measurement ignores them (:func:`engine_view` shows them as background).  Exactly
-    the reference part of stage A's invalid pixels.  Raises ValueError like :func:`detect_edge`.
-    """
-    ref = to_gray_frame(reference)
-    gx, gy, _ = _parse_roi(gridx, gridy, ref.values.shape)
-    roi = roi_to_slice(gx, gy)
-    return reference_unusable(ref.values[roi], reference_invalid(ref, roi, config.normalize), config.normalize)
-
-
 def _steep_edges(e: np.ndarray, invalid: np.ndarray, exclude: np.ndarray, coarse: CoarseMask,
                  sel: Selection, params: EdgeParams, cfg: EdgeConfig,
                  rng: np.random.Generator) -> tuple[RayEdges, CircleFit | None]:
     """Ray passes around the candidate circle, each re-centred on the previous fit.
 
-    Only genuine wall points count: rays stop at *invalid* pixels and the ROI
-    border, and a point next to *exclude* pixels (a step at saturated glare) is
-    dropped.  The reported fit is a final robust fit of the last pass's points
-    (a fresh RANSAC draw), exactly as in the prototype.
+    Only genuine wall points count: rays stop at *invalid* (non-finite) pixels and
+    the ROI border, and a point next to *exclude* pixels (a step at the frame's
+    saturated glare) is dropped.  The reported fit is a final robust fit of the last
+    pass's points (a fresh RANSAC draw), exactly as in the prototype.
     """
     circle, window = sel.best.circle, None
     edges = None

@@ -3,7 +3,7 @@
 The bubble's interior belongs to it whatever it shows (a bright centre spot,
 rings, a transparent core): the body is the region inside its OUTER boundary.
 Interiors enclosed by dark pixels alone are always filled.  Interiors closed
-only with the help of excluded pixels (saturated glare, dead reference pixels)
+only with the help of excluded pixels (the frame's saturated glare, non-finite pixels)
 or of the ROI border (a clipped bubble's bright core), or by the steep edge the
 rays found where the dark wall itself is broken, or across a gap in the wall a
 few pixels wide (a transparent bubble, a faint wall), are filled when the
