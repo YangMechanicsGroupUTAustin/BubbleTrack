@@ -115,22 +115,43 @@ def test_background_surface_flattens_vignette_and_ramp():
     assert np.median(n[_disk((h, w), 60, 100, 20)]) < 0.2
 
 
-def test_reference_normalisation_corrects_gain_and_marks_dead_pixels():
+def test_reference_normalisation_corrects_gain_and_keeps_a_dark_wall():
+    # edge-1.4.0: a black wall in the reference is divided like every other pixel (nothing
+    # is excluded); the same wall in the frame then normalises to the background
     h, w = 100, 160
     rng = np.random.default_rng(1)
     ref = (20000 + 500 * rng.standard_normal((h, w))).astype(np.float32)
-    ref[:, :20] = 50.0                                   # black wall: no light in the reference
+    ref[:, :20] = 50.0                                   # black wall: almost no light in the reference
     frame = 1.2 * ref                                    # flicker: 20 % brighter
     disk = _disk((h, w), 50, 90, 20)
     frame = np.where(disk, 0.1 * frame, frame).astype(np.float32)
     out = normalize_roi(frame, np.zeros((h, w), bool), CFG, reference=ref)
     assert out.gain == pytest.approx(1.2, rel=0.02)
-    assert out.invalid[:, :20].all()
-    assert np.all(out.image[out.invalid] == 1.0)
-    bg = ~out.invalid & ~_disk((h, w), 50, 90, 26)
+    assert not out.invalid.any()
+    assert np.all(np.isfinite(out.image))
+    assert np.median(out.image[:, :20]) == pytest.approx(1.0, abs=0.05)
+    bg = ~_disk((h, w), 50, 90, 26)
     assert abs(np.median(out.image[bg]) - 1.0) < 0.01
     assert np.median(out.image[_disk((h, w), 50, 90, 15)]) < 0.2
     assert out.method.startswith("reference")
+
+
+def test_only_non_finite_pixels_are_invalid():
+    h, w = 60, 80
+    ref = np.full((h, w), 20000.0, np.float32)
+    ref[:, :10] = 0.0                                    # no light at all: the divisor is floored
+    ref[40:50, 50:70] = 65535.0                          # a clipped block
+    frame = ref.copy()
+    invalid = np.zeros((h, w), bool)
+    invalid[5:8, 30:35] = True                           # e.g. NaN in the frame
+    out = normalize_roi(frame, np.zeros((h, w), bool), CFG, reference=ref, invalid=invalid)
+    np.testing.assert_array_equal(out.invalid, invalid)
+    assert np.all(np.isfinite(out.image))
+    assert np.all(out.image[invalid] == 1.0)
+    assert np.all(out.image[:, :5] == 0.0)               # 0 / 0 reads 0 (no light in either), not NaN
+    assert out.gain == pytest.approx(1.0, rel=1e-3)
+    assert np.median(out.image[42:48, 52:68]) == pytest.approx(1.0, abs=0.02)  # clipped block: real ratio
+    assert np.median(out.image[:, 15:]) == pytest.approx(1.0, abs=0.01)
 
 
 def test_reference_free_normalisation_reports_its_method():

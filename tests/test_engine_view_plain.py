@@ -1,11 +1,13 @@
-"""The Auto view draws no extra fill or title note for the reference pixels Auto
-cannot use (owner, 2026-11-13: remove the violet "not usable" fill); driven through
-the real window offscreen."""
+"""The Auto view draws no extra fill or title note over dark or clipped areas of the
+reference frame (owner, 2026-11-13: remove the violet "not usable" fill; 2026-11-14: no
+pixel is excluded at all, so the view is the engine's image as it is); the first test
+drives the real window offscreen."""
 
 from __future__ import annotations
 
 import cv2
 import numpy as np
+import pytest
 from PyQt6.QtWidgets import QGraphicsPixmapItem
 
 from bubbletrack.controller.display_mixin import ENGINE_VIEW_TITLE
@@ -15,7 +17,7 @@ from conftest import write_sequence
 RADII = [0.0, 0.0, 30.0, 40.0, 50.0]  # frame 1: no bubble (the reference)
 
 
-def test_unusable_reference_pixels_get_no_fill_key_or_note(gui, tmp_path):
+def test_dark_or_clipped_reference_areas_get_no_fill_key_or_note(gui, tmp_path):
     window, controller = gui
     folder = write_sequence(tmp_path / "seq", RADII)
     for path in sorted(folder.glob("*.tiff")):  # a dark band and glare in every frame
@@ -34,27 +36,26 @@ def test_unusable_reference_pixels_get_no_fill_key_or_note(gui, tmp_path):
     assert not any("not usable" in text for text in panel.legend_texts())
 
 
-def test_auto_view_has_no_flat_patches_where_the_reference_is_unusable():
-    # Owner: no grey "mask" on the image.  Display only: where the reference frame is too
-    # dark or clipped, the Auto view shows the plain frame / reference values instead of a
-    # flat background fill; everywhere else it is the engine's own image (measurement unchanged).
+def test_auto_view_is_the_engine_image_with_no_flat_patch():
+    # Owner: no grey "mask" on the image, and no pixel is excluded (edge-1.4.0): where the
+    # reference frame is very dark or clipped the Auto view shows the real frame / reference
+    # ratio, and it is exactly the image the engine measures
     from bubbletrack.model import edge_pipeline
     from bubbletrack.model.edge import EdgeParams
-    from bubbletrack.model.edge.engine import engine_view, unusable_mask
+    from bubbletrack.model.edge.engine import engine_view
 
     rng = np.random.default_rng(0)
-    ref = np.full((120, 160), 30000, np.uint16)
-    ref[:30, :] = 300  # almost no light in the reference
-    ref[90:110, 10:40] = 65535  # clipped
-    frame = (ref * rng.uniform(0.8, 1.2, ref.shape)).clip(0, 65535).astype(np.uint16)
-    frame[:30, :] = rng.integers(200, 20000, (30, 160))  # light reaches the band now
+    ref = rng.normal(30000, 300, (120, 160))
+    ref[:30, :] *= 0.03  # almost no light in the reference (the old rule excluded it)
+    frame = ref * rng.uniform(0.9, 1.1, ref.shape)
+    ref[90:110, 10:40] = 65535  # clipped in the reference only
+    ref, frame = (np.round(a).clip(0, 65535).astype(np.uint16) for a in (ref, frame))
     roi = ((1, 120), (1, 160))
     job = edge_pipeline.EdgeJob(params=EdgeParams(), reference=ref, max_radius=160.0)
 
     shown = edge_pipeline.view_edge(frame, *roi, job)
-    engine = engine_view(frame, *roi, reference=ref, params=EdgeParams())
-    blind = unusable_mask(ref, *roi)
-    assert blind[:30].all()
-    assert np.ptp(shown[blind]) > 0.1  # real values, not one flat fill
-    assert np.array_equal(shown[~blind], engine[~blind])  # the engine's image elsewhere
-    assert np.all(engine[blind] == 1.0)  # the measurement still ignores them
+    np.testing.assert_array_equal(shown, engine_view(frame, *roi, reference=ref, params=EdgeParams()))
+    assert np.all(np.isfinite(shown))
+    for area in (shown[:28, :], shown[92:108, 12:38]):
+        assert np.std(area) > 0.01 and not np.any(area == 1.0)  # real values, not one flat fill
+    assert np.median(shown[:28, :]) == pytest.approx(1.0, abs=0.05)  # the static dark band divides out

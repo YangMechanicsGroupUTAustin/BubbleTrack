@@ -237,7 +237,7 @@ def find_region(img: np.ndarray, level: float, exclude: np.ndarray, candidate: t
     level : float
         Iso level of the edge in *img* (the engine passes ``image - level map`` and 0).
     exclude : ndarray of bool
-        Pixels without usable data (saturated glare, dead reference pixels).
+        Pixels without usable data (the frame's saturated glare, non-finite pixels).
     candidate : (row, col)
         A dark point of the selected candidate (its deepest pixel).
     circle : (rc, cc, R) or None

@@ -5,6 +5,10 @@ it.  With a bubble-free reference frame, ``N = I / (gain * B_ref)`` corrected
 by a smooth residual surface; without one, ``N = I / B_hat`` with ``B_hat`` a
 robust polynomial surface plus a masked local correction.  All work is done in
 float32 on the full-bit-depth data.
+
+No pixel is excluded for being dark or saturated in the reference frame (owner
+decision 2026-11-14): ``N`` holds the real ratio everywhere.  The only pixels
+without a value are the non-finite (NaN / inf) ones of the frame or the reference.
 """
 
 from __future__ import annotations
@@ -43,8 +47,7 @@ class Normalized:
     saturated: np.ndarray
     """Saturated blobs of the frame (bool)."""
     invalid: np.ndarray
-    """Pixels without usable data: dark or saturated in the reference (:func:`reference_unusable`),
-    or non-finite in the frame."""
+    """Pixels without data: non-finite (NaN / inf) in the frame or in the reference."""
     method: str
     gain: float
 
@@ -196,9 +199,15 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
 
 def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfig, *,
                   reference: np.ndarray | None = None,
-                  ref_invalid: np.ndarray | None = None,
                   invalid: np.ndarray | None = None) -> Normalized:
     """Normalise an ROI so that its background is 1.0.
+
+    With a *reference*, every pixel gets the ratio frame / blurred reference, however
+    dark or saturated the reference is there; the divisor is floored at ``_EPS`` so the
+    ratio stays finite (0 where neither frame has light).  Where the reference has almost
+    no light but the frame has some, the ratio can be huge: the gain (a median) ignores
+    it, but the residual surface is a least-squares fit and is dragged by a large area of
+    such pixels.
 
     Parameters
     ----------
@@ -210,10 +219,8 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
     reference : ndarray, optional
         float32 ROI of a bubble-free reference frame.  None selects the
         reference-free surface normalisation.
-    ref_invalid : ndarray of bool, optional
-        Pixels of the reference without usable data (saturated, non-finite).
     invalid : ndarray of bool, optional
-        Pixels of the frame without usable data (non-finite).
+        Pixels without data (non-finite in the frame or the reference): they get 1.0.
 
     Returns
     -------
@@ -226,8 +233,7 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
         image = np.where(invalid, 1.0, image).astype(np.float32)
         method = f"surface(cubic+normconv {cfg.bg_sigma:g})" + _no_background_note(saturated | invalid)
         return Normalized(image, saturated, invalid, method, 1.0)
-    blurred = _blur_reference(reference, cfg)
-    invalid |= _unusable(blurred, ref_invalid, cfg)
+    blurred = cv2.GaussianBlur(reference, (0, 0), cfg.ref_blur_sigma)
     ratio = values / np.maximum(blurred, _EPS)
     ok = ~invalid & ~saturated
     gain = float(np.median(ratio[ok])) if ok.sum() > cfg.gain_min_pixels else 1.0
@@ -245,61 +251,21 @@ def normalize_frame_roi(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slic
 
     Returns (normalized, saturated, working image, excluded pixels): the working image is
     the normalised one, mirrored for a bright bubble (*dark* False) so the bubble is dark.
+    The excluded pixels are the frame's own saturated blobs (dark bubbles only) and the
+    pixels without data (non-finite in the frame or the reference); no pixel is excluded
+    for being dark or saturated in the reference.
     """
     values = frame.values[roi]
     sat = saturation_mask(values, frame.full_scale, cfg)
     # a bright bubble may itself be saturated: then saturation is signal, not glare
     sat_excl = sat if dark else np.zeros_like(sat)
-    ref_values, ref_bad = None, None
+    invalid = frame.non_finite[roi]
+    ref_values = None
     if ref is not None:
-        ref_values, ref_bad = ref.values[roi], reference_invalid(ref, roi, cfg)
-    norm = normalize_roi(values, sat_excl, cfg, reference=ref_values, ref_invalid=ref_bad,
-                         invalid=frame.non_finite[roi])
+        ref_values, invalid = ref.values[roi], invalid | ref.non_finite[roi]
+    norm = normalize_roi(values, sat_excl, cfg, reference=ref_values, invalid=invalid)
     image = norm.image if dark else (2.0 - norm.image).astype(np.float32)
     return norm, sat, image, sat_excl | norm.invalid
-
-
-def reference_invalid(ref: GrayFrame, roi: tuple[slice, slice], cfg: NormalizeConfig) -> np.ndarray:
-    """Reference pixels of the ROI without data of their own: saturated blobs, non-finite."""
-    return saturation_mask(ref.values[roi], ref.full_scale, cfg) | ref.non_finite[roi]
-
-
-def reference_unusable(reference: np.ndarray, ref_invalid: np.ndarray | None,
-                       cfg: NormalizeConfig) -> np.ndarray:
-    """Pixels of a reference ROI without usable data: the reference part of ``Normalized.invalid``.
-
-    Dark (the blurred reference below ``ref_invalid_level`` times its median: no light) or in
-    *ref_invalid* (saturated blobs, non-finite pixels), widened by ``ref_invalid_dilate_px``.
-    :func:`normalize_roi` gives them the background value 1.0 in every frame, so the
-    measurement cannot see a bubble there.
-
-    Parameters
-    ----------
-    reference : ndarray
-        float32 ROI of the bubble-free reference frame.  It is not modified.
-    ref_invalid : ndarray of bool, optional
-        Pixels of the reference without data of their own (saturated, non-finite).
-    cfg : NormalizeConfig
-
-    Returns
-    -------
-    ndarray of bool
-        Same shape as *reference*.
-    """
-    return _unusable(_blur_reference(reference, cfg), ref_invalid, cfg)
-
-
-def _blur_reference(reference: np.ndarray, cfg: NormalizeConfig) -> np.ndarray:
-    return cv2.GaussianBlur(reference, (0, 0), cfg.ref_blur_sigma)
-
-
-def _unusable(blurred: np.ndarray, ref_invalid: np.ndarray | None, cfg: NormalizeConfig) -> np.ndarray:
-    """:func:`reference_unusable` of the already blurred reference."""
-    dead = blurred < cfg.ref_invalid_level * float(np.median(blurred))
-    if ref_invalid is not None:
-        dead = dead | ref_invalid
-    k = cfg.ref_invalid_dilate_px
-    return cv2.dilate(dead.astype(np.uint8), np.ones((k, k), np.uint8)) > 0
 
 
 def _no_background_note(excluded: np.ndarray) -> str:

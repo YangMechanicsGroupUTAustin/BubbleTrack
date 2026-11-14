@@ -148,6 +148,12 @@ def test_labelled_bubble_frames_on_lic():
     rejected 83/85 (79).  13 frames lost (06: 7, 08: 4, 09: 2; 11 of them guesses below the
     gate, where the outline takes in wall texture or misses a transparent wall), 1 gained (07);
     on lic_hard the same change gains 10 (79 -> 89 / 182).
+
+    Measured with no reference pixel excluded (edge-1.4.0, 2026-11-14): 195/235 = 83.0 % agree;
+    198 bubble frames accepted, 184 of them correct; no-bubble frames rejected 80/85 (83).
+    06: 16 -> 21 (bubbles next to the dark wall are no longer cut off at it), 07: 2 -> 0,
+    09: 26 -> 25;
+    on lic_hard 89 -> 79 / 182 (04: 9 -> 1).
     """
     labels = _labels()
     crit = labels["criterion"]
