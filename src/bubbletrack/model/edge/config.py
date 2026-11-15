@@ -30,6 +30,9 @@ class NormalizeConfig:
     bg_iterations: int = 5
     bg_dark_start: float = 0.5
     """Pixels darker than this fraction of the median are excluded from the first fit."""
+    bg_dark_hold: float = 0.3
+    """Pixels darker than this fraction of the median stay excluded from every later fit too,
+    so dense speckle never lets a big dark bubble back in as background."""
     bg_dark_k: float = 4.0
     bg_dark_floor: float = 0.015
     bg_bright_k: float = 6.0

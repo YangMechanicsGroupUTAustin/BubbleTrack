@@ -145,7 +145,10 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
 
     A cubic polynomial is fitted on a shrunk image with iterative rejection of
     dark and bright outliers, then multiplied by a masked normalised-convolution
-    correction that captures medium-scale illumination the cubic misses.
+    correction that captures medium-scale illumination the cubic misses.  Pixels
+    below ``bg_dark_hold`` x the median are never used: in dense speckle the
+    rejection band is so wide that a big dark bubble would otherwise be re-admitted
+    and lifted to the background level.
 
     Parameters
     ----------
@@ -172,6 +175,7 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
         keep = np.ones_like(keep)
     med = float(np.median(y[keep]))
     keep &= y > cfg.bg_dark_start * med
+    clearly_dark = y <= cfg.bg_dark_hold * med
     surface = np.full(small.shape, med, np.float32)
     k3 = np.ones((3, 3), np.uint8)
     for _ in range(cfg.bg_iterations):
@@ -185,7 +189,7 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
         bad = ((res < -max(cfg.bg_dark_k * sig, cfg.bg_dark_floor))
                | (res > max(cfg.bg_bright_k * sig, cfg.bg_bright_floor)) | ex_s)
         bad = cv2.dilate(bad.astype(np.uint8), k3) > 0
-        keep = ~bad.ravel()
+        keep = ~bad.ravel() & ~clearly_dark
     ratio = small / np.maximum(surface, _EPS)
     wgt = keep.reshape(small.shape).astype(np.float32)
     sig_s = cfg.bg_sigma / f

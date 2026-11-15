@@ -263,7 +263,7 @@ def test_the_provenance_names_the_circle():
     assert circle["points"] == len(res.edge_xy) and 0.9 < circle["kept"] <= 1.0
     assert tuple(circle["centre"]) == pytest.approx((res.rc, res.cc), abs=1e-3)
     assert circle["radius"] == pytest.approx(res.radius, abs=1e-3)
-    assert res.provenance["engine"] == "edge-1.4.0"
+    assert res.provenance["engine"] == "edge-1.5.0"
 
 
 # ------------------------------------------------------------------ every consumer gets the same circle

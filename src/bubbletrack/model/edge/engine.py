@@ -45,8 +45,12 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.4.0"
-"""1.4.0: no reference pixel is excluded any more (owner decision 2026-11-14).  Up to 1.3.0,
+ENGINE_VERSION = "edge-1.5.0"
+"""1.5.0: the background surface never uses pixels darker than 0.3 x the median (owner
+decision 2026-11-15).  Up to 1.4.0 they were left out of the first fit only; in dense speckle
+the later fits re-admitted a big dark bubble as background, which lifted its inside to the
+background level (lic_hard/02 frames 6-41 gave no result).
+1.4.0: no reference pixel is excluded any more (owner decision 2026-11-14).  Up to 1.3.0,
 stage A marked the pixels where the blurred reference was darker than 0.12 x its median or
 lay in a saturated blob, widened by 5 px, as invalid: they were set to the background 1.0
 and later stages dropped edges next to them and completed regions touching them.  Now every

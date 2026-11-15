@@ -115,6 +115,30 @@ def test_background_surface_flattens_vignette_and_ramp():
     assert np.median(n[_disk((h, w), 60, 100, 20)]) < 0.2
 
 
+def _speckle(shape, grain, rng):
+    """Fully developed speckle (exponential intensities, median 1), grain ~ *grain* px."""
+    from scipy.ndimage import gaussian_filter
+
+    re = gaussian_filter(rng.standard_normal(shape), grain)
+    im = gaussian_filter(rng.standard_normal(shape), grain)
+    inten = re ** 2 + im ** 2
+    return inten / np.median(inten)
+
+
+def test_background_surface_keeps_a_big_dark_bubble_out_of_dense_speckle():
+    # edge-1.5.0: in dense speckle the residual spread is so large that the later fits used to
+    # re-admit a big dark bubble as "background"; the surface then ran through it and its inside
+    # normalised to the speckle level (lic_hard/02 frames 6-41, owner decision 2026-11-15)
+    h, w = 250, 400
+    img = 20000 * _speckle((h, w), 1.2, np.random.default_rng(0))
+    bubble = _disk((h, w), 125, 200, 110)
+    img = np.where(bubble, 0.03 * img.mean(), img).astype(np.float32)
+    n = img / estimate_background(img, np.zeros((h, w), bool), CFG)
+    inside = np.median(n[_disk((h, w), 125, 200, 88)])
+    outside = np.median(n[~_disk((h, w), 125, 200, 120)])
+    assert inside < 0.2 * outside
+
+
 def test_reference_normalisation_corrects_gain_and_keeps_a_dark_wall():
     # edge-1.4.0: a black wall in the reference is divided like every other pixel (nothing
     # is excluded); the same wall in the frame then normalises to the background

@@ -154,6 +154,12 @@ def test_labelled_bubble_frames_on_lic():
     06: 16 -> 21 (bubbles next to the dark wall are no longer cut off at it), 07: 2 -> 0,
     09: 26 -> 25;
     on lic_hard 89 -> 79 / 182 (04: 9 -> 1).
+
+    Measured with clearly dark pixels kept out of every background fit (edge-1.5.0, owner decision
+    2026-11-15, accepting the cost on 09): 184/235 = 78.3 % agree; no-bubble frames accepted 5/85
+    (5).  09: 25 -> 15 (its circles grow by ~0.7 px and leave the 2 px tolerance), 06: 21 -> 20;
+    on lic_hard 79 -> 81 / 182 (01: 30 -> 31, 03: 0 -> 1, 07: 16 -> 17, 04: 1 -> 0), no-bubble
+    frames accepted 1 -> 2 / 31 (03).
     """
     labels = _labels()
     crit = labels["criterion"]
@@ -173,7 +179,20 @@ def test_labelled_bubble_frames_on_lic():
             if lab["circle"] is not None and np.isfinite(res.radius):
                 ok += _agree((res.radius, res.rc, res.cc), lab["circle"], crit)
     assert n_b == 235
-    assert ok / n_b >= 0.82, f"{ok}/{n_b}"
+    assert ok / n_b >= 0.78, f"{ok}/{n_b}"
+
+
+def test_big_dark_bubble_in_dense_speckle_is_measured():
+    """lic_hard/02 frame 11: a black bubble of R ~ 106 px in dense moving speckle, app defaults
+    (reference frame 2, no seed).  Up to edge-1.4.0 the background surface took the bubble in,
+    its inside normalised to 1.4-4 and the frame (like frames 6-41) gave no result; the circle
+    was checked by eye on the raw frame."""
+    files = _frames(_seq_dir("lic_hard", "02"))
+    res = detect_edge(imread_unicode(files[10]), *FULL, reference=imread_unicode(files[1]),
+                      params=EdgeParams())
+    crit = {"radius_tol_px": 2.0, "radius_tol_frac": 0.05, "centre_tol_px": 3.0, "centre_tol_frac": 0.15}
+    assert res.accepted, f"confidence {res.confidence:.2f}"
+    assert _agree((res.radius, res.rc, res.cc), (106.12, 139.41, 191.71), crit), (res.radius, res.rc, res.cc)
 
 
 def test_reference_frame_choice_on_real_recordings():
