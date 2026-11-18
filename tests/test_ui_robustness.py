@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import numpy as np
+import pytest
 
 from bubbletrack.model.report import build_report_parameters
 from bubbletrack.model.state import AppState, update_state
@@ -236,3 +238,63 @@ def test_replacing_a_folder_is_not_called_a_file_held_open(tmp_path):
         write_text_atomic(tmp_path / "out.csv", "x")
     assert "open in another program" not in str(exc.value)
     assert sorted(p.name for p in tmp_path.iterdir()) == ["out.csv"]
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="POSIX renames over a read-only file")
+def test_a_read_only_target_is_called_read_only(tmp_path):
+    import os
+    import stat
+
+    from bubbletrack.model.atomic_write import write_text_atomic
+
+    target = tmp_path / "results.csv"
+    target.write_text("old", encoding="utf-8")
+    os.chmod(target, stat.S_IREAD)
+    try:
+        with pytest.raises(PermissionError) as exc:
+            write_text_atomic(target, "new")
+        assert str(exc.value) == "results.csv is read-only"
+        assert target.read_text(encoding="utf-8") == "old"
+    finally:
+        os.chmod(target, stat.S_IREAD | stat.S_IWRITE)
+
+
+def test_a_log_rollover_finishes_once_a_held_backup_is_released(tmp_path, monkeypatch):
+    """A log viewer held bubbletrack.log.2: the half-done rollover (.rolling) was later
+    overwritten, losing a chunk, and the retry threshold was never reset."""
+    import logging
+
+    from bubbletrack import logging_config
+
+    log = tmp_path / "bubbletrack.log"
+    handler = logging_config._SharedRotatingFileHandler(log, maxBytes=300, backupCount=2,
+                                                       encoding="utf-8")
+    logger = logging.getLogger("bubbletrack.test_rollover")
+    logger.addHandler(handler)
+    logger.propagate = False
+    logger.setLevel(logging.INFO)
+    real_replace, held = logging_config.os.replace, [True]
+
+    def replace(src, dst):
+        if held[0] and str(dst).endswith(".log.2"):
+            raise PermissionError(32, "being used by another process")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(logging_config.os, "replace", replace)
+    try:
+        for i in range(30):
+            logger.info("record %03d %s", i, "x" * 40)
+        held[0] = False
+        for i in range(30, 60):
+            logger.info("record %03d %s", i, "x" * 40)
+        handler.flush()
+        assert handler._retry_at == 0
+        assert not (tmp_path / "bubbletrack.log.rolling").exists()
+        newest = "".join((tmp_path / name).read_text(encoding="utf-8")
+                         for name in ("bubbletrack.log.1", "bubbletrack.log"))
+        assert "record 059" in newest
+        sizes = [p.stat().st_size for p in tmp_path.iterdir()]
+        assert max(sizes) < 3000  # no file grew far past the limit
+    finally:
+        logger.removeHandler(handler)
+        handler.close()

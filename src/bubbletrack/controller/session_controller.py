@@ -108,15 +108,16 @@ def sanitize_params(params: dict, n_frames: int,
     """Drop parameters that are invalid or no longer fit the loaded images; return warnings."""
     params, invalid = config_module.check_session_settings(params)  # a hand-edited file
     reference = params.get("reference_frame")
-    if reference is not None and reference >= n_frames:
+    if reference is not None and reference >= n_frames:  # fewer frames now (said elsewhere)
         params.pop("reference_frame")
-        invalid.append("reference_frame")
+    roi_damaged = bool({"gridx", "gridy"} & set(invalid))  # reported as a reset ROI below
+    invalid = [key for key in invalid if key not in ("gridx", "gridy")]
     warnings: list[str] = []
     if invalid:
         warnings.append("ignored invalid saved values: " + ", ".join(invalid))
     (_, h), (_, w) = full_roi
     gx, gy = params.get("gridx"), params.get("gridy")
-    if gx is not None or gy is not None:
+    if roi_damaged or gx is not None or gy is not None:
         ok = (gx is not None and gy is not None
               and 1 <= gx[0] <= gx[1] <= h and 1 <= gy[0] <= gy[1] <= w)
         if not ok:

@@ -86,3 +86,25 @@ def test_a_damaged_session_never_breaks_the_window(gui, make_sequence, tmp_path,
             assert not errors and not slot_errors, (key, bad, errors, slot_errors[:1])
     assert ctl.load_session_file(str(good))  # and the good file still loads
     np.testing.assert_allclose(ctl._get_state().radius, [20.0, 22.0, 24.0, 26.0])
+
+
+class TestWarnings:
+    """Warnings name each problem once, in the words the user can act on."""
+
+    def test_a_damaged_roi_is_one_roi_reset(self):
+        from bubbletrack.controller.session_controller import sanitize_params
+
+        params, warnings = sanitize_params({"gridx": [-30, 260], "gridy": [1, 400]}, 6,
+                                           ((1, 250), (1, 400)))
+        assert "gridx" not in params and "gridy" not in params
+        assert warnings == ["saved ROI does not fit the images (ROI reset)"]
+
+    def test_a_reference_beyond_the_frames_is_dropped_quietly(self):
+        from bubbletrack.controller.session_controller import sanitize_params
+
+        params, warnings = sanitize_params({"reference_frame": 5}, 4, ((1, 250), (1, 400)))
+        assert "reference_frame" not in params and warnings == []
+
+    def test_an_unbounded_closing_radius_is_clamped(self):
+        clean, invalid = check_session_settings({"removing_obj_radius": 200})
+        assert clean == {"removing_obj_radius": 30} and not invalid

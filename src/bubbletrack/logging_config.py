@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import logging
 import logging.handlers
 import os
@@ -18,9 +17,10 @@ LOG_BACKUPS = 2
 class _SharedRotatingFileHandler(logging.handlers.RotatingFileHandler):
     """Rotates like its base, but moves the live file aside before shifting the backups.
 
-    When another running instance holds the file (Windows refuses the rename) the
-    backups stay as they are, records keep being appended, and the rollover is tried
-    again once the file has grown by another tenth of ``maxBytes``.
+    When another running instance holds the file, or a log viewer holds a backup
+    (Windows refuses the rename), no record or backup is lost: records keep being
+    appended, a half-done rollover is finished first next time, and the rollover is
+    tried again once the file has grown by another tenth of ``maxBytes``.
     """
 
     _retry_at = 0  # file position before which a refused rollover is not retried
@@ -33,17 +33,18 @@ class _SharedRotatingFileHandler(logging.handlers.RotatingFileHandler):
             self.stream = None
         aside = f"{self.baseFilename}.rolling"
         try:
-            os.replace(self.baseFilename, aside)
-        except OSError:
-            self.stream = self._open()
-            self._retry_at = self.stream.tell() + self.maxBytes // 10
-            return
-        with contextlib.suppress(OSError):  # a backup held open is replaced next time
+            if not os.path.exists(aside):  # else: finish the previous rollover first
+                os.replace(self.baseFilename, aside)
             for i in range(self.backupCount - 1, 0, -1):
                 older = f"{self.baseFilename}.{i}"
                 if os.path.exists(older):
                     os.replace(older, f"{self.baseFilename}.{i + 1}")
             os.replace(aside, f"{self.baseFilename}.1")
+        except OSError:
+            self.stream = self._open()
+            self._retry_at = self.stream.tell() + self.maxBytes // 10
+            return
+        self._retry_at = 0
         self.stream = self._open()
 
 

@@ -210,7 +210,7 @@ _SESSION_VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "gridx": _as_roi_range,
     "gridy": _as_roi_range,
     "image_no": _as_index,
-    "removing_obj_radius": _as_index,
+    "removing_obj_radius": _int_in(0, 30),  # no control sets it; a closing radius like Morph Close
     "reference_frame": lambda value: None if value is None else _as_index(value),
     "edge_seed": _as_point,
 }
