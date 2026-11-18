@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 import scipy.io
 
 from bubbletrack.model.export import export_csv, export_r_data
@@ -76,3 +77,49 @@ class TestRmaxGap:
         gap = locate_rmax(radius, 11)
         assert any("3 frames between frames" in w and "bridges the gap" in w
                    for w in gap.warnings)
+
+
+class TestInterruptedExports:
+    """An export that fails part-way leaves the previous file as it was (and no temp file)."""
+
+    @pytest.mark.parametrize("ext", ["mat", "csv", "xlsx"])
+    def test_the_previous_file_survives(self, tmp_path, monkeypatch, ext):
+        from bubbletrack.model import atomic_write
+        from bubbletrack.model.export import export_excel
+
+        radius, centres = np.array([20.0, 22.0]), np.full((2, 2), 50.0)
+        path = tmp_path / f"r.{ext}"
+
+        def write():
+            if ext == "mat":
+                export_r_data(str(path), radius, centres, [None, None])
+            elif ext == "csv":
+                export_csv(str(path), radius, centres)
+            else:
+                export_excel(str(path), radius, centres)
+
+        write()
+        before = path.read_bytes()
+
+        def fail(*_a, **_k):
+            raise OSError("disk full")
+
+        monkeypatch.setattr(atomic_write.os, "replace", fail)
+        radius[:] = 99.0
+        with pytest.raises(OSError):
+            write()
+        assert path.read_bytes() == before
+        assert sorted(p.name for p in tmp_path.iterdir()) == [path.name]
+
+    def test_the_report_too(self, tmp_path, monkeypatch):
+        from bubbletrack.model import atomic_write
+
+        state = update_state(AppState(), folder_path="D:/data").with_results_initialized(2)
+        state.radius[:] = [10.0, 12.0]
+        path = tmp_path / "report.pdf"
+        generate_report(str(path), state)
+        before = path.read_bytes()
+        monkeypatch.setattr(atomic_write.os, "replace", lambda *_a: (_ for _ in ()).throw(OSError("busy")))
+        with pytest.raises(OSError):
+            generate_report(str(path), state)
+        assert path.read_bytes() == before

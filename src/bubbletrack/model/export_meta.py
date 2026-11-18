@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 import bubbletrack
-from bubbletrack.model.long_paths import os_path
+from bubbletrack.model.atomic_write import replacing
 
 if TYPE_CHECKING:
     from bubbletrack.model.state import AppState
@@ -152,7 +152,7 @@ def sidecar_path(filepath: str) -> Path:
 
 def write_json_sidecar(filepath: str, metadata: dict) -> None:
     """Write *metadata* as JSON next to *filepath*."""
-    with open(os_path(sidecar_path(filepath)), "w", encoding="utf-8") as f:
+    with replacing(sidecar_path(filepath)) as tmp, open(tmp, "w", encoding="utf-8") as f:
         json.dump(plain_metadata(metadata), f, indent=2, ensure_ascii=False)
         f.write("\n")
 

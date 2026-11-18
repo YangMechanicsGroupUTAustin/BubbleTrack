@@ -12,6 +12,7 @@ from __future__ import annotations
 import contextlib
 import os
 import time
+from collections.abc import Iterator
 
 from bubbletrack.model.long_paths import os_path
 
@@ -28,6 +29,26 @@ def write_text_atomic(path: str | os.PathLike, text: str, *, encoding: str = "ut
             fh.write(text)
             fh.flush()
             os.fsync(fh.fileno())
+        _replace(tmp, target)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.remove(tmp)
+        raise
+
+
+@contextlib.contextmanager
+def replacing(path: str | os.PathLike) -> Iterator[str]:
+    """Write through a temporary file that replaces *path* only when the block succeeds.
+
+    For writers that take a path (savemat, openpyxl, fpdf2): an interrupted export
+    leaves the previous file intact.  The temporary name keeps the extension, which
+    some writers check or append.
+    """
+    target = os_path(path)
+    root, ext = os.path.splitext(target)
+    tmp = f"{root}.{os.getpid()}.tmp{ext}"
+    try:
+        yield tmp
         _replace(tmp, target)
     except BaseException:
         with contextlib.suppress(OSError):

@@ -9,7 +9,7 @@ import numpy as np
 
 from bubbletrack.model.config import DETECTION_MODE_LABELS
 from bubbletrack.model.export_meta import results_radius_definition
-from bubbletrack.model.long_paths import os_path
+from bubbletrack.model.atomic_write import replacing
 from bubbletrack.model.provenance import FitSource
 
 CONFIDENCE_THRESHOLD = 0.5
@@ -196,4 +196,5 @@ def generate_report(
         pdf.cell(0, 8, "R-t Chart", new_x="LMARGIN", new_y="NEXT")
         pdf.image(chart_image_path, w=170)
 
-    pdf.output(os_path(filepath))
+    with replacing(filepath) as tmp:
+        pdf.output(tmp)

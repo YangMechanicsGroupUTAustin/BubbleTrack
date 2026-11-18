@@ -28,6 +28,7 @@ from bubbletrack.model.export_meta import (
     radius_definition,
 )
 from bubbletrack.model.export_table import export_csv, export_excel
+from bubbletrack.model.atomic_write import replacing
 from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.rmax import (
     RmaxEstimate,
@@ -150,7 +151,8 @@ def export_r_data(
     data.update(fit.mat_variables())
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
-    savemat(os_path(save_path), data)
+    with replacing(save_path) as tmp:  # an interrupted save keeps the previous file
+        savemat(tmp, data)
 
 
 def export_rof_t_data(
@@ -263,7 +265,8 @@ def export_rof_t_data(
         ).reshape(-1, 1)
     if metadata is not None:
         data[META_MAT_VARIABLE] = mat_metadata(metadata)
-    savemat(os_path(save_path), data)
+    with replacing(save_path) as tmp:  # an interrupted save keeps the previous file
+        savemat(tmp, data)
 
     return True, " ".join(estimate.warnings)
 
