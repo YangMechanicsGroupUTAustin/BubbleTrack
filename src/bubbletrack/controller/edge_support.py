@@ -104,6 +104,14 @@ def store_meta(state: AppState, idx: int, meta: dict) -> None:
     set_suggestion(state, idx, meta.get("suggestion"))
 
 
+def forget_meta(state: AppState, idx: int) -> None:
+    """Drop frame *idx*'s Auto confidence, flags, metrics and guess: a result that
+    did not come from the Auto engine (classic method, clicked points) has none."""
+    if state.fit_confidence is not None:
+        state.fit_confidence[idx] = np.nan
+    store_meta(state, idx, {})
+
+
 def clear_suggestion(state: AppState, idx: int) -> None:
     """Drop frame *idx*'s guess (a new result or fit attempt replaces it)."""
     set_suggestion(state, idx, None)

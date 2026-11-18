@@ -147,3 +147,30 @@ class TestAtomicSave:
             save_session(str(path), AppState(folder_path="/second"))
         assert path.read_bytes() == before
         assert [p.name for p in tmp_path.iterdir()] == ["s.brt"]  # no temp file left
+
+
+class TestRunResults:
+    """What one Fit All run writes into a frame it measured."""
+
+    def test_a_classic_result_carries_no_earlier_auto_meta(self, fitted):
+        _, controller = fitted
+        state = controller._get_state()
+        state.fit_confidence[3] = 0.99
+        state.fit_flags[3] = frozenset({"no_reference"})
+        xy = np.array([[10.0, 10.0], [12.0, 10.0], [11.0, 12.0]])
+        controller.auto_ctrl._on_auto_frame_done(3, 30.0, xy, None, 50.0, 50.0, 1)
+        assert state.radius[3] == 30.0
+        assert np.isnan(state.fit_confidence[3]) and state.fit_flags[3] == frozenset()
+
+    def test_a_frame_that_cannot_be_read_keeps_its_result(self, fitted):
+        _, controller = fitted
+        state = controller._get_state()
+        auto = controller.auto_ctrl
+        auto._on_worker_frame_error(auto._worker, 4, "file is locked")
+        auto._on_auto_frame_done(4, -1.0, np.empty((0, 2)), None, np.nan, np.nan, 0)
+        assert state.radius[4] == pytest.approx(np.linspace(20, 40, 12)[4])
+        # A frame with no result before stays empty
+        state.radius[5] = -1.0
+        auto._on_worker_frame_error(auto._worker, 5, "file is locked")
+        auto._on_auto_frame_done(5, -1.0, np.empty((0, 2)), None, np.nan, np.nan, 0)
+        assert state.radius[5] == -1.0

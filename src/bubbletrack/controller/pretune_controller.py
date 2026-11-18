@@ -289,6 +289,7 @@ class PretuneController(BaseController):
                         self.state.region_count[idx] = count
                     if self.state.fit_source is not None:
                         self.state.fit_source[idx] = FitSource.REFIT
+                    edge_support.forget_meta(self.state, idx)  # a classic fit has no Auto meta
 
                     # Clear old overlays before drawing new results
                     redraw_original(self.state, self.w)

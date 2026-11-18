@@ -63,6 +63,7 @@ class AutoController(BaseController):
         self._protected: frozenset[int] = frozenset()
         self._stop_requested = False
         self._frame_errors = 0
+        self._failed_frames: set[int] = set()
         self._frames_done = 0
         self._autosave_failed = False
         self._edge_job = None  # the run's EdgeJob, reused by tracking
@@ -212,6 +213,7 @@ class AutoController(BaseController):
         self._protected = protected
         self._stop_requested = False
         self._frame_errors = 0
+        self._failed_frames = set()
         self._frames_done = 0
         self._autosave_failed = False
         self._running = True
@@ -328,6 +330,7 @@ class AutoController(BaseController):
     def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
         if worker is self._worker:
             self._frame_errors += 1
+            self._failed_frames.add(idx)
 
     def _on_worker_finished(self, worker) -> None:
         if worker is not self._worker:
@@ -393,7 +396,11 @@ class AutoController(BaseController):
             return  # keep the user's manual fit
 
         state = self.state
-        edge_support.clear_suggestion(state, idx)  # an Edge run's frame_meta brings the new guess
+        if idx in self._failed_frames and state.radius[idx] > 0:
+            return  # unreadable now (file locked, offline): keep its last result
+        # An Edge run's frame_meta (emitted after this) brings confidence, flags and
+        # guess; a classic run has none, so nothing of an earlier Auto run may stay.
+        edge_support.forget_meta(state, idx)
         state.radius[idx] = radius
         if radius > 0 and edge_xy is not None and edge_xy.shape[0] > 0:
             state.circle_fit_par[idx] = [rc, cc]

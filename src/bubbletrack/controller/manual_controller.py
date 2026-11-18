@@ -11,6 +11,7 @@ import logging
 
 import numpy as np
 
+from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
     FITTED_CIRCLE, redraw_original, refresh_chart,
@@ -21,7 +22,6 @@ from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
-from bubbletrack.model.suggestion import set_suggestion
 from bubbletrack.model.undo import UndoStack
 from bubbletrack.ui.fix_strip import FixView, NoFixView
 
@@ -165,7 +165,7 @@ class ManualController(BaseController):
                 self.state.fit_source[idx] = FitSource.MANUAL
             if self.state.fit_locked is not None:
                 self.state.fit_locked[idx] = True  # the user's decision: Fit All keeps it
-            set_suggestion(self.state, idx, None)  # the user's fit replaces Auto's guess
+            edge_support.forget_meta(self.state, idx)  # no Auto score, flags or guess
             self._history.push(record_edit(self.state, f"manual fit on frame {idx + 1}", before))
 
             # Clear old overlays before drawing new results
