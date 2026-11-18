@@ -135,6 +135,20 @@ def images_differ(saved: list | None, images) -> str | None:
             "results were not restored")
 
 
+def session_json(data: dict) -> str:
+    """*data* as strict JSON with one top-level key per line and compact values.
+
+    Indenting every number of the per-frame arrays (outlines: hundreds of points
+    per frame) almost doubled the file: 258 MB instead of 142 MB at 10k frames,
+    rewritten by every autosave into a folder that is often synced.  The keys stay
+    readable; any JSON reader (MATLAB's jsondecode) loads it as before.
+    ``allow_nan=False``: strict JSON, as jsondecode rejects NaN.
+    """
+    lines = [f"  {json.dumps(key)}: {json.dumps(value, separators=(',', ':'), allow_nan=False)}"
+             for key, value in data.items()]
+    return "{\n" + ",\n".join(lines) + "\n}\n"
+
+
 def save_session(filepath: str, state) -> None:
     """Serialize the current AppState to a ``.brt`` JSON file.
 
@@ -186,9 +200,8 @@ def save_session(filepath: str, state) -> None:
             [bool(v) for v in state.fit_locked] if state.fit_locked is not None else None
         ),
     }
-    # allow_nan=False guarantees strict JSON (MATLAB's jsondecode rejects NaN)
     # Atomic: an interrupted save must never destroy the previous session file
-    write_text_atomic(filepath, json.dumps(data, indent=2, allow_nan=False))
+    write_text_atomic(filepath, session_json(data))
     logger.info("Session saved to %s", filepath)
 
 

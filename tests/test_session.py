@@ -211,3 +211,19 @@ class TestLoadSession:
         assert restored.image_no == 2
         assert isinstance(restored.radius, np.ndarray)
         assert restored.radius[1] == 33.0
+
+
+def test_session_json_is_one_key_per_line_and_strict(tmp_path):
+    """Compact per-frame arrays (the file halves at 10k frames), readable keys, no NaN."""
+    import math
+
+    import pytest
+
+    from bubbletrack.model.session import session_json
+
+    text = session_json({"version": "3.3", "radius": [1.5, None], "flags": [["a"], []]})
+    assert text.splitlines() == ['{', '  "version": "3.3",', '  "radius": [1.5,null],',
+                                 '  "flags": [["a"],[]]', '}']
+    assert json.loads(text)["radius"] == [1.5, None]
+    with pytest.raises(ValueError):
+        session_json({"radius": [math.nan]})
