@@ -447,3 +447,19 @@ def test_a_partial_run_keeps_review_progress(qapp, app):
     assert resets == []
     controller.bus.emit(RUN_FINISHED, {"frames": tuple(range(N)), "edge": True, "ml": True})
     assert resets == [1]
+
+
+def test_an_undo_during_a_hold_updates_the_list_when_released(qapp, app):
+    """Ctrl+Z while a fix holds re-tracking: at release only the Review list is
+    recomputed (a full re-track could redo the re-track just undone)."""
+    _window, controller = app
+    rt = controller.retrack
+    _edit(controller)
+    _started(qapp).finish()  # a re-track lands (one history entry)
+    rt.hold()
+    controller._on_undo()  # undo the re-track while held
+    assert not rt.timer.isActive()
+    rt.release_hold()
+    _wait(qapp, lambda: len(FakeWorker.made) == 2 and FakeWorker.made[-1].started)
+    assert rt._allowed == frozenset()  # list only
+    FakeWorker.made[-1].finish()

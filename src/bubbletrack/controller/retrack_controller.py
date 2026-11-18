@@ -78,6 +78,7 @@ class RetrackController(BaseController):
         self._held = 0          # hold() depth: a fix is open, a question is asked
         self._pending = False   # an edit while held: re-track when released
         self._review_only = False  # after an undo: recompute the Review list only
+        self._review_pending = False  # an undo while held: the list update runs at release
         self._quiet = False
         self._own_emit = False
         self.timer = QTimer()
@@ -111,7 +112,7 @@ class RetrackController(BaseController):
     def cancel(self) -> None:
         """Drop a pending countdown and a running re-track (results unchanged)."""
         self.timer.stop()
-        self._pending = self._review_only = False
+        self._pending = self._review_only = self._review_pending = False
         if self._worker is not None:
             self._abandon()
 
@@ -131,10 +132,15 @@ class RetrackController(BaseController):
     def release_hold(self) -> None:
         """End a :meth:`hold`; what was pending (or edited meanwhile) runs after the quiet time."""
         self._held = max(0, self._held - 1)
-        if not self._held and self._pending:
-            self._pending = False
-            if AUTO_RETRACK_ENABLED:
-                self.timer.start()
+        if self._held or not AUTO_RETRACK_ENABLED:
+            return
+        if self._pending:  # a full re-track also recomputes the list
+            self._pending = self._review_pending = False
+            self.timer.start()
+        elif self._review_pending:  # never a full one: it could redo an undone re-track
+            self._review_pending = False
+            self._review_only = True
+            self.timer.start()
 
     def exclude(self, frames: Iterable[int]) -> None:
         """Keep a running re-track off *frames* (the user skipped them: left as they are)."""
@@ -170,7 +176,11 @@ class RetrackController(BaseController):
     def _on_undone(self, _edit) -> None:
         """Ctrl+Z restored results: recompute the Review list from them (a re-track
         had replaced it; the undo itself never triggers one)."""
-        if AUTO_RETRACK_ENABLED and not self._held:
+        if not AUTO_RETRACK_ENABLED:
+            return
+        if self._held:
+            self._review_pending = True
+        else:
             self._review_only = True
             self.timer.start()
 
