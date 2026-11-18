@@ -14,13 +14,13 @@ from bubbletrack.controller.display_mixin import display_frame
 from bubbletrack.event_bus import EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import frame_to_display
+from bubbletrack.model.folder_scan import scan_folder_report, tiff_page_count
 from bubbletrack.model.frame_source import open_recording
 from bubbletrack.model.hpvx2_dat import DAT_EXTS
 from bubbletrack.model.image_io import (
     detect_bit_depth,
     load_and_normalize,
     normalize_frame,
-    scan_folder,
 )
 from bubbletrack.ui.frame_scrubber import frame_file_labels
 
@@ -32,6 +32,21 @@ NOT_LOADED = "Nothing loaded: the current recording is still open"
 def recording_kind(path: str) -> str:
     """'HPV-X2 recording' for a raw .dat file, else 'video'."""
     return "HPV-X2 recording" if os.path.splitext(path)[1].lower() in DAT_EXTS else "video"
+
+
+def scan_notes(report) -> list[str]:
+    """What the user should know about a scanned folder: files left out, and a
+    multi-page TIFF (a stack) of which only the first page is read.  Only the first
+    frame's pages are counted: opening every file would download a whole folder
+    kept online-only by a sync client."""
+    notes = list(report.warnings)
+    if report.group == "tiff" and report.images:
+        first = report.images[0]
+        pages = tiff_page_count(first)
+        if pages > 1:
+            notes.append(f"{os.path.basename(first)} has {pages} pages; "
+                         "only the first page is read.")
+    return notes
 
 
 class FileController(BaseController):
@@ -63,7 +78,8 @@ class FileController(BaseController):
         """Load an image folder; with *ask*, unsaved review decisions are asked about."""
         if self._refuse_while_busy():
             return
-        images = scan_folder(folder)
+        report = scan_folder_report(folder, check_pages=False)
+        images = list(report.images)
         if not images:
             self.w.header.set_status("No images found", "#ef4444")
             return
@@ -107,7 +123,11 @@ class FileController(BaseController):
 
         self.w.left_panel.image_source.set_folder_loaded(folder, len(images))
         self._reset_views(len(images), os.path.splitext(images[0])[1])
-        self.w.header.set_status("Ready", "#10b981")
+        notes = scan_notes(report)
+        if notes:
+            self.w.header.set_status("Ready — " + " ".join(notes), "#f59e0b")
+        else:
+            self.w.header.set_status("Ready", "#10b981")
 
         display_frame(self.state, self.w, 0, self._set_state, self._cache)
 

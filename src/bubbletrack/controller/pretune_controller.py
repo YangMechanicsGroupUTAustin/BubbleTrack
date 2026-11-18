@@ -23,7 +23,7 @@ from bubbletrack.model.detection import detect_bubble_with_mode, measure_detecti
 from bubbletrack.controller import edge_support, suggestion_view
 from bubbletrack.controller.edge_setup import EdgeSetup
 from bubbletrack.model.frame_source import normalize_source
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import FitSource, user_confirmed_mask
 from bubbletrack.model.quality import compute_fit_quality
 from bubbletrack.model.removing_factor import compute_removing_factor
 
@@ -48,7 +48,10 @@ class PretuneController(BaseController):
 
         # Auto-tune worker (lazy import to avoid circular dependency)
         self._autotune_worker = None
+        self._autotune_target: tuple | None = None  # (frame, ROI) the running tune is for
         self.edge_setup = EdgeSetup(bus, get_state, set_state, window)
+        # A tune of the previous recording must never land on the new one
+        bus.subscribe("source_loaded", lambda _n: self._cancel_autotune())
 
     # -- public handlers -------------------------------------------------- #
 
@@ -169,7 +172,8 @@ class PretuneController(BaseController):
             bin_display = ~processed if self.state.invert_mask else processed
             self.w.binary_panel.set_image(bin_display)
         except Exception:
-            pass
+            # A live preview while dragging a slider must never interrupt; keep the cause
+            logger.debug("Mask preview failed", exc_info=True)
 
     def on_select_roi(self) -> None:
         self.w.original_panel.set_mode("roi")
@@ -282,14 +286,17 @@ class PretuneController(BaseController):
                     self.w.left_panel.measure_panel.hide_quality()
                 else:
                     logger.info("Fit frame %d: radius=%.2f", idx, radius)
-                    self.state.radius[idx] = radius
-                    self.state.circle_fit_par[idx] = [rc, cc]
-                    self.state.circle_xy[idx] = edge_xy
-                    if self.state.region_count is not None:
-                        self.state.region_count[idx] = count
-                    if self.state.fit_source is not None:
-                        self.state.fit_source[idx] = FitSource.REFIT
-                    edge_support.forget_meta(self.state, idx)  # a classic fit has no Auto meta
+                    # A locked frame or the user's own fit is shown, never overwritten
+                    store = not self._user_decided(idx)
+                    if store:
+                        self.state.radius[idx] = radius
+                        self.state.circle_fit_par[idx] = [rc, cc]
+                        self.state.circle_xy[idx] = edge_xy
+                        if self.state.region_count is not None:
+                            self.state.region_count[idx] = count
+                        if self.state.fit_source is not None:
+                            self.state.fit_source[idx] = FitSource.REFIT
+                        edge_support.forget_meta(self.state, idx)  # a classic fit: no Auto meta
 
                     # Clear old overlays before drawing new results
                     redraw_original(self.state, self.w)
@@ -298,7 +305,8 @@ class PretuneController(BaseController):
                                                           legend=FITTED_CIRCLE)
                     self.w.original_panel.draw_points(edge_xy, "#ef4444", 2.0)
                     refresh_chart(self.state, self.w)
-                    self._results_changed()
+                    if store:
+                        self._results_changed()
                     label = (f"Area-equivalent R = {radius:.1f} px; regions = {count}"
                              if self.state.detection_mode == "area"
                              else f"R = {radius:.1f} px")
@@ -325,7 +333,32 @@ class PretuneController(BaseController):
             self.w.header.set_status(f"Error: {exc}", "#ef4444")
             self.w.left_panel.measure_panel.hide_quality()
 
+    def _user_decided(self, idx: int) -> bool:
+        """Frame *idx* holds a decision of the user (locked, manual, accepted)."""
+        state = self.state
+        if state.fit_locked is not None and state.fit_locked[idx]:
+            return True
+        return bool(user_confirmed_mask(state.fit_source, state.total_frames)[idx])             if state.fit_source is not None else False
+
     # -- Auto-tune -------------------------------------------------------- #
+
+    def _tune_target(self) -> tuple:
+        return (self.state.image_no, self.state.gridx, self.state.gridy)
+
+    def _cancel_autotune(self) -> None:
+        worker = self._autotune_worker
+        if worker is None:
+            return
+        try:
+            worker.result_ready.disconnect(self._on_autotune_finished)
+        except TypeError:
+            pass
+        if worker.isRunning():
+            worker.cancel()
+            worker.wait()
+        self._autotune_worker = None
+        self._autotune_target = None
+        self.w.left_panel.measure_panel.set_autotune_enabled(True)
 
     def on_autotune(self) -> None:
         """Launch auto-tune grid search in background thread."""
@@ -347,6 +380,7 @@ class PretuneController(BaseController):
             self._autotune_worker = None
 
         idx = self.state.image_no
+        self._autotune_target = self._tune_target()
         self.w.header.set_status("Auto-tuning...", "#f59e0b")
         self.w.left_panel.measure_panel.set_autotune_enabled(False)
 
@@ -379,6 +413,11 @@ class PretuneController(BaseController):
 
         if result is None:
             self.w.header.set_status("Auto-tune: no valid fit found", "#ef4444")
+            return
+        target, self._autotune_target = self._autotune_target, None
+        if target != self._tune_target():
+            self.w.header.set_status(
+                "Auto-tune: the frame or ROI changed while tuning; nothing applied", "#f59e0b")
             return
 
         # Apply best parameters to state + UI

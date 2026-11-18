@@ -122,6 +122,26 @@ def _outlier_warning(
     )
 
 
+def _gap_warning(fit_frames: np.ndarray) -> str | None:
+    """Warn when frames without a radius lie inside the fitted span.
+
+    The parabola then bridges the gap: the true maximum may sit in the missing
+    frames (big bubbles are where detection fails most), so t=0 is uncertain.
+    Truncation at the data edges is reported by :func:`_boundary_warning`.
+    """
+    if len(fit_frames) < 2:
+        return None
+    first, last = int(fit_frames[0]), int(fit_frames[-1])
+    missing = (last - first + 1) - len(fit_frames)
+    if missing <= 0:
+        return None
+    return (
+        f"{missing} frame{'s' if missing != 1 else ''} between frames {first} and {last} of "
+        f"the Rmax fit have no radius; the fit bridges the gap, so Rmax and t=0 may be "
+        f"inaccurate."
+    )
+
+
 def _fit_parabola_vertex(
     frames: np.ndarray,
     values: np.ndarray,
@@ -194,6 +214,7 @@ def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
         w for w in (
             _boundary_warning(peak_frame, valid_indices, half),
             _outlier_warning(R, valid_indices, peak_pos),
+            _gap_warning(fit_frames),
         )
         if w is not None
     )

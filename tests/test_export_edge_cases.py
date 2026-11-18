@@ -62,3 +62,17 @@ def test_the_report_accepts_any_folder_name(tmp_path):
     generate_report(str(path), state)
     assert path.stat().st_size > 1000
     assert pdf_text("实验 — µm") == "?? - µm"
+
+
+class TestRmaxGap:
+    def test_failed_frames_inside_the_fit_window_are_reported(self):
+        from bubbletrack.model.rmax import locate_rmax
+
+        t = np.arange(1, 61, dtype=float)
+        radius = 100.0 - 0.05 * (t - 30.4) ** 2
+        clean = locate_rmax(radius, 11)
+        assert not any("bridges the gap" in w for w in clean.warnings)
+        radius[[28, 29, 30]] = -1.0  # frames 29-31 unmeasured, next to the peak
+        gap = locate_rmax(radius, 11)
+        assert any("3 frames between frames" in w and "bridges the gap" in w
+                   for w in gap.warnings)

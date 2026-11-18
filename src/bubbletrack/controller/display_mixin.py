@@ -224,6 +224,7 @@ def display_frame(
             )
         suggestion_view.announce_guess(state, window, idx)
     except Exception as exc:
+        logger.exception("Displaying frame %d failed", idx)  # the status alone has no traceback
         window.header.set_status(f"Error: {exc}", "#ef4444")
 
 

@@ -305,7 +305,9 @@ class TestRmaxOutlierWarning:
         R = np.full(30, 100.0)
         R[14] = 105.0          # 5% above its valid neighbours: no warning
         R[[13, 15]] = -1.0     # failed frames right next to the peak
-        assert locate_rmax(R, 11).warnings == ()
+        warnings = locate_rmax(R, 11).warnings
+        assert not any("median" in w for w in warnings)  # no outlier warning
+        assert [w for w in warnings if "bridges the gap" in w]  # the gap is reported
 
     def test_combined_with_boundary_warning(self, tmp_path):
         R = np.array([130.0, 100.0, 99.0, 98.0, 97.0, 96.0])

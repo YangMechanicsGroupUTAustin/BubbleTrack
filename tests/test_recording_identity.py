@@ -174,3 +174,93 @@ class TestRunResults:
         auto._on_worker_frame_error(auto._worker, 5, "file is locked")
         auto._on_auto_frame_done(5, -1.0, np.empty((0, 2)), None, np.nan, np.nan, 0)
         assert state.radius[5] == -1.0
+
+
+class TestAutoTune:
+    """Classic Auto Tune applies its result only where it was started."""
+
+    def _result(self):
+        from bubbletrack.model.autotune import AutoTuneResult
+        from bubbletrack.model.quality import FitQuality
+
+        quality = FitQuality(score=0.9, n_edge_points=50, edge_density=1.0, rms_residual=0.5,
+                             sector_coverage=1.0, radius=30.0)
+        return AutoTuneResult(threshold=0.44, removing_factor=14, quality=quality,
+                              candidates_evaluated=10)
+
+    @pytest.fixture
+    def classic(self, gui, make_sequence):
+        window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6)))
+        controller._set_state(update_state(controller._get_state(), detection_mode="intensity",
+                                           img_thr=0.58, removing_factor=85, gaussian_sigma=3.0))
+        return window, controller
+
+    def test_a_frame_change_during_the_tune_applies_nothing(self, classic):
+        window, controller = classic
+        pretune = controller.pretune_ctrl
+        pretune._autotune_target = pretune._tune_target()
+        controller.file_ctrl.on_frame_changed(3)
+        pretune._on_autotune_finished(self._result())
+        assert controller._get_state().img_thr == 0.58
+        assert "nothing applied" in window.header.status_text()
+
+    def test_a_locked_frame_keeps_its_result(self, classic):
+        from bubbletrack.model.provenance import FitSource
+
+        _, controller = classic
+        state = controller._get_state()
+        state.radius[0] = 47.0
+        state.fit_source[0] = FitSource.MANUAL
+        state.fit_locked[0] = True
+        pretune = controller.pretune_ctrl
+        pretune._autotune_target = pretune._tune_target()
+        pretune._on_autotune_finished(self._result())
+        state = controller._get_state()
+        assert state.img_thr == 0.44  # the tuned values are applied ...
+        assert state.radius[0] == 47.0 and state.fit_source[0] == FitSource.MANUAL  # ... not stored
+
+    def test_loading_another_recording_cancels_the_tune(self, classic, make_sequence):
+        _, controller = classic
+        pretune = controller.pretune_ctrl
+        cancelled = []
+
+        class FakeWorker:
+            class _Sig:
+                def disconnect(self, _slot):
+                    pass
+            result_ready = _Sig()
+
+            def isRunning(self):  # noqa: N802 (Qt name)
+                return True
+
+            def cancel(self):
+                cancelled.append(True)
+
+            def wait(self):
+                pass
+
+        pretune._autotune_worker = FakeWorker()
+        controller.file_ctrl.on_folder_selected(str(make_sequence("b", 6)))
+        assert cancelled == [True] and pretune._autotune_worker is None
+
+
+class TestFolderNotes:
+    def test_a_tiff_stack_and_left_out_files_are_reported(self, gui, tmp_path):
+        import cv2
+
+        window, controller = gui
+        folder = tmp_path / "stack"
+        folder.mkdir()
+        pages = [np.full((40, 50), 200, np.uint8) for _ in range(4)]
+        assert cv2.imwritemulti(str(folder / "stack.tif"), pages)
+        cv2.imwrite(str(folder / "extra.png"), pages[0])
+        controller.file_ctrl.on_folder_selected(str(folder))
+        text = window.header.status_text()
+        assert text.startswith("Ready — ")
+        assert "stack.tif has 4 pages" in text and "Ignored 1 .png" in text
+
+    def test_a_plain_folder_just_says_ready(self, gui, make_sequence):
+        window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("a", 4)))
+        assert window.header.status_text() == "Ready"
