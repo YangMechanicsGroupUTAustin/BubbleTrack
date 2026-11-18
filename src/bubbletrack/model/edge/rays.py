@@ -232,6 +232,14 @@ def outer_extent(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, fl
     return outer_extent_with_levels(image, exclude, circle, cfg)[0]
 
 
+def _distance_range(rc: float, cc: float, shape: tuple[int, int]) -> tuple[float, float]:
+    """Nearest and farthest distance from (rc, cc) to the pixel centres' box [0, h-1] x [0, w-1]."""
+    h, w = shape[0] - 1, shape[1] - 1
+    near = float(np.hypot(max(0.0, -rc, rc - h), max(0.0, -cc, cc - w)))
+    far = float(np.hypot(max(abs(rc), abs(rc - h)), max(abs(cc), abs(cc - w))))
+    return near, far
+
+
 def outer_extent_with_levels(image: np.ndarray, exclude: np.ndarray, circle: tuple[float, float, float],
                              cfg: RayConfig) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Definition-B edge points: where each ray recovers 90 % of its step beyond the steep edge.
@@ -260,10 +268,17 @@ def outer_extent_with_levels(image: np.ndarray, exclude: np.ndarray, circle: tup
         The index of each point's ray among ``cfg.outer_rays``.
     """
     rc, cc, radius = circle
-    smooth = cv2.GaussianBlur(image, (0, 0), cfg.outer_blur_sigma)
     step = cfg.outer_step_px
     r_lo = max(0.0, radius - max(cfg.outer_inner_min, cfg.outer_inner_frac * radius))
     r_hi = radius + max(cfg.outer_reach_min, cfg.outer_reach_frac * radius)
+    # A ray counts only from an in-image start, and no sample beyond the farthest image
+    # corner can be in the image: skip those radii (the result is the same).  A nearly
+    # straight edge can fit R ~ 1e5 px, which would otherwise mean 1e7+ samples (GBs).
+    near, far = _distance_range(rc, cc, image.shape)
+    if not near - step <= r_lo <= far + step:
+        return np.empty((0, 2)), np.empty(0), np.empty(0, int)
+    r_hi = min(r_hi, far + step)
+    smooth = cv2.GaussianBlur(image, (0, 0), cfg.outer_blur_sigma)
     rs = np.arange(r_lo, r_hi + step, step)
     th = np.linspace(0, 2 * np.pi, cfg.outer_rays, endpoint=False)
     prof, ok = _sample_rays(smooth, rc, cc, th, rs, exclude)

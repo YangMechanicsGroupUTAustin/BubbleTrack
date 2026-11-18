@@ -45,8 +45,10 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.5.0"
-"""1.5.0: the background surface never uses pixels darker than 0.3 x the median (owner
+ENGINE_VERSION = "edge-1.5.1"
+"""1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
+31M points, 1.5 GB, on lic_hard/03 frame 77); accepted results unchanged (2026-11-18).
+1.5.0: the background surface never uses pixels darker than 0.3 x the median (owner
 decision 2026-11-15).  Up to 1.4.0 they were left out of the first fit only; in dense speckle
 the later fits re-admitted a big dark bubble as background, which lifted its inside to the
 background level (lic_hard/02 frames 6-41 gave no result).
@@ -243,6 +245,8 @@ def _steep_edges(e: np.ndarray, invalid: np.ndarray, exclude: np.ndarray, coarse
         fit = fit_circle(edges.points, rng, cfg.fit)
         if fit is None:
             break
+        if not fit.radius <= cfg.rays.max_radius_diagonals * float(np.hypot(*e.shape)):
+            return edges, None  # a nearly straight edge, not a bubble (and a huge next pass)
         circle, window = fit.circle, refine_window(fit.radius, cfg.rays)
     return edges, fit_circle(edges.points, rng, cfg.fit)
 

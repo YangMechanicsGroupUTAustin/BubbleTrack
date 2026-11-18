@@ -280,3 +280,25 @@ def test_speed_on_a_250x400_roi():
         share.append(laps["region"] / (laps["total"] - laps["region"]))
     assert np.median(times) <= 0.200
     assert np.median(share) <= 0.35
+
+
+
+def test_a_nearly_straight_edge_stops_the_ray_passes(monkeypatch):
+    """lic_hard/03 frame 77 fitted R ~ 90,000 px: its next ray pass sampled 31 million points
+    (1.5 GB).  A fit beyond 4 ROI diagonals now ends the passes as "fit_failed"."""
+    from bubbletrack.model.edge import engine
+    from bubbletrack.model.edge.fit import CircleFit
+
+    yy, xx = np.mgrid[:120, :160]
+    img = np.where((yy - 60) ** 2 + (xx - 80) ** 2 < 30 ** 2, 2000.0, 10000.0).astype(np.float32)
+    ref = np.full_like(img, 10000.0)
+    passes = []
+    real_rays = engine.ray_edges
+    monkeypatch.setattr(engine, "ray_edges", lambda *a, **k: passes.append(1) or real_rays(*a, **k))
+    huge = CircleFit(rc=-90_000.0, cc=80.0, radius=90_060.0, cov=np.full((3, 3), np.nan),
+                     weights=np.ones(1), method="test")
+    monkeypatch.setattr(engine, "fit_circle", lambda *a, **k: huge)
+    res = engine.detect_edge(img, (1, 120), (1, 160), reference=ref, params=engine.EdgeParams())
+    assert passes == [1]  # no second pass around the absurd circle
+    assert "fit_failed" in res.flags and not res.accepted
+    assert engine.ENGINE_VERSION == "edge-1.5.1"

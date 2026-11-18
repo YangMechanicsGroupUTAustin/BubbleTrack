@@ -111,3 +111,23 @@ def test_row_percentile_matches_numpy():
                      for r in p])
     np.testing.assert_allclose(got, want, equal_nan=True)
     assert not rows[0]
+
+
+def test_outer_extent_of_an_absurd_circle_samples_only_the_image():
+    """A nearly straight edge can fit R ~ 1e5 px (lic_hard/03 frame 77: R ~ 90,000).
+    Sampling 0.55 R .. 1.6 R along every ray then took GBs; only radii that can
+    reach the image are sampled now, so this returns at once."""
+    import time
+
+    from bubbletrack.model.edge.config import EdgeConfig
+    from bubbletrack.model.edge.rays import _distance_range, outer_extent_with_levels
+
+    img = np.ones((250, 400), np.float32)
+    exclude = np.zeros(img.shape, bool)
+    start = time.perf_counter()
+    for circle in ((-90_000.0, 200.0, 90_100.0), (125.0, 200.0, 90_000.0), (125.0, 200.0, 3.0e6)):
+        pts, levels, rays = outer_extent_with_levels(img, exclude, circle, EdgeConfig().rays)
+        assert len(pts) == len(levels) == len(rays) == 0
+    assert time.perf_counter() - start < 2.0
+    assert _distance_range(125.0, 200.0, (251, 401)) == (0.0, float(np.hypot(125, 200)))
+    assert _distance_range(-10.0, -10.0, (11, 11)) == (float(np.hypot(10, 10)), float(np.hypot(20, 20)))

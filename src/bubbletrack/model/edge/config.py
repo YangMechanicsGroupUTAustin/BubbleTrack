@@ -110,6 +110,9 @@ class RayConfig:
     refine_window_frac: float = 0.12
     refine_window_pad: float = 2.0
     refine_passes: int = 1
+    max_radius_diagonals: float = 4.0
+    """A fit beyond this many ROI diagonals is a nearly straight edge, not a bubble: the
+    passes stop (its rays would sample 1e7+ points; the app rejects R > the image's long side)."""
     min_samples: int = 12
     amplitude_half_px: float = 2.0
     plateau_px: float = 4.0
