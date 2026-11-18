@@ -22,7 +22,6 @@ from bubbletrack.model.cases.schema import (
 )
 from bubbletrack.model.provenance import USER_CONFIRMED_SOURCES, FitSource
 
-_MANUAL = FitSource.MANUAL.name.lower()
 # Sources the user decided count as labels (a circle fix only if it counts as confirmed).
 _CONFIRMED_BY = {source.name.lower(): (BY_MANUAL if source == FitSource.MANUAL else BY_GUIDED)
                  for source in USER_CONFIRMED_SOURCES}

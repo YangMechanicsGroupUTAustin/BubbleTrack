@@ -48,12 +48,6 @@ class CircleCheck:
     """"area" (inside the ROI, or hardly hidden), "ellipse" (clipped: completed with an ellipse)
     or "none"."""
 
-    def rel_diff(self, radius: float) -> float:
-        """|r_estimate - radius| / radius (NaN when unknown)."""
-        if not (np.isfinite(self.r_estimate) and np.isfinite(radius) and radius > 0):
-            return float("nan")
-        return float(abs(self.r_estimate - radius) / radius)
-
 
 NO_CHECK = CircleCheck(float("nan"), "none")
 

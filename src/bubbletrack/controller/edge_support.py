@@ -112,11 +112,6 @@ def forget_meta(state: AppState, idx: int) -> None:
     store_meta(state, idx, {})
 
 
-def clear_suggestion(state: AppState, idx: int) -> None:
-    """Drop frame *idx*'s guess (a new result or fit attempt replaces it)."""
-    set_suggestion(state, idx, None)
-
-
 def fit_from_suggestion(suggestion: Suggestion) -> EdgeFrameFit:
     """The fit a suggestion stands for, as the engine reported it."""
     return EdgeFrameFit(suggestion.radius, suggestion.rc, suggestion.cc,
