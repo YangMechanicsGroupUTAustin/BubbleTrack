@@ -220,6 +220,8 @@ class AppController:
         mp.edges_changed.connect(self.pretune_ctrl.on_edges_changed)
         mp.autotune_clicked.connect(self.pretune_ctrl.on_autotune)
         mp.filters_changed.connect(self.pretune_ctrl.on_filters_changed)
+        # Leaving a classic method hides the selector again (unless Settings shows it)
+        mp.filters_changed.connect(lambda: self.settings.apply_classic())
 
         # Clicks on the image: edge points of Review's Fix, or the seed pick
         self.w.original_panel.point_clicked.connect(self.manual_ctrl.on_point_clicked)

@@ -228,7 +228,7 @@ def load_session(filepath: str) -> dict:
     FileNotFoundError
         If the file does not exist.
     """
-    with open(os_path(filepath), encoding="utf-8") as fh:
+    with open(os_path(filepath), encoding="utf-8-sig") as fh:  # a BOM (Notepad) is fine
         raw = fh.read()
     try:
         data = json.loads(raw)

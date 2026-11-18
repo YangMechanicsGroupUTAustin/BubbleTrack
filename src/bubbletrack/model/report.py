@@ -48,9 +48,16 @@ def build_report_parameters(
         "Threshold": f"{state.img_thr:.2f}",
         "Removing Factor": str(state.removing_factor),
         "ROI": f"rows {state.gridx}, cols {state.gridy}",
-        "FPS": f"{fps_value:.0f} Hz" if physical_set else "not set",
-        "Scale": f"{um2px_value:.2f} um/px" if physical_set else "not set",
+        "FPS": f"{_exact(fps_value, 0)} Hz" if physical_set else "not set",
+        "Scale": f"{_exact(um2px_value, 2)} um/px" if physical_set else "not set",
     }
+
+
+def _exact(value: float, decimals: int) -> str:
+    """*value* with *decimals* decimals, or with every digit it needs when that would
+    round it (a scale of 0.065 um/px must not print as 0.07, nor 29.97 fps as 30)."""
+    text = f"{value:.{decimals}f}"
+    return text if float(text) == round(float(value), 9) else f"{value:.10g}"
 
 
 def _valid_fits(state) -> np.ndarray:

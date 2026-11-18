@@ -23,10 +23,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from bubbletrack.event_bus import SOURCE_LOADED
+import numpy as np
+
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
+from bubbletrack.controller.display_mixin import refresh_chart
 from bubbletrack.controller.session_controller import SESSION_RESTORED
+from bubbletrack.event_bus import SOURCE_LOADED
 from bubbletrack.model import config
 from bubbletrack.model.constants import DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import (
@@ -169,13 +172,16 @@ class ExportController(BaseController):
         self.make_dialog().exec()
 
     def on_physical_params_changed(self, panel) -> None:
-        self._update(fps=panel.get_fps(), um2px=panel.get_scale(),
-                     rmax_fit_length=panel.get_fit_length())
+        length = panel.get_fit_length()
+        changed = length != self.state.rmax_fit_length
+        self._update(fps=panel.get_fps(), um2px=panel.get_scale(), rmax_fit_length=length)
+        if changed and getattr(self.w, "radius_chart", None) is not None:
+            refresh_chart(self.state, self.w)  # its Rmax window follows the fit length
         self._set_physical(PHYSICAL_FIELDS - panel.unset_fields())
 
     def export_from(self, dialog: ExportDialog) -> bool:
         """Export what the dialog says; close it on success, else show why not."""
-        if self.state.radius is None:
+        if self.state.radius is None or not np.any(np.asarray(self.state.radius) > 0):
             dialog.set_status("No data to export", False)
             return False
         path = dialog.get_path()

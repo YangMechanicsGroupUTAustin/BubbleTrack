@@ -17,9 +17,9 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
-from bubbletrack.event_bus import RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.display_mixin import current_source
+from bubbletrack.event_bus import RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.model import config, edge_pipeline
 from bubbletrack.model.cases.build import (
     SIZE_WARN_BYTES, CaseRequest, clip_range, default_file_name, estimate_bytes, make_case,

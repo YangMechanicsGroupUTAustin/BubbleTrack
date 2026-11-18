@@ -16,12 +16,12 @@ from bubbletrack.controller.display_mixin import (
     refresh_chart,
     show_engine_view,
 )
-from bubbletrack.event_bus import SOURCE_LOADED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
 from bubbletrack.controller import edge_support, suggestion_view
 from bubbletrack.controller.edge_setup import EdgeSetup
+from bubbletrack.event_bus import SOURCE_LOADED, EventBus
 from bubbletrack.model.frame_source import normalize_source
 from bubbletrack.model.provenance import FitSource, user_confirmed_mask
 from bubbletrack.model.quality import compute_fit_quality

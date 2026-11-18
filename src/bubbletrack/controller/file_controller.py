@@ -149,6 +149,16 @@ class FileController(BaseController):
             self.w.header.set_status("Video has no frames", "#ef4444")
             reader.close()
             return
+        # Read the first frame BEFORE touching state (as for folders): a video
+        # that cannot be decoded leaves the current recording intact.
+        try:
+            first_raw = reader.read_frame(0)
+            first_img, _, _, _ = normalize_frame(first_raw, 0.5, (1, 99999), (1, 99999))
+        except Exception as exc:
+            logger.error("Cannot read the first frame of %s: %s", video_path, exc)
+            reader.close()
+            self.w.header.set_status(f"Cannot open video: {exc}", "#ef4444")
+            return
         if ask and not self.confirm_leave():
             reader.close()
             self.w.header.set_status(NOT_LOADED, "#a1a1aa")
@@ -176,13 +186,9 @@ class FileController(BaseController):
         )
         self.state = self.state.with_results_initialized(n)
 
-        # Read first frame to determine dimensions and set default ROI
-        first_raw = reader.read_frame(0)
+        # The first frame (read above) gives the dimensions and the default ROI
         if np.issubdtype(first_raw.dtype, np.integer):
             self._update(img_grayscale_max=int(np.iinfo(first_raw.dtype).max))
-        first_img, _, _, _ = normalize_frame(
-            first_raw, 0.5, (1, 99999), (1, 99999),
-        )
         h, w = first_img.shape
         self._update(gridx=(1, h), gridy=(1, w))
         self._set_max_radius(float(max(h, w)))

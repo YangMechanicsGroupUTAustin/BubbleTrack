@@ -7,6 +7,7 @@ is not in a session file.
 
 from __future__ import annotations
 
+import numpy as np
 import pytest
 
 from bubbletrack.controller import session_controller, unsaved_review
@@ -137,6 +138,9 @@ def test_a_video_is_asked_about_too(gui, make_sequence, answers, monkeypatch):
 
     class Reader:
         total_frames, fps = 3, 0.0
+
+        def read_frame(self, _i):  # read before asking: an unreadable video asks nothing
+            return np.full((20, 30), 100, np.uint8)
 
         def close(self):
             Reader.closed = True

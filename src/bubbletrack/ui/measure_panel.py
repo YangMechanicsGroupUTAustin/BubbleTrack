@@ -225,7 +225,7 @@ class MeasurePanel(QWidget):
         if not path:
             return
         try:
-            with open(path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8-sig") as f:  # a BOM (Notepad) is fine
                 preset = json.load(f)
             if not isinstance(preset, dict):
                 raise ValueError("not a preset (expected a JSON object)")

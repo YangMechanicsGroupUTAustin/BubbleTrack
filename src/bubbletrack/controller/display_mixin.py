@@ -79,6 +79,7 @@ def display_frame(
     """
     if not state.images:
         return
+    loaded = False
     try:
         # Check cache before loading from disk / video
         cache_key = _build_cache_key(state.images[idx], state)
@@ -120,6 +121,7 @@ def display_frame(
             state, cur_img=cur_img, cur_img_binary_roi=binary_roi,
         )
         set_state(state)
+        loaded = True
 
         # Compute bin_display by running the full detect_bubble pipeline
         # for ALL frames (fitted or not). Historical bug: the unfitted
@@ -224,7 +226,23 @@ def display_frame(
         suggestion_view.announce_guess(state, window, idx)
     except Exception as exc:
         logger.exception("Displaying frame %d failed", idx)  # the status alone has no traceback
+        if not loaded:
+            _show_unreadable(state, window, idx, set_state)
         window.header.set_status(f"Error: {exc}", "#ef4444")
+
+
+def _show_unreadable(state: AppState, window, idx: int, set_state) -> None:
+    """Frame *idx* could not be read: never leave the previous frame on screen
+    (a fix clicked on it would be stored on *idx*).  Blank panels, and the frame
+    indicators follow *idx* like the scrubber does."""
+    shape = state.cur_img.shape[:2] if state.cur_img is not None else (16, 16)
+    blank = np.zeros(shape, np.float32)
+    for panel in (window.original_panel, window.binary_panel):
+        panel.clear_overlays()
+        panel.set_image(blank)
+    set_state(update_state(state, cur_img=None, cur_img_binary_roi=None))
+    window.radius_chart.set_current_frame(idx)
+    window.status_bar.update_frame(frame_to_display(idx), state.total_frames)
 
 
 def run_display_hooks(window, state: AppState, idx: int) -> None:

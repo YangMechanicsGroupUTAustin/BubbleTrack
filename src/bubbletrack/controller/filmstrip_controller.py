@@ -17,12 +17,12 @@ import numpy as np
 from PyQt6.QtCore import QObject, QPointF, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
 
-from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.controller.display_mixin import current_source
 from bubbletrack.controller.key_frames import (  # noqa: F401 (re-exported)
     KeyFrame, choose_key_frames, find_collapses, key_frame_tooltip, to_check_frames,
 )
 from bubbletrack.controller.review_queue import ReviewItem
+from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode, to_grayscale
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail

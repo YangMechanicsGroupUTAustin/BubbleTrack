@@ -247,7 +247,7 @@ def load_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
     try:
-        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))  # BOM: Notepad
     except (ValueError, OSError) as exc:  # ValueError covers JSON and UTF-8 errors
         logger.warning("Failed to load config: %s", exc)
         return {}
@@ -266,7 +266,7 @@ def _load_raw_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
     try:
-        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8-sig"))  # BOM: Notepad
         return raw if isinstance(raw, dict) else {}
     except (ValueError, OSError):  # ValueError covers JSON and UTF-8 errors
         return {}
