@@ -86,7 +86,6 @@ class TestAppStateDefaults:
         s = AppState()
         assert s.cur_img is None
         assert s.cur_img_binary_roi is None
-        assert s.realtime_play is False
 
 
 class TestTotalFrames:

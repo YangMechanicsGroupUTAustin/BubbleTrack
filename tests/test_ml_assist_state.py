@@ -20,7 +20,7 @@ from bubbletrack.model.ml_pipeline import StoredAuto, storable
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.session import load_session, save_session, session_parameters
 from bubbletrack.model.state import AppState, update_state
-from bubbletrack.model.teach import BACKGROUND, BUBBLE, MLExamples, MLRegion, MLResult, stroke_pixels
+from bubbletrack.model.teach import BACKGROUND, BUBBLE, MLExamples, MLRegion, MLResult
 from bubbletrack.ui.chart_style import marker_symbols
 
 N = 8
@@ -63,17 +63,6 @@ def test_examples_for_run_keeps_strokes_and_syncs_verified_frames():
     assert set(ex.verified) == {6}                # stale circle 0 dropped, frame 6 added
     assert ex.strokes == strokes.strokes
     assert M.examples_for_run(state, MLExamples()).strokes == {}   # pluggable source
-
-
-def test_readiness_needs_bubble_and_background():
-    ready, text = M.readiness(MLExamples())
-    assert not ready and text == "0 verified frames, 0 strokes — needs at least one bubble and one background example"
-    ex = MLExamples().paint(1, BUBBLE, stroke_pixels([(10, 10), (10, 30)], 2, (100, 120)))
-    assert not M.readiness(ex)[0]
-    ex = ex.paint(1, BACKGROUND, stroke_pixels([(80, 10), (80, 30)], 2, (100, 120)))
-    ex = ex.paint(1, BACKGROUND, stroke_pixels([(90, 90)], 2, (100, 120)))
-    assert M.readiness(ex) == (True, "0 verified frames, 3 strokes — ready")
-    assert M.readiness(MLExamples().verify(0, (50.0, 60.0, 20.0)))[1] == "1 verified frame, 0 strokes — ready"
 
 
 # --------------------------------------------------------------------------- #
@@ -248,10 +237,6 @@ def test_run_summary_and_state_line():
     counts = M.run_counts(state, range(N))
     assert counts == {"guided": 1, "auto": 5, "outline": 1, "none": 1, "unfamiliar": 1}
     assert M.run_summary(counts) == "ML assist: 1 ML outline to review, 1 frame unlike the taught ones"
-    ex = MLExamples().verify(0, (1.0, 1.0, 5.0)).verify(4, (1.0, 1.0, 5.0))
-    assert M.state_text(True, ex) == "On (2 examples)"
-    assert M.state_text(False, ex) == "Off (2 examples)"
-    assert M.state_text(False, MLExamples()) == "Off"
 
 
 # --------------------------------------------------------------------------- #

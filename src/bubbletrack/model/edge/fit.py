@@ -254,11 +254,3 @@ def arc_stats(p: np.ndarray, rc: float, cc: float, nbins: int = 36) -> tuple[flo
     return float(coverage), float(gaps.max())
 
 
-def polygon_area(p: np.ndarray, rc: float, cc: float) -> float:
-    """Area of the polygon through *p* ordered by angle about (rc, cc) (shoelace)."""
-    if len(p) < 3:
-        return 0.0
-    ang = np.arctan2(p[:, 0] - rc, p[:, 1] - cc)
-    order = np.argsort(ang)
-    y, x = p[order, 0], p[order, 1]
-    return float(0.5 * abs(np.dot(x, np.roll(y, -1)) - np.dot(y, np.roll(x, -1))))

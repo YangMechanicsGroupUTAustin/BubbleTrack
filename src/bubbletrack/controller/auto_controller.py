@@ -475,10 +475,6 @@ class AutoController(BaseController):
             logger.warning("Auto-save to %s failed: %s", path, exc)
             return False
 
-    def _on_auto_finished(self) -> None:
-        """Kept for callers that finish a run without a worker reference."""
-        self._finish_run(stopped=self._stop_requested)
-
     def _finish_run(self, stopped: bool, review=()) -> None:
         self._running = False
         self._tracker = None

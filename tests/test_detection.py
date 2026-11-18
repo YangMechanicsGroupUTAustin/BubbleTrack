@@ -1,7 +1,6 @@
 """Tests for bubble detection pipeline."""
 
 import numpy as np
-import pytest
 
 from bubbletrack.model.detection import (
     crop_expanded_image,

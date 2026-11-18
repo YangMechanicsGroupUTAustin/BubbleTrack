@@ -1,12 +1,12 @@
-"""Reusable UI primitives: SliderInput, ToggleSwitch, CollapsibleSection, InfoBox."""
+"""Reusable UI primitives: SliderInput, ToggleSwitch, CollapsibleSection."""
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal, QSize, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QPainter, QColor
 from PyQt6.QtWidgets import (
     QCheckBox, QDoubleSpinBox, QHBoxLayout, QLabel, QSlider, QSpinBox,
-    QVBoxLayout, QWidget, QPushButton, QFrame, QSizePolicy,
+    QVBoxLayout, QWidget, QPushButton,
 )
 
 
@@ -269,25 +269,3 @@ class CollapsibleSection(QWidget):
         self._content.setVisible(checked)
         arrow = "▾" if checked else "▸"
         self._toggle.setText(f"  {arrow} {self._title}")
-
-
-# ------------------------------------------------------------------ #
-# InfoBox  (coloured hint box)
-# ------------------------------------------------------------------ #
-
-class InfoBox(QFrame):
-    """Coloured information / instruction box."""
-
-    def __init__(self, text: str, colour: str = "rgba(99, 102, 241, 0.15)",
-                 border: str = "rgba(99, 102, 241, 0.20)",
-                 parent: QWidget | None = None):
-        super().__init__(parent)
-        self.setStyleSheet(
-            f"background:{colour}; border:1px solid {border}; border-radius:8px; padding:8px;"
-        )
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(8, 8, 8, 8)
-        lbl = QLabel(text)
-        lbl.setWordWrap(True)
-        lbl.setStyleSheet("border:none; color:#e4e4e7;")
-        layout.addWidget(lbl)

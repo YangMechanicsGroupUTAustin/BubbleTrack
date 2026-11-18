@@ -12,7 +12,7 @@ large arrays on every frame would be wasteful.  The key benefit is that all
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 
 import numpy as np
 
@@ -128,7 +128,6 @@ class AppState:
     video_reader: object = None  # VideoFrameReader | None
 
     # Runtime state
-    realtime_play: bool = False
     cur_img: object = None          # np.ndarray | None
     cur_img_binary_roi: object = None  # np.ndarray | None
 

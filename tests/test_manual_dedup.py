@@ -1,7 +1,6 @@
 """Tests for manual point deduplication logic."""
 
 import numpy as np
-import pytest
 
 from bubbletrack.controller.manual_controller import is_duplicate_point
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX

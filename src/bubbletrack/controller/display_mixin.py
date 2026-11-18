@@ -13,7 +13,6 @@ import numpy as np
 
 from bubbletrack.controller import suggestion_view
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.conventions import frame_to_display, roi_to_slice
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
 from bubbletrack.model.export import locate_rmax

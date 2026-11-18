@@ -454,47 +454,6 @@ def _keep_dominant_radius_band(points: np.ndarray, dists: np.ndarray) -> np.ndar
     return points[keep] if np.sum(keep) >= 24 else points
 
 
-def _collect_radial_boundary_points(
-    smooth: np.ndarray,
-    center_r: float,
-    center_c: float,
-    core_radius: float,
-    boundary_level: float,
-) -> np.ndarray:
-    """Collect edge candidates in an annulus controlled by boundary level."""
-    h, w = smooth.shape
-    short_side = min(h, w)
-    level = float(np.clip(boundary_level, 0.0, 1.0))
-    inner_factor = 0.55 + 0.95 * level
-    outer_factor = inner_factor + 0.85
-    r_min = max(5.0, inner_factor * core_radius)
-    r_max = min(0.72 * short_side, outer_factor * core_radius)
-    if r_max <= r_min + 4:
-        return np.empty((0, 2), dtype=np.float64)
-
-    points: list[list[float]] = []
-    angles = np.linspace(0, 2 * np.pi, 240, endpoint=False)
-    radii = np.arange(r_min, r_max, 0.5)
-    for theta in angles:
-        rr = center_r + np.sin(theta) * radii
-        cc = center_c + np.cos(theta) * radii
-        valid = (rr >= 1) & (rr < h - 2) & (cc >= 1) & (cc < w - 2)
-        if np.sum(valid) < 5:
-            continue
-        vals = ndimage.map_coordinates(
-            smooth,
-            [rr[valid], cc[valid]],
-            order=1,
-            mode="nearest",
-        )
-        radial_derivative = np.gradient(vals)
-        k = int(np.argmax(radial_derivative))
-        min_rise = max(0.01, float(np.percentile(radial_derivative, 75)))
-        if radial_derivative[k] > min_rise:
-            points.append([float(rr[valid][k]), float(cc[valid][k])])
-    return np.asarray(points, dtype=np.float64)
-
-
 def _collect_first_radial_peak_points(
     smooth: np.ndarray,
     center_r: float,
@@ -563,65 +522,6 @@ def _collect_first_radial_peak_points(
         points.append([float(rr[valid][chosen]), float(cc[valid][chosen])])
 
     return np.asarray(points, dtype=np.float64)
-
-
-def _score_gradient_circle(
-    img: np.ndarray,
-    points: np.ndarray,
-    center_r: float,
-    center_c: float,
-    radius: float,
-    boundary_level: float,
-    boundary_bias: float,
-    *,
-    prior_circle: tuple[float, float, float] | None = None,
-    gridx: tuple[int, int] | None = None,
-    gridy: tuple[int, int] | None = None,
-) -> float:
-    """Score a candidate by circularity, contrast, coverage, and UI preference."""
-    h, w = img.shape
-    rr, cc = np.ogrid[:h, :w]
-    dist = np.sqrt((rr - center_r) ** 2 + (cc - center_c) ** 2)
-
-    inner = dist <= max(1.0, radius * 0.82)
-    outer = (dist >= radius * 1.05) & (dist <= radius * 1.28)
-    if np.sum(inner) < 12 or np.sum(outer) < 12:
-        return -np.inf
-
-    inside_mean = float(np.mean(img[inner]))
-    outside_mean = float(np.mean(img[outer]))
-    inside_std = float(np.std(img[inner]))
-    outside_std = float(np.std(img[outer]))
-    pooled = max(0.02, 0.5 * (inside_std + outside_std))
-    contrast = (outside_mean - inside_mean) / pooled
-    contrast_score = 1.0 / (1.0 + np.exp(-contrast))
-
-    dists = np.linalg.norm(points - np.array([center_r, center_c]), axis=1)
-    residual = float(np.sqrt(np.mean((dists - radius) ** 2)))
-    circularity_score = np.exp(-residual / max(2.0, 0.08 * radius))
-
-    coverage = _sector_coverage(points, center_r, center_c)
-    preference = np.exp(-abs(boundary_level - boundary_bias) / 0.35)
-    prior_score = 0.5
-    if prior_circle is not None and gridx is not None and gridy is not None:
-        prior_r, prior_c, prior_radius = prior_circle
-        full_r = center_r + gridx[0]
-        full_c = center_c + gridy[0]
-        center_delta = np.hypot(full_r - prior_r, full_c - prior_c)
-        radius_delta = abs(radius - prior_radius)
-        center_scale = max(4.0, 0.35 * prior_radius)
-        radius_scale = max(4.0, 0.40 * prior_radius)
-        prior_score = np.exp(
-            -center_delta / center_scale - radius_delta / radius_scale
-        )
-
-    return (
-        0.25 * contrast_score
-        + 0.18 * circularity_score
-        + 0.12 * coverage
-        + 0.25 * preference
-        + 0.20 * prior_score
-    )
 
 
 def _estimate_dark_core(img: np.ndarray) -> tuple[float, float, float] | None:

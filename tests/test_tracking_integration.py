@@ -14,7 +14,7 @@ from _sequence_synth import drift_spec, render_seq
 from bubbletrack.controller.tracking import apply_tracking, review_items
 from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.sequence import FrameSolution, Observation, SequenceResult
+from bubbletrack.model.sequence import FrameSolution, SequenceResult
 from bubbletrack.model.sequence_pipeline import (
     Redetector, TrackingStopped, anchors, observations,
 )

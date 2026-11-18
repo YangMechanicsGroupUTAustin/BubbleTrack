@@ -115,18 +115,6 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}{'' if n == 1 else 's'}"
 
 
-def readiness(examples: MLExamples) -> tuple[bool, str]:
-    """(ready, quality line): training needs a bubble and a background example."""
-    verified = len(examples.verified)
-    painted = [examples.strokes[f] for f in examples.strokes]
-    bubble = verified > 0 or any(s.bubble for s in painted)
-    background = verified > 0 or any(s.background for s in painted)
-    ready = bubble and background
-    head = f"{_plural(verified, 'verified frame')}, {_plural(stroke_count(examples), 'stroke')}"
-    return ready, f"{head} — " + ("ready" if ready else "needs at least one bubble and one "
-                                                        "background example")
-
-
 def stored_auto(state, idx: int) -> StoredAuto | None:
     """Frame *idx*'s stored plain-Auto result, or None when it has none to offer.
 
@@ -270,17 +258,9 @@ def run_summary(counts: dict[str, int]) -> str:
     return "ML assist: " + ", ".join(parts)
 
 
-def state_text(on: bool, examples: MLExamples | None) -> str:
-    """The Auto box's state line: 'Off', 'Off (2 examples)', 'On (3 examples)'
-    (examples = frames with verified circles or strokes)."""
-    n = len(examples.frames) if isinstance(examples, MLExamples) else 0
-    head = "On" if on else "Off"
-    return f"{head} ({_plural(n, 'example')})" if n or on else head
-
-
 __all__ = [
     "BACKGROUND", "BUBBLE", "HINT_SHARE", "SUGGESTED_FRAMES", "UNAVAILABLE_TIP", "default_brush",
-    "examples_for_run", "failures", "make_job", "ml_available", "protected_frames", "readiness", "run_counts",
-    "run_summary", "state_text", "stored_auto", "stored_auto_map", "stroke_count", "suggestions",
+    "examples_for_run", "failures", "make_job", "ml_available", "protected_frames", "run_counts",
+    "run_summary", "stored_auto", "stored_auto_map", "stroke_count", "suggestions",
     "verified_circles",
 ]

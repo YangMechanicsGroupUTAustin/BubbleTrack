@@ -126,24 +126,9 @@ QUALITY_MIN_RADIUS_FRACTION: float = 0.03
 QUALITY_MAX_RADIUS_FRACTION: float = 0.85
 """Maximum plausible radius as fraction of ROI short side."""
 
-QUALITY_GOOD_THRESHOLD: float = 0.65
-"""Fit quality score >= this is considered reliable (green marker)."""
 
 QUALITY_WARN_THRESHOLD: float = 0.35
-"""Fit quality score >= this but < GOOD is marginal (amber). Below = unreliable (red)."""
-
-FIT_ACCEPT_MIN_SECTOR_COVERAGE: float = 0.625
-"""Minimum angular coverage for accepting a full in-ROI automatic fit.
-
-0.625 means at least 5 of 8 angular sectors contain boundary points.  This
-rejects half-circle fits whose radius is mostly extrapolated.
-"""
-
-FIT_ACCEPT_PARTIAL_MIN_SECTOR_COVERAGE: float = 0.375
-"""Coverage threshold when the user explicitly marks a bubble crossing an ROI edge."""
-
-FIT_ACCEPT_MIN_EDGE_DENSITY: float = 0.12
-"""Minimum edge points per pixel of circumference for accepting an automatic fit."""
+"""Fit quality score below this counts as low (classic modes' run summary)."""
 
 # ------------------------------------------------------------------ #
 #  Auto-tune grid search

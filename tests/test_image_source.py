@@ -16,7 +16,6 @@ objects directly — no real OS-level drag is performed.
 
 from __future__ import annotations
 
-import os
 import sys
 from pathlib import Path
 

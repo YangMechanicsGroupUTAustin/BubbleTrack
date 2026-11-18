@@ -26,7 +26,6 @@ ROI_COLOUR = "#10b981"  # the ROI rectangle (green)
 USER_CIRCLE_COLOUR = "#22d3ee"  # your drawn circle, not stored (cyan dashes: never the guess)
 FOUND_COLOUR = "#a1a1aa"  # what Auto found instead of a drawn circle (grey)
 PAINT_BUBBLE_COLOUR = "#22c55e"  # ML assist: painted bubble / P(bubble) tint
-PAINT_BACKGROUND_COLOUR = "#ef4444"  # ML assist: painted background
 
 KINDS = ("line", "dash", "dots", "box", "fill")
 

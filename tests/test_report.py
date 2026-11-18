@@ -5,7 +5,6 @@ from __future__ import annotations
 import os
 
 import numpy as np
-import pytest
 
 from bubbletrack.model.report import build_report_parameters, generate_report
 from bubbletrack.model.state import AppState, update_state

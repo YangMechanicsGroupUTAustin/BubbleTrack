@@ -6,7 +6,7 @@ import numpy as np
 import pytest
 
 from bubbletrack.model.edge.config import FitConfig
-from bubbletrack.model.edge.fit import arc_stats, fit_circle, polygon_area, ransac_circle
+from bubbletrack.model.edge.fit import arc_stats, fit_circle, ransac_circle
 
 CFG = FitConfig()
 
@@ -71,6 +71,3 @@ def test_arc_stats_full_and_half_circle():
     assert arc_stats(np.empty((0, 2)), 0.0, 0.0) == (0.0, 360.0)
 
 
-def test_polygon_area_of_a_dense_circle():
-    assert polygon_area(_circle(720), 50.0, 80.0) == pytest.approx(np.pi * 30.0 ** 2, rel=1e-3)
-    assert polygon_area(_circle(2), 50.0, 80.0) == 0.0

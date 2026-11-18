@@ -1,7 +1,6 @@
 """Tests for the Taubin circle fitting algorithm."""
 
 import numpy as np
-import pytest
 
 from bubbletrack.model.circle_fit import circle_fit_taubin
 

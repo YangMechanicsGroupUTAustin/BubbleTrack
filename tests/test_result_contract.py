@@ -4,7 +4,6 @@ review queue, visualisation and export work streams."""
 from __future__ import annotations
 
 import numpy as np
-import pytest
 
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.session import load_session, save_session

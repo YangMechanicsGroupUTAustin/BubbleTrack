@@ -7,8 +7,6 @@ Range Image Segmentation", IEEE Trans. PAMI, Vol. 13, pp 1115-1138, 1991.
 
 from __future__ import annotations
 
-import warnings
-
 import numpy as np
 
 from bubbletrack.model.constants import (
@@ -65,7 +63,6 @@ def circle_fit_taubin(xy: np.ndarray) -> tuple[float, float, float]:
     ynew = 1e20
     epsilon = TAUBIN_EPSILON
     iter_max = TAUBIN_MAX_ITER
-    converged = False
 
     for _ in range(iter_max):
         yold = ynew
@@ -77,7 +74,6 @@ def circle_fit_taubin(xy: np.ndarray) -> tuple[float, float, float]:
         xold = xnew
         xnew = xold - ynew / dy
         if abs((xnew - xold) / (xnew + np.finfo(float).eps)) < epsilon:
-            converged = True
             break
         if xnew < 0.0:
             xnew = 0.0
