@@ -131,6 +131,7 @@ class AppController:
         self.settings = SettingsController(self.w, self)
 
         # Lock everything that mutates results while a worker writes into them
+        self._run_locked = False
         self.bus.subscribe(RUN_STATE_CHANGED, self._apply_run_lock)
         self.w.set_close_guard(self._confirm_close)
 
@@ -241,7 +242,7 @@ class AppController:
 
         # ROI: button click → enter selection mode, drag complete → apply ROI
         self.w.original_panel.select_roi_clicked.connect(self.pretune_ctrl.on_select_roi)
-        self.w.original_panel.roi_selected.connect(self.pretune_ctrl.on_roi_selected)
+        self.w.original_panel.roi_selected.connect(self._on_roi_selected)
 
         # R-t chart click-to-jump
         self.w.radius_chart.point_clicked.connect(self.file_ctrl.on_frame_changed)
@@ -302,12 +303,18 @@ class AppController:
         self.pretune_ctrl.refresh_edge_labels()
         self.settings.apply_classic()  # a classic method keeps its controls in view
 
+    def _on_roi_selected(self, r0: int, r1: int, c0: int, c1: int) -> None:
+        if self._run_locked:
+            return  # the running fit measures with the ROI it started with
+        self.pretune_ctrl.on_roi_selected(r0, r1, c0, c1)
+
     def _apply_run_lock(self, running: bool) -> None:
         """Disable every control that loads data or edits results during a run.
 
         Frame navigation stays available so the user can watch progress.
         """
         enabled = not running
+        self._run_locked = bool(running)
         lp = self.w.left_panel
         for widget in (lp.image_source, lp.measure_panel, lp.export_button):
             widget.setEnabled(enabled)
@@ -316,6 +323,8 @@ class AppController:
         self.w.save_session_action.setEnabled(enabled)
         self.w.load_session_action.setEnabled(enabled)
         self.w.radius_chart.set_editing_enabled(enabled)
+        # The run measures with the ROI it started with: no new ROI meanwhile
+        self.w.original_panel.set_roi_enabled(enabled)
 
     def _on_clear_results(self) -> None:
         """Edit > Clear All Results: remove every result once the user confirms."""

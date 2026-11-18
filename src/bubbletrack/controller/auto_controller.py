@@ -360,7 +360,8 @@ class AutoController(BaseController):
         logger.info("Tracking re-measured %d frame(s): %s", len(changed), changed[:20])
         if changed:
             self._run_notes.append(f"tracking re-measured {plural(len(changed), 'frame')}")
-        self._finish_run(stopped=False, review=review_items(outcome.result))
+        self._finish_run(stopped=False,
+                         review=review_items(outcome.result, allowed_frames=self._tracking_scope()))
 
     def _tracking_scope(self) -> frozenset[int] | None:
         """Frames tracking may change: any after a run over every frame (Fit All),
@@ -396,8 +397,8 @@ class AutoController(BaseController):
             return  # keep the user's manual fit
 
         state = self.state
-        if idx in self._failed_frames and state.radius[idx] > 0:
-            return  # unreadable now (file locked, offline): keep its last result
+        if idx in self._failed_frames:
+            return  # unreadable now (file locked, offline): keep its last result and guess
         # An Edge run's frame_meta (emitted after this) brings confidence, flags and
         # guess; a classic run has none, so nothing of an earlier Auto run may stay.
         edge_support.forget_meta(state, idx)
@@ -475,7 +476,7 @@ class AutoController(BaseController):
             logger.warning("Auto-save to %s failed: %s", path, exc)
             return False
 
-    def _finish_run(self, stopped: bool, review=()) -> None:
+    def _finish_run(self, stopped: bool, review=None) -> None:
         self._running = False
         self._tracker = None
         self._set_run_state(False)
@@ -489,9 +490,10 @@ class AutoController(BaseController):
                 self._cache,
             )
         scores = refresh_chart(self.state, self.w)
-        # The tracking review list (empty when tracking did not run) and the
-        # frames it re-measured; the Review queue is up to date afterwards.
-        self.bus.emit(TRACKING_REVIEW, tuple(review))
+        # The tracking review list replaces the previous one only when tracking ran:
+        # a stopped or untracked (partial) run must not drop other frames' reasons.
+        if review is not None:
+            self.bus.emit(TRACKING_REVIEW, tuple(review))
         self._results_changed()
         self._show_summary(stopped, scores)
         self.bus.emit(RUN_FINISHED, {"stopped": stopped, "ml": self._ml_run,

@@ -306,6 +306,8 @@ class SessionController(BaseController):
         warning = images_differ(names, self.state.images) or restore_results(self.state, results)
         if warning:
             warnings.append(warning)
+            # Strokes and confirmed circles belong to the frames they were taught on
+            self._update(ml_examples=None, ml_assist=False)
         self._saved_review = review_signature(self.state)
         self._after_restore()
         self.bus.emit(SESSION_RESTORED)

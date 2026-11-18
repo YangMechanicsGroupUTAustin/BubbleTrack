@@ -233,6 +233,8 @@ class FilmstripController(QObject):
 
     def _on_source_loaded(self, _n: int) -> None:
         self._cache.clear()
+        self._built_for = None
+        self._strip.set_thumbnails([])  # also when collapsed (refresh skips it then)
         self.refresh(force=True)
 
     def _on_frame_changed(self, idx: int) -> None:

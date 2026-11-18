@@ -253,7 +253,7 @@ def test_tracking_after_a_partial_run_may_change_only_that_run(gui, make_sequenc
     seen = []
     monkeypatch.setattr(auto, "apply_tracking",
                         lambda state, outcome, allowed_frames=None: seen.append(allowed_frames) or [])
-    monkeypatch.setattr(auto, "review_items", lambda result: [])
+    monkeypatch.setattr(auto, "review_items", lambda result, allowed_frames=None: [])
     monkeypatch.setattr(ctrl, "_finish_run", lambda **kwargs: None)
     tracker, outcome = object(), type("Outcome", (), {"result": None})()
     ctrl._tracker = tracker

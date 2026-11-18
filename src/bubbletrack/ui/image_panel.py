@@ -176,6 +176,12 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
     def mode(self) -> str:
         return self._mode
 
+    def set_roi_enabled(self, enabled: bool) -> None:
+        """Allow selecting a new ROI (off while a run measures with the current one)."""
+        self._select_roi_btn.setEnabled(enabled)
+        if not enabled and self._mode == "roi":
+            self.set_mode("normal")
+
     def set_mode(self, mode: str):
         """Set interaction mode: 'normal', 'point', 'circle', 'paint' or 'roi'.
 

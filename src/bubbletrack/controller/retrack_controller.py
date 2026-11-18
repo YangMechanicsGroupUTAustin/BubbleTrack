@@ -251,7 +251,8 @@ class RetrackController(BaseController):
             self.w.header.set_status(f"Tracking updated {plural(n, 'nearby frame')} "
                                      "— Ctrl+Z undoes", _OK)
         with self.muted():
-            self.bus.emit(TRACKING_REVIEW, tuple(review_items(outcome.result)))
+            self.bus.emit(TRACKING_REVIEW,
+                          tuple(review_items(outcome.result, allowed_frames=self._allowed)))
             if n:
                 self._results_changed()
 

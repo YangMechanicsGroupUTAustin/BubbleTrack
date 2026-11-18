@@ -19,6 +19,7 @@ from bubbletrack.model.edge_pipeline import EdgeJob, read_raw
 from bubbletrack.model.frame_source import open_recording
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
 from bubbletrack.model.sequence import SOURCE_TRACKED, SequenceResult, solve_sequence
+from bubbletrack.model.sequence.types import FLAG_DISAGREE
 from bubbletrack.model.sequence_pipeline import (
     Redetector, TrackingStopped, anchors, observations,
 )
@@ -106,7 +107,20 @@ def apply_tracking(state, outcome: TrackingOutcome,
     return changed
 
 
-def review_items(result: SequenceResult) -> list[ReviewItem]:
-    """The solver's review list, ranked by the review queue's own weights."""
-    return [ReviewItem(frame, tuple(reasons), 0, result.frames[frame].confidence)
-            for frame, reasons in result.review]
+def review_items(result: SequenceResult,
+                 allowed_frames: Collection[int] | None = None) -> list[ReviewItem]:
+    """The solver's review list, ranked by the review queue's own weights.
+
+    With *allowed_frames* (a re-track or partial run), a frame outside them kept
+    its own result, so "disagree" (tracking found another circle) is dropped there:
+    Review would say tracking changed it, and listing it would let the next
+    re-track change a frame that looks good.
+    """
+    items = []
+    for frame, reasons in result.review:
+        if allowed_frames is not None and frame not in allowed_frames:
+            reasons = tuple(r for r in reasons if r != FLAG_DISAGREE)
+            if not reasons:
+                continue
+        items.append(ReviewItem(frame, tuple(reasons), 0, result.frames[frame].confidence))
+    return items

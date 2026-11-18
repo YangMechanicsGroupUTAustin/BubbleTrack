@@ -178,8 +178,9 @@ class TeachingMode:
             before = shown + [size(g) for g in slots[:k] if g is not None and g not in examples]
             if f is not None and f not in examples and not all(differ(size(f), b, n) for b in before):
                 slots[k] = None
+        reference = self._c.reference_index()  # None: Auto runs without one
         skip = (self._rejected | set(examples) | protected_frames(self._c.state)
-                | {self._c.reference_index()})
+                | ({reference} if reference is not None else set()))
         avoid = [FrameSize(f, radius[f]) for f in sorted(self._rejected)]
         for k in range(SLOTS):
             if slots[k] is None:
