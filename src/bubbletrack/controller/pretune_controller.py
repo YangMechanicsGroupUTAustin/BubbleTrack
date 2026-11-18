@@ -180,10 +180,12 @@ class PretuneController(BaseController):
         self.w.header.set_status("Drag on image to select ROI", "#f59e0b")
 
     def on_roi_selected(self, r0: int, r1: int, c0: int, c1: int) -> None:
-        # Clamp to actual image dimensions
-        if self.state.cur_img is not None:
-            h, w = self.state.cur_img.shape[:2]
-            (r0, r1), (c0, c1) = clamp_roi((r0, r1), (c0, c1), h, w)
+        # Clamp to the image dimensions: an unreadable frame on screen is a blank of
+        # the same size (a drag from the view margin gives negative bounds)
+        shape = (self.state.cur_img.shape[:2] if self.state.cur_img is not None
+                 else self.w.original_panel.image_size)
+        if shape is not None:
+            (r0, r1), (c0, c1) = clamp_roi((r0, r1), (c0, c1), *shape)
         self._update(gridx=(r0, r1), gridy=(c0, c1))
         self._invalidate_binary_cache()
         if self._cache is not None:
@@ -222,7 +224,8 @@ class PretuneController(BaseController):
             logger.exception("Edge fit failed for frame %d", idx)
             self.w.header.set_status(f"Error: {exc}", "#ef4444")
             return
-        if not self._user_decided(idx):  # a locked frame or the user's own fit is kept
+        store = not self._user_decided(idx)  # a locked frame or the user's own fit is kept
+        if store:
             edge_support.store_fit(self.state, idx, fit, FitSource.REFIT)
         show_engine_view(self.state, self.w, idx)
         redraw_original(self.state, self.w)
@@ -235,7 +238,8 @@ class PretuneController(BaseController):
         refresh_chart(self.state, self.w)
         self.w.left_panel.measure_panel.hide_quality()
         self.w.header.set_status(*edge_support.status_text(idx, fit))
-        self._results_changed()
+        if store:  # nothing changed on a kept frame: no re-track, no autosave
+            self._results_changed()
 
     def on_pretune_fit(self) -> None:
         """Detect + fit circle for the current single frame."""

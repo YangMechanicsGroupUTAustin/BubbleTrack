@@ -135,6 +135,7 @@ class ExportDialog(QDialog):
         self._fit_len_spin = QSpinBox()
         self._fit_len_spin.setRange(3, 999)
         self._fit_len_spin.setSingleStep(2)
+        self._fit_len_spin.setKeyboardTracking(False)  # typing "25" redraws the chart once
         self._fit_len_spin.setToolTip("Frames around the largest radius used to fit Rmax\n"
                                       "and its time, the zero of the exported time axis.")
         grid.addWidget(QLabel("Rmax fit:"), 3, 0)

@@ -32,7 +32,7 @@ def _wait(qapp, predicate, timeout_s=60.0):
 
 
 @pytest.mark.parametrize("seed", list(range(4)))
-def test_monkey(qapp, gui, make_sequence, tmp_path, monkeypatch, caplog, seed):
+def test_monkey(qapp, gui, make_sequence, tmp_path, monkeypatch, caplog, request, seed):
     import faulthandler
 
     from PyQt6.QtWidgets import QMessageBox
@@ -40,6 +40,7 @@ def test_monkey(qapp, gui, make_sequence, tmp_path, monkeypatch, caplog, seed):
     from bubbletrack.ui.export_dialog import ExportDialog
 
     faulthandler.dump_traceback_later(240, exit=True)  # a hang prints the stacks and ends the run
+    request.addfinalizer(faulthandler.cancel_dump_traceback_later)  # whatever fails below
     caplog.set_level(logging.WARNING)
     monkeypatch.setattr(worker_mod.BatchWorker, "inline", True)  # threads, not processes
     # No modal dialog may wait for a click offscreen: answer at once
@@ -50,8 +51,8 @@ def test_monkey(qapp, gui, make_sequence, tmp_path, monkeypatch, caplog, seed):
     window, ctl = gui
     rng = np.random.default_rng(seed)
     slot_errors = []
-    old_hook = sys.excepthook
-    sys.excepthook = lambda t, v, tb: slot_errors.append("".join(traceback.format_exception(t, v, tb)))
+    monkeypatch.setattr(sys, "excepthook",
+                        lambda t, v, tb: slot_errors.append("".join(traceback.format_exception(t, v, tb))))
     folders = [make_sequence(f"a{seed}", 12, r_min=15, r_max=40), make_sequence(f"b{seed}", 7, r_min=25, r_max=30)]
     ctl.retrack.timer.setInterval(30)
     trail = []
@@ -140,21 +141,17 @@ def test_monkey(qapp, gui, make_sequence, tmp_path, monkeypatch, caplog, seed):
     actions = [load, goto, goto, fit_all, fit_range, mode, chart_range, chart_range, undo, undo, review,
                review, review, fix_cancel, session, export, reference, seed_click, non_round, clear, settle]
     load()
-    try:
-        for _ in range(80):
-            act = actions[int(rng.integers(0, len(actions)))]
-            trail.append(act.__name__)
-            try:
-                act()
-            except Exception:  # noqa: BLE001
-                pytest.fail(f"{act.__name__} raised after {trail}:\n{traceback.format_exc()}")
-            qapp.processEvents()
-            assert not slot_errors, f"slot error after {trail}:\n{slot_errors[0]}"
-            bad = [r for r in caplog.records if r.levelno >= logging.ERROR]
-            assert not bad, (f"error log after {trail}: {bad[0].getMessage()}\n"
-                             f"{bad[0].exc_text or ''}")
-        settle()
-        assert not slot_errors, slot_errors[:1]
-    finally:
-        sys.excepthook = old_hook
-        faulthandler.cancel_dump_traceback_later()
+    for _ in range(80):
+        act = actions[int(rng.integers(0, len(actions)))]
+        trail.append(act.__name__)
+        try:
+            act()
+        except Exception:  # noqa: BLE001
+            pytest.fail(f"{act.__name__} raised after {trail}:\n{traceback.format_exc()}")
+        qapp.processEvents()
+        assert not slot_errors, f"slot error after {trail}:\n{slot_errors[0]}"
+        bad = [r for r in caplog.records if r.levelno >= logging.ERROR]
+        assert not bad, (f"error log after {trail}: {bad[0].getMessage()}\n"
+                         f"{bad[0].exc_text or ''}")
+    settle()
+    assert not slot_errors, slot_errors[:1]

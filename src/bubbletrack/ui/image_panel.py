@@ -176,6 +176,11 @@ class ImagePanel(OverlayDrawingMixin, QWidget):
     def mode(self) -> str:
         return self._mode
 
+    @property
+    def image_size(self) -> tuple[int, int] | None:
+        """(h, w) of the image on screen; None before the first one."""
+        return self._image_size
+
     def set_roi_enabled(self, enabled: bool) -> None:
         """Allow selecting a new ROI (off while a run measures with the current one)."""
         self._select_roi_btn.setEnabled(enabled)

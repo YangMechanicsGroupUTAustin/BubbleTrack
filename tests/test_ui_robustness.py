@@ -119,3 +119,89 @@ def test_a_bad_preset_changes_nothing(gui):
         assert (panel.get_threshold(), panel.get_removing_factor_slider(), panel.method()) == before
     panel.apply_preset({"threshold": 0.3, "edge_flags": [1, 0, 0, 1]})
     assert panel.get_threshold() == pytest.approx(0.3) and panel.get_edge_flags() == [True, False, False, True]
+
+
+# -- second self-review of the overnight commits ---------------------------- #
+
+def _make_unreadable(controller, idx):
+    with open(controller._get_state().images[idx], "wb") as fh:
+        fh.write(b"not an image")
+    controller.file_ctrl._cache.invalidate()
+
+
+def test_an_roi_drawn_on_an_unreadable_frame_is_clamped(gui, make_sequence):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6)))  # 250 x 400 frames
+    _make_unreadable(controller, 3)
+    _make_unreadable(controller, 4)
+    controller.file_ctrl.on_frame_changed(3)
+    controller.file_ctrl.on_frame_changed(4)  # twice in a row: the blank keeps the frame size
+    assert controller._get_state().cur_img is None
+    assert window.original_panel.image_size == (250, 400)
+    controller._on_roi_selected(-30, 260, -40, 420)  # a drag from the view margin
+    state = controller._get_state()
+    assert state.gridx == (1, 250) and state.gridy == (1, 400)
+
+
+def test_a_bad_filter_value_in_a_preset_changes_nothing(gui):
+    import pytest
+
+    window, _controller = gui
+    panel = window.left_panel.measure_panel
+    before = panel.get_threshold()
+    for bad in ("x", None, float("nan"), True):
+        with pytest.raises(ValueError):
+            panel.apply_preset({"threshold": 0.31, "gaussian_sigma": bad})
+        assert panel.get_threshold() == pytest.approx(before)
+    panel.apply_preset({"threshold": 0.31, "gaussian_sigma": 1.5, "area_max_regions": 3})
+    assert panel.get_threshold() == pytest.approx(0.31)
+
+
+def test_a_failed_xlsx_save_leaves_no_temporary_file(tmp_path, monkeypatch):
+    import openpyxl
+    import pytest
+
+    from bubbletrack.model.export import export_excel
+
+    def fail(self, *_a, **_k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(openpyxl.writer.excel.ExcelWriter, "write_data", fail)
+    with pytest.raises(OSError):
+        export_excel(str(tmp_path / "out.xlsx"), np.array([20.0, 22.0]), np.full((2, 2), 50.0))
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_a_target_open_elsewhere_is_named_in_the_error(tmp_path, monkeypatch):
+    import pytest
+
+    from bubbletrack.model import atomic_write
+
+    monkeypatch.setattr(atomic_write, "_REPLACE_WAIT_S", 0.0)
+
+    def refuse(*_a, **_k):
+        raise PermissionError(13, "Access is denied")
+
+    monkeypatch.setattr(atomic_write.os, "replace", refuse)
+    with pytest.raises(PermissionError) as exc:
+        atomic_write.write_text_atomic(tmp_path / "results.csv", "x")
+    assert str(exc.value).startswith("results.csv is open in another program")
+    assert ".tmp" not in str(exc.value)
+
+
+def test_fit_current_frame_on_a_locked_frame_announces_nothing(gui, make_sequence):
+    from bubbletrack.event_bus import RESULTS_CHANGED
+
+    _window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6, r_min=20, r_max=40)))
+    controller._set_state(update_state(controller._get_state(), detection_mode="edge"))
+    controller.file_ctrl.on_frame_changed(4)
+    controller.pretune_ctrl.on_pretune_fit()  # a stored fit, then locked
+    controller._on_lock_range(4, 4, locked=True)
+    controller.retrack.cancel()
+    radius = float(controller._get_state().radius[4])
+    events = []
+    controller.bus.subscribe(RESULTS_CHANGED, lambda *a: events.append(a))
+    controller.pretune_ctrl.on_pretune_fit()
+    assert float(controller._get_state().radius[4]) == radius
+    assert not events and not controller.retrack.timer.isActive()

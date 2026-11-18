@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
@@ -42,6 +43,8 @@ _FILTER_KEYS = (
     "gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius", "detection_mode",
     "edge_polarity", "bubble_non_round", "area_max_regions", "gradient_boundary", "temporal_refine",
 )
+_NUMERIC_FILTER_KEYS = ("gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius",
+                        "area_max_regions", "gradient_boundary")
 
 
 def is_classic(mode: str) -> bool:
@@ -62,6 +65,11 @@ def _checked_preset(preset: dict) -> dict:
         out["edge_flags"] = [bool(v) for v in flags]
     if "detection_mode" in out and out["detection_mode"] not in DETECTION_MODES:
         raise ValueError(f"unknown detection mode {out['detection_mode']!r}")
+    for key in _NUMERIC_FILTER_KEYS:  # checked, not converted: the controls take them as saved
+        value = out.get(key)
+        if key in out and (isinstance(value, bool) or not isinstance(value, (int, float))
+                           or not math.isfinite(value)):
+            raise ValueError(f"{key} must be a number, got {value!r}")
     return out
 
 

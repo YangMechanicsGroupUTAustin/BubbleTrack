@@ -319,16 +319,33 @@ def test_a_refused_log_rollover_keeps_appending(tmp_path, monkeypatch):
         logging_config.setup_logging(log_dir=tmp_path)
         handler = next(h for h in logger.handlers if isinstance(h, logging_config._SharedRotatingFileHandler))
         handler.maxBytes = 200
+        log = tmp_path / "bubbletrack.log"
+        (tmp_path / "bubbletrack.log.1").write_text("newer backup\n", encoding="utf-8")
+        (tmp_path / "bubbletrack.log.2").write_text("oldest backup\n", encoding="utf-8")
+        real_replace, held = logging_config.os.replace, [True]
 
-        def refuse(*_a, **_k):
-            raise PermissionError(32, "being used by another process")
+        def replace(src, dst):
+            if held[0] and str(src) == str(log):
+                raise PermissionError(32, "being used by another process")
+            real_replace(src, dst)
 
-        monkeypatch.setattr(logging_config.logging.handlers.RotatingFileHandler, "rotate", refuse)
+        monkeypatch.setattr(logging_config.os, "replace", replace)
         for i in range(50):
             logger.warning("record %d", i)
         handler.flush()
-        text = (tmp_path / "bubbletrack.log").read_text(encoding="utf-8")
+        text = log.read_text(encoding="utf-8")
         assert "record 0" in text and "record 49" in text
+        # A refused rollover shifts no backup: the oldest one is not lost
+        assert (tmp_path / "bubbletrack.log.1").read_text(encoding="utf-8") == "newer backup\n"
+        assert (tmp_path / "bubbletrack.log.2").read_text(encoding="utf-8") == "oldest backup\n"
+
+        held[0] = False  # the other instance closed: the next rollover goes through
+        logger.warning("record 50")
+        handler.flush()
+        assert "record 0" in (tmp_path / "bubbletrack.log.1").read_text(encoding="utf-8")
+        assert (tmp_path / "bubbletrack.log.2").read_text(encoding="utf-8") == "newer backup\n"
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "bubbletrack.log", "bubbletrack.log.1", "bubbletrack.log.2"]
     finally:
         for h in [h for h in logger.handlers if h not in handlers]:
             logger.removeHandler(h)

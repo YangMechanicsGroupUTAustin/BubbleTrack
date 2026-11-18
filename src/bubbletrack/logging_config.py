@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import logging.handlers
+import os
 import sys
 from pathlib import Path
 
@@ -14,16 +16,35 @@ LOG_BACKUPS = 2
 
 
 class _SharedRotatingFileHandler(logging.handlers.RotatingFileHandler):
-    """Rotates like its base; when another running instance holds the file (Windows
-    refuses the rename) it keeps appending instead of losing every later record."""
+    """Rotates like its base, but moves the live file aside before shifting the backups.
+
+    When another running instance holds the file (Windows refuses the rename) the
+    backups stay as they are, records keep being appended, and the rollover is tried
+    again once the file has grown by another tenth of ``maxBytes``.
+    """
+
+    _retry_at = 0  # file position before which a refused rollover is not retried
 
     def doRollover(self) -> None:  # noqa: N802 (logging API)
+        if self.stream is not None and self.stream.tell() < self._retry_at:
+            return
+        if self.stream is not None:
+            self.stream.close()
+            self.stream = None
+        aside = f"{self.baseFilename}.rolling"
         try:
-            super().doRollover()
+            os.replace(self.baseFilename, aside)
         except OSError:
-            self.maxBytes = 0  # no more rollovers for this instance
-            if self.stream is None:
-                self.stream = self._open()
+            self.stream = self._open()
+            self._retry_at = self.stream.tell() + self.maxBytes // 10
+            return
+        with contextlib.suppress(OSError):  # a backup held open is replaced next time
+            for i in range(self.backupCount - 1, 0, -1):
+                older = f"{self.baseFilename}.{i}"
+                if os.path.exists(older):
+                    os.replace(older, f"{self.baseFilename}.{i + 1}")
+            os.replace(aside, f"{self.baseFilename}.1")
+        self.stream = self._open()
 
 
 def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> None:

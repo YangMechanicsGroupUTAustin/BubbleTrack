@@ -8,6 +8,7 @@ existing column positions stay stable for downstream scripts.
 from __future__ import annotations
 
 import csv
+import io
 import math
 from collections.abc import Iterator, Mapping, Sequence
 
@@ -319,6 +320,10 @@ def export_excel(
         for key, value in plain_metadata(metadata).items():
             meta_ws.append([key, excel_value(value)])
 
-    with replacing(filepath) as tmp:
-        wb.save(tmp)
+    # Built in memory first: openpyxl leaves its file open when a save fails, and
+    # Windows then refuses to remove the temporary file
+    data = io.BytesIO()
+    wb.save(data)
+    with replacing(filepath) as tmp, open(tmp, "wb") as fh:
+        fh.write(data.getbuffer())
     return warning

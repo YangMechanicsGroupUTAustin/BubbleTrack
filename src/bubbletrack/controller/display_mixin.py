@@ -235,7 +235,9 @@ def _show_unreadable(state: AppState, window, idx: int, set_state) -> None:
     """Frame *idx* could not be read: never leave the previous frame on screen
     (a fix clicked on it would be stored on *idx*).  Blank panels, and the frame
     indicators follow *idx* like the scrubber does."""
-    shape = state.cur_img.shape[:2] if state.cur_img is not None else (16, 16)
+    # Keep the frame size (and the zoom) when the previous frame was unreadable too
+    shape = (state.cur_img.shape[:2] if state.cur_img is not None
+             else window.original_panel.image_size or (16, 16))
     blank = np.zeros(shape, np.float32)
     for panel in (window.original_panel, window.binary_panel):
         panel.clear_overlays()

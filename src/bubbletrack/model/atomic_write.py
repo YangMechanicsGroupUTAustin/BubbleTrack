@@ -61,7 +61,10 @@ def _replace(src: str, dst: str) -> None:
         try:
             os.replace(src, dst)
             return
-        except PermissionError:
+        except PermissionError as exc:
             if attempt == _REPLACE_ATTEMPTS - 1:
-                raise
+                # Name the user's file, not the temporary one the OS error quotes
+                raise PermissionError(
+                    f"{os.path.basename(dst)} is open in another program "
+                    "(close it there and try again)") from exc
             time.sleep(_REPLACE_WAIT_S)
