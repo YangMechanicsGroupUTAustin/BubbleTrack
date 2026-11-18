@@ -115,10 +115,33 @@ def imread_unicode(
     if buf.size == 0:
         return None
     try:
-        return cv2.imdecode(buf, flags)
+        image = cv2.imdecode(buf, flags)
     except cv2.error as exc:
         logger.debug("Cannot decode %s: %s", path, exc)
+        image = None
+    if image is None and flags == cv2.IMREAD_UNCHANGED and bytes(buf[:4]) in _TIFF_MAGIC:
+        image = _read_tiff_fallback(buf, path)
+    return image
+
+
+# Classic and BigTIFF headers, little- and big-endian
+_TIFF_MAGIC = (b"II*\x00", b"MM\x00*", b"II+\x00", b"MM\x00+")
+
+
+def _read_tiff_fallback(buf: np.ndarray, path) -> np.ndarray | None:
+    """First page of a TIFF OpenCV cannot decode (e.g. unsigned 32-bit samples), via
+    tifffile (installed with scikit-image); None when that fails too or is missing."""
+    try:
+        import io
+
+        import tifffile
+
+        image = np.asarray(tifffile.imread(io.BytesIO(buf.tobytes()), key=0))
+    except Exception as exc:  # noqa: BLE001 - any failure means "cannot decode", as before
+        logger.debug("tifffile cannot decode %s either: %s", path, exc)
         return None
+    # A broken file can come back as an empty array: that is "cannot decode" too
+    return image if image.ndim in (2, 3) and image.size else None
 
 
 # Video file extensions

@@ -199,3 +199,19 @@ class TestLoadAndNormalize:
         )
         np.testing.assert_array_equal(r1[0], r2[0])
         np.testing.assert_array_equal(r1[1], r2[1])
+
+
+def test_a_tiff_opencv_cannot_decode_is_read_with_tifffile(tmp_path):
+    """Unsigned 32-bit samples: OpenCV refuses the header and the frame was called damaged."""
+    tifffile = pytest.importorskip("tifffile")
+    from bubbletrack.model.image_io import imread_unicode, load_and_normalize
+
+    yy, xx = np.mgrid[:48, :64]
+    img = np.where((yy - 24) ** 2 + (xx - 32) ** 2 < 100, 100_000, 3_000_000).astype(np.uint32)
+    path = tmp_path / "u32.tif"
+    tifffile.imwrite(str(path), img)
+    assert np.array_equal(imread_unicode(str(path)), img)
+    gray = load_and_normalize(str(path), 0.5, (1, 48), (1, 64))[0]
+    assert gray.min() == 0.0 and gray.max() == 1.0
+    (tmp_path / "junk.tif").write_bytes(b"II*" + bytes(1) + b"not a tiff")
+    assert imread_unicode(str(tmp_path / "junk.tif")) is None
