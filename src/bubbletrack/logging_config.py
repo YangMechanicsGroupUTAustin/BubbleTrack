@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import logging
+import logging.handlers
 import sys
 from pathlib import Path
 
 LOG_FORMAT = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
+LOG_MAX_BYTES = 5_000_000  # the log rolls over to bubbletrack.log.1, .2 (never grows unbounded)
+LOG_BACKUPS = 2
 
 
 def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> None:
@@ -30,7 +33,10 @@ def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> 
     # File handler (optional)
     if log_dir is not None:
         log_dir.mkdir(parents=True, exist_ok=True)
-        fh = logging.FileHandler(log_dir / "bubbletrack.log", encoding="utf-8")
+        fh = logging.handlers.RotatingFileHandler(
+            log_dir / "bubbletrack.log", maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS,
+            encoding="utf-8",
+        )
         fh.setFormatter(logging.Formatter(LOG_FORMAT, LOG_DATE_FORMAT))
         fh._bubbletrack = True
         root.addHandler(fh)
