@@ -33,7 +33,7 @@ def _process_single_frame(args: tuple):
     ) = args
 
     # Import inside the function — each worker process needs its own imports
-    from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
+    from bubbletrack.model.frame_pipeline import FrameParams, fit_rois
     from bubbletrack.model.frame_source import normalize_source
     from bubbletrack.model.removing_factor import compute_removing_factor
 
@@ -42,25 +42,18 @@ def _process_single_frame(args: tuple):
         filepath, sensitivity, gridx, gridy,
         gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
     )
-    rf = compute_removing_factor(rf_slider, gridx, gridy)
-    processed, edge_xy = detect_bubble_with_mode(
-        binary_roi, cur_img_roi, detection_mode, sensitivity,
-        list(edges), rf, gridx, gridy, removing_obj_radius,
-        opening_radius=opening_radius, closing_radius=closing_radius,
-        gaussian_sigma=gaussian_sigma,
-        gradient_boundary=gradient_boundary,
-        area_max_regions=area_max_regions,
-    )
-
-    radius, rc, cc, count = measure_detection(
-        processed, edge_xy, detection_mode, gridx, gridy,
-    )
-    if not np.isfinite(radius) or radius <= 0 or radius > max_radius:
-        radius = -1.0
-        edge_xy = np.empty((0, 2))
-        count = 0
-
-    return idx, radius, edge_xy, processed, rc, cc, count
+    # The one classic per-frame fit (also the CLI's and the case replay's)
+    fit = fit_rois(binary_roi, cur_img_roi, FrameParams(
+        sensitivity=sensitivity, gridx=gridx, gridy=gridy,
+        removing_factor=compute_removing_factor(rf_slider, gridx, gridy),
+        edges=tuple(edges), mode=detection_mode, removing_obj_radius=removing_obj_radius,
+        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
+        closing_radius=closing_radius, opening_radius=opening_radius,
+        gradient_boundary=gradient_boundary, area_max_regions=area_max_regions,
+        max_radius=max_radius,
+    ))
+    return (idx, fit.radius, fit.edge_xy, fit.mask, fit.center_row, fit.center_col,
+            fit.region_count)
 
 
 def _process_single_frame_edge(args: tuple):
