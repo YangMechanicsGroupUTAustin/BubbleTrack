@@ -30,7 +30,7 @@ from bubbletrack.model.rmax import locate_rmax, valid_frame_mask
 _Cell = tuple["int | float | str", str]
 
 _FMT_INT = "d"
-_FMT_TIME = ".8f"
+_FMT_TIME = ".12f"  # 1 ps: at 10-20 Mfps, 8 decimals (10 ns) cost 5-10 % of a frame
 _FMT_LENGTH = ".4f"
 
 

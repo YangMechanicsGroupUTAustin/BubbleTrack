@@ -203,6 +203,7 @@ def build_export_metadata(
     """
     stamp = timestamp or datetime.now().astimezone()
     reference = state.reference_frame if reference_index is None else reference_index
+    auto = state.detection_mode == "edge"  # the classic methods use no reference frame
     return plain_metadata({
         "app_version": _app_version(),
         "exported_at": stamp.isoformat(timespec="seconds"),
@@ -229,8 +230,9 @@ def build_export_metadata(
         "edge_definition": state.edge_definition,
         "edge_polarity": state.edge_polarity,
         "bubble_non_round": bool(getattr(state, "bubble_non_round", False)),
-        "reference_frame": None if reference is None else int(reference) + 1,
-        "reference_frame_origin": "auto" if state.reference_frame is None else "set",
+        "reference_frame": None if reference is None or not auto else int(reference) + 1,
+        "reference_frame_origin": (None if not auto
+                                   else "auto" if state.reference_frame is None else "set"),
         "edge_seed_used": state.detection_mode == "edge" and state.edge_seed is not None,
         "edge_seed": state.edge_seed,
     })

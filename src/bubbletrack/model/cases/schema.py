@@ -198,9 +198,14 @@ def _int(value: Any, what: str, minimum: int = 0) -> int:
 def _number(value: Any, what: str) -> float | None:
     if value is None:
         return None
-    _require(isinstance(value, (int, float)) and not isinstance(value, bool)
-             and math.isfinite(value), f"{what} must be a finite number, got {value!r}")
-    return float(value)
+    _require(isinstance(value, (int, float)) and not isinstance(value, bool),
+             f"{what} must be a finite number, got {value!r}")
+    try:
+        number = float(value)  # an int beyond float's range raises OverflowError
+    except OverflowError:
+        number = math.inf
+    _require(math.isfinite(number), f"{what} must be a finite number, got {value!r}")
+    return number
 
 
 def _center(value: Any, what: str) -> tuple[float, float] | None:

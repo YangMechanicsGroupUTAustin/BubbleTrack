@@ -22,7 +22,7 @@ from bubbletrack.model.cases.schema import LABEL_NO_BUBBLE, HardCase, Label
 
 CORRECT, WRONG, REJECTED = "correct", "wrong", "rejected"
 OUTCOMES = (CORRECT, WRONG, REJECTED)
-_AUTOMATIC_SOURCES = frozenset({"auto", "tracked"})  # results Fit All produced
+_AUTOMATIC_SOURCES = frozenset({"auto", "tracked", "ml"})  # results Fit All produced (ML assist too)
 
 
 @dataclass(frozen=True)

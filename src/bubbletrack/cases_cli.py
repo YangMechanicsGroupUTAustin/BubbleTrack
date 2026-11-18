@@ -14,10 +14,12 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
 from bubbletrack.logging_config import setup_logging
+from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.cases.bundle import find_bundles, open_bundle
 from bubbletrack.model.cases.replay import replay_case
 from bubbletrack.model.cases.report import build_report, load_report, write_report
@@ -60,8 +62,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def _tolerance(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Tolerance:
     values = (args.radius_tol_px, args.radius_tol_frac, args.center_tol_px, args.center_tol_frac)
-    if any(not v >= 0 for v in values):
-        parser.error("tolerances must be >= 0")
+    if any(not (math.isfinite(v) and v >= 0) for v in values):
+        parser.error("tolerances must be finite and >= 0")
     return Tolerance(*values)
 
 
@@ -129,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
     tol = _tolerance(parser, args)
     setup_logging(level=logging.DEBUG if args.verbose else logging.WARNING)
     folder = Path(args.folder)
-    if not folder.is_dir():
+    if not Path(os_path(folder)).is_dir():  # paths beyond MAX_PATH too
         parser.error(f"not a folder: {folder}")
     baseline = None
     if args.baseline:
@@ -139,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error(f"--baseline: {exc}")
 
     print(f"Hard cases in {folder}:")
-    scores = _run_all(folder, tol, False if args.no_tracking else None)
+    scores = _run_all(Path(os_path(folder)), tol, False if args.no_tracking else None)
     if not scores:
         print(f"No hard-case bundles found in {folder}", file=sys.stderr)
         return EXIT_USAGE
@@ -147,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
                           baseline_name=Path(args.baseline).name if args.baseline else "")
     try:
         json_path, md_path = write_report(report, args.out, args.name)
-    except OSError as exc:
+    except (OSError, ValueError) as exc:  # ValueError: a NaN/inf a bundle carried in
         print(f"Cannot write the report to {args.out}: {exc}", file=sys.stderr)
         return EXIT_USAGE
     _print_summary(report)

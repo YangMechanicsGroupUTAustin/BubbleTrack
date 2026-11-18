@@ -66,6 +66,12 @@ def compare_with_baseline(cases: list[dict], baseline: dict) -> dict:
     """Regressions and fixes of *cases* relative to an earlier report."""
     before, now = _outcomes(baseline["cases"]), _outcomes(cases)
     current = {c["case_id"]: c for c in cases}
+    # A bundle that no longer opens is reported under its file name, not its case_id:
+    # find it through the bundle name, so its frames count as failed, not as "missing".
+    failed = {c.get("bundle"): c for c in cases if c.get("error")}
+    for old in baseline["cases"]:
+        if old["case_id"] not in current and old.get("bundle") in failed:
+            current[old["case_id"]] = failed[old["bundle"]]
     regressions, fixed = [], []
     for (case_id, frame), old in sorted(before.items()):
         if case_id not in current:
@@ -77,9 +83,11 @@ def compare_with_baseline(cases: list[dict], baseline: dict) -> dict:
         elif old != CORRECT and new == CORRECT:
             fixed.append(change)
     old_ids = {c["case_id"] for c in baseline["cases"]}
+    run_ids = {c["case_id"] for c in cases}
+    matched = {current[i]["case_id"] for i in old_ids & set(current) if i not in run_ids}
     return {"regressions": regressions, "fixed": fixed,
             "missing_cases": sorted(old_ids - set(current)),
-            "new_cases": sorted(set(current) - old_ids)}
+            "new_cases": sorted(run_ids - old_ids - matched)}
 
 
 def _engine_version() -> str:

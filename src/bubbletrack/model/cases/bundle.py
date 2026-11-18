@@ -23,6 +23,8 @@ import zlib
 from collections.abc import Mapping
 from pathlib import Path
 
+from bubbletrack.model.long_paths import os_path
+
 import cv2
 import numpy as np
 
@@ -90,7 +92,7 @@ def write_bundle(path: str | os.PathLike, case: HardCase,
     OSError
         If the file cannot be written.
     """
-    target = Path(path)
+    target = Path(os_path(path))  # beyond MAX_PATH too, like every other export
     encoded = {f.index: encode_frame(images[f.index]) for f in case.frames}
     frames = tuple(dataclasses.replace(f, file=frame_file_name(f.index, encoded[f.index][0]))
                    for f in case.frames)
@@ -206,7 +208,7 @@ def open_bundle(path: str | os.PathLike) -> CaseBundle:
     CaseFormatError
         If *path* is not a readable hard case.
     """
-    path = Path(path)
+    path = Path(os_path(path))  # paths beyond MAX_PATH open too
     if path.is_dir():
         return _open_folder(path)
     if not path.is_file():
