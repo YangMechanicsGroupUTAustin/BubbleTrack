@@ -104,3 +104,18 @@ def test_leaving_a_classic_method_hides_the_selector(gui, make_sequence):
     panel.set_filter_params({**panel.get_filter_params(), "detection_mode": "edge"})
     panel.filters_changed.emit()
     assert not panel.classic_methods_visible()
+
+
+def test_a_bad_preset_changes_nothing(gui):
+    import pytest
+
+    window, controller = gui
+    panel = window.left_panel.measure_panel
+    before = (panel.get_threshold(), panel.get_removing_factor_slider(), panel.method())
+    for bad in ({"threshold": 0.3, "removing_factor": "x"}, {"threshold": 0.3, "detection_mode": "EDGE"},
+                {"threshold": 0.3, "edge_flags": [1, 0]}):
+        with pytest.raises((ValueError, TypeError)):
+            panel.apply_preset(bad)
+        assert (panel.get_threshold(), panel.get_removing_factor_slider(), panel.method()) == before
+    panel.apply_preset({"threshold": 0.3, "edge_flags": [1, 0, 0, 1]})
+    assert panel.get_threshold() == pytest.approx(0.3) and panel.get_edge_flags() == [True, False, False, True]

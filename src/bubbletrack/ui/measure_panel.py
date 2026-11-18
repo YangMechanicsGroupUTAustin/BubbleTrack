@@ -48,6 +48,23 @@ def is_classic(mode: str) -> bool:
     return mode in CLASSIC_METHODS
 
 
+def _checked_preset(preset: dict) -> dict:
+    """*preset* with its values converted; raises before anything is applied."""
+    out = dict(preset)
+    if "threshold" in out:
+        out["threshold"] = float(out["threshold"])
+    if "removing_factor" in out:
+        out["removing_factor"] = int(out["removing_factor"])
+    if "edge_flags" in out:
+        flags = out["edge_flags"]
+        if not isinstance(flags, list) or len(flags) != 4:
+            raise ValueError("edge_flags must be four values (top, right, down, left)")
+        out["edge_flags"] = [bool(v) for v in flags]
+    if "detection_mode" in out and out["detection_mode"] not in DETECTION_MODES:
+        raise ValueError(f"unknown detection mode {out['detection_mode']!r}")
+    return out
+
+
 class MeasurePanel(QWidget):
     """The Auto box; with classic methods enabled, a Method selector and their controls."""
 
@@ -196,15 +213,20 @@ class MeasurePanel(QWidget):
         }
 
     def apply_preset(self, preset: dict) -> None:
-        """Apply a saved preset and announce the changed values."""
+        """Apply a saved preset and announce the changed values.
+
+        Every value is checked first: a bad preset raises ValueError / TypeError
+        and changes nothing (it used to apply the values before the bad one).
+        """
+        preset = _checked_preset(preset)
         if "threshold" in preset:
-            self.set_threshold(float(preset["threshold"]))
+            self.set_threshold(preset["threshold"])
             self.threshold_changed.emit(self.get_threshold())
         if "removing_factor" in preset:
-            self.set_removing_factor(int(preset["removing_factor"]))
+            self.set_removing_factor(preset["removing_factor"])
             self.removing_factor_changed.emit(self.get_removing_factor_slider())
         if "edge_flags" in preset:
-            self.classic.set_edge_flags([bool(v) for v in preset["edge_flags"]])
+            self.classic.set_edge_flags(preset["edge_flags"])
             self.edges_changed.emit()
         filters = {key: preset[key] for key in _FILTER_KEYS if key in preset}
         self.set_filter_params({**self.get_filter_params(), **filters})
