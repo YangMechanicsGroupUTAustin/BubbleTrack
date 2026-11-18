@@ -1,0 +1,301 @@
+{
+ "engine": "edge-1.5.1",
+ "sequences": {
+  "01_rgb8_dense_speckle_moving": {
+   "correct_single": [
+    1,
+    9,
+    17,
+    25,
+    33,
+    41,
+    49,
+    57,
+    65,
+    73,
+    89,
+    97,
+    105,
+    113,
+    121,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217,
+    225,
+    233,
+    241,
+    249
+   ],
+   "correct_tracked": [
+    1,
+    9,
+    17,
+    25,
+    33,
+    41,
+    49,
+    57,
+    65,
+    73,
+    89,
+    97,
+    105,
+    113,
+    121,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217,
+    225,
+    233,
+    241,
+    249
+   ],
+   "shown_correct": [
+    1,
+    9,
+    17,
+    25,
+    41,
+    49,
+    65,
+    73,
+    89,
+    97,
+    105,
+    113,
+    121,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217,
+    225,
+    233,
+    241,
+    249
+   ],
+   "no_bubble_kept_after": []
+  },
+  "02_rgb8_air_interface_dense_speckle_moving": {
+   "correct_single": [
+    113,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217
+   ],
+   "correct_tracked": [
+    113,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217
+   ],
+   "shown_correct": [
+    113,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209,
+    217
+   ],
+   "no_bubble_kept_after": []
+  },
+  "03_gelgel_interface_migration_speckle": {
+   "correct_single": [
+    49
+   ],
+   "correct_tracked": [
+    49
+   ],
+   "shown_correct": [
+    49
+   ],
+   "no_bubble_kept_after": [
+    73,
+    81
+   ]
+  },
+  "04_rgb8_water_gel_postcollapse_drift": {
+   "correct_single": [],
+   "correct_tracked": [
+    129,
+    177
+   ],
+   "shown_correct": [
+    129,
+    177
+   ],
+   "no_bubble_kept_after": []
+  },
+  "05_blood_low_contrast": {
+   "correct_single": [
+    49,
+    57,
+    65,
+    73,
+    97,
+    105,
+    121,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209
+   ],
+   "correct_tracked": [
+    49,
+    57,
+    65,
+    73,
+    97,
+    105,
+    121,
+    129,
+    137,
+    145,
+    153,
+    161,
+    169,
+    177,
+    185,
+    193,
+    201,
+    209
+   ],
+   "shown_correct": [],
+   "no_bubble_kept_after": [
+    25
+   ]
+  },
+  "06_blood_lowcon_migrating_moving_texture": {
+   "correct_single": [],
+   "correct_tracked": [],
+   "shown_correct": [],
+   "no_bubble_kept_after": []
+  },
+  "07_rgb8_wall_lowcon_speckle_moving": {
+   "correct_single": [
+    9,
+    49,
+    65,
+    81,
+    89,
+    97,
+    145,
+    153,
+    161,
+    169,
+    185,
+    193,
+    209,
+    217,
+    225,
+    241,
+    249
+   ],
+   "correct_tracked": [
+    9,
+    49,
+    65,
+    81,
+    89,
+    97,
+    145,
+    153,
+    161,
+    169,
+    185,
+    193,
+    209,
+    217,
+    225,
+    241,
+    249
+   ],
+   "shown_correct": [
+    81,
+    89,
+    97,
+    145,
+    153,
+    161,
+    169,
+    185,
+    193,
+    209,
+    217,
+    225,
+    241,
+    249
+   ],
+   "no_bubble_kept_after": []
+  },
+  "08_pegda_dvc_particles_advected": {
+   "correct_single": [
+    9
+   ],
+   "correct_tracked": [
+    9
+   ],
+   "shown_correct": [
+    9
+   ],
+   "no_bubble_kept_after": []
+  }
+ }
+}

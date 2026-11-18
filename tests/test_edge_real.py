@@ -19,13 +19,9 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from bubbletrack.model.edge import ENGINE_VERSION, EdgeParams, choose_reference_frame, detect_edge
+import _baselines
+from bubbletrack.model.edge import EdgeParams, choose_reference_frame, detect_edge
 from bubbletrack.model.image_io import imread_unicode
-
-# Per-frame results of the labelled-frames test, tracked in git: any engine change that moves
-# a frame shows up as a diff of this file.  Regenerate deliberately with
-# BUBBLETRACK_UPDATE_BASELINES=1 and commit the new file together with the engine change.
-BASELINE = Path(__file__).with_name("baselines") / "edge_lic_labelled.json"
 
 
 def _data_root() -> Path | None:
@@ -195,33 +191,7 @@ def test_labelled_bubble_frames_on_lic():
                 seq["correct"].append(int(frame_no))
     assert n_b == 235
     assert ok / n_b >= 0.78, f"{ok}/{n_b}"
-    _check_baseline(BASELINE, found)
-
-
-def _check_baseline(path: Path, found: dict) -> None:
-    """*found* (per sequence: lists of frame numbers) must equal the tracked baseline.
-
-    Fails on any change, gains included, so every move is recorded deliberately:
-    run with BUBBLETRACK_UPDATE_BASELINES=1 to rewrite the file, then review its diff.
-    """
-    data = {"engine": ENGINE_VERSION, "sequences": {k: found[k] for k in sorted(found)}}
-    if os.environ.get("BUBBLETRACK_UPDATE_BASELINES") == "1" or not path.exists():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
-        return
-    saved = json.loads(path.read_text(encoding="utf-8"))
-    changes = []
-    for name in sorted(set(saved["sequences"]) | set(found)):
-        old = saved["sequences"].get(name, {})
-        new = found.get(name, {})
-        for key in ("correct", "no_bubble_accepted"):
-            lost = sorted(set(old.get(key, [])) - set(new.get(key, [])))
-            won = sorted(set(new.get(key, [])) - set(old.get(key, [])))
-            if lost or won:
-                changes.append(f"{name} {key}: -{lost} +{won}")
-    assert not changes, (f"results differ from {path.name} ({saved.get('engine')} -> {ENGINE_VERSION}); "
-                         "if intended, rerun with BUBBLETRACK_UPDATE_BASELINES=1 and commit it:\n"
-                         + "\n".join(changes))
+    _baselines.check("edge_lic_labelled", found)
 
 
 def test_big_dark_bubble_in_dense_speckle_is_measured():

@@ -80,6 +80,8 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+import _baselines
+
 FULL = ((1, 250), (1, 400))
 HERE = Path(__file__).resolve().parent
 
@@ -145,6 +147,10 @@ def _solve_folder(folder: str, ref_index, seed):
     return raw, res, solver_ms
 
 
+# Per-frame lists kept in tests/baselines/sequence_*.json (see tests/_baselines.py)
+FRAME_LISTS = ("correct_single", "correct_tracked", "shown_correct", "no_bubble_kept_after")
+
+
 def _accepted(obs) -> bool:
     """Would the app show this single-frame result (the engine's 0.3 gate)?"""
     return obs.ok and obs.confidence >= 0.3
@@ -153,26 +159,36 @@ def _accepted(obs) -> bool:
 def _score(raw, res, labels: dict, crit) -> dict:
     """labels: {frame index: circle (B) | "N"}."""
     out = dict(b=0, before=0, after=0, shown_before=0, app=0, n=0, rej_before=0, rej_after=0)
+    frames = {key: [] for key in FRAME_LISTS}  # 1-based frame numbers, for the baselines
     for i, lab in labels.items():
         if i >= len(raw):
             continue
         sol = res.frames[i]
         if lab == "N":
             out["n"] += 1
-            out["rej_before"] += (not raw[i].ok) or raw[i].confidence < 0.3
-            out["rej_after"] += (not sol.ok) or sol.source in ("none", "lost") or sol.confidence < 0.3
+            rejected = (not raw[i].ok) or raw[i].confidence < 0.3
+            rejected_after = (not sol.ok) or sol.source in ("none", "lost") or sol.confidence < 0.3
+            out["rej_before"] += rejected
+            out["rej_after"] += rejected_after
+            if not rejected_after:
+                frames["no_bubble_kept_after"].append(i + 1)
         else:
             out["b"] += 1
-            out["before"] += _agree((raw[i].radius, raw[i].rc, raw[i].cc), lab, crit)
-            out["after"] += _agree((sol.radius, sol.rc, sol.cc), lab, crit)
+            before = _agree((raw[i].radius, raw[i].rc, raw[i].cc), lab, crit)
+            after = _agree((sol.radius, sol.rc, sol.cc), lab, crit)
+            out["before"] += before
+            out["after"] += after
             # What the app SHOWS: a frame below the confidence gate has no result;
             # the solver's re-measurements are stored only when accepted.
             shown = _accepted(raw[i])
-            out["shown_before"] += shown and _agree((raw[i].radius, raw[i].rc, raw[i].cc), lab, crit)
+            out["shown_before"] += shown and before
             kept = sol if sol.source == "tracked" else raw[i]
-            out["app"] += (sol.source == "tracked" or shown) and _agree(
-                (kept.radius, kept.rc, kept.cc), lab, crit)
-    out.update(review=len(res.review), calls=res.redetect_calls, n_frames=len(raw))
+            app = (sol.source == "tracked" or shown) and _agree((kept.radius, kept.rc, kept.cc), lab, crit)
+            out["app"] += app
+            for key, ok in (("correct_single", before), ("correct_tracked", after), ("shown_correct", app)):
+                if ok:
+                    frames[key].append(i + 1)
+    out.update(review=len(res.review), calls=res.redetect_calls, n_frames=len(raw), frames=frames)
     return out
 
 
@@ -226,7 +242,9 @@ def test_lic_no_regression_against_single_frame():
             pytest.skip(f"{name} not present")
         lab = {int(k) - 1: ("N" if v["label"] != "B" else v["circle"]) for k, v in info["frames"].items()}
         jobs.append((name, str(folder), labels["reference_frame_index"], info["seed"], lab, labels["criterion"]))
-    tot = _report("lic", _run_set(jobs))
+    rows = _run_set(jobs)
+    tot = _report("lic", rows)
+    _baselines.check("sequence_lic", {name: r["frames"] for name, r in rows.items()})
     assert tot["b"] == 235
     assert tot["after"] >= tot["before"] >= 184             # edge-1.5.0 (1.4.0: 195, 1.3.0: 193, 1.2.0: 205)
     assert tot["app"] >= tot["shown_before"]
@@ -244,7 +262,9 @@ def test_lic_hard_no_regression_against_single_frame():
             pytest.skip(f"{name} not present")
         lab = {int(k): c for k, c in info["B"].items()} | {i: "N" for i in info["N"]}
         jobs.append((name, str(folder), info["reference_index"], info["seed"], lab, labels["criterion"]))
-    tot = _report("lic_hard", _run_set(jobs))
+    rows = _run_set(jobs)
+    tot = _report("lic_hard", rows)
+    _baselines.check("sequence_lic_hard", {name: r["frames"] for name, r in rows.items()})
     assert tot["b"] == 182
     assert tot["after"] >= tot["before"] >= 81                       # edge-1.5.0 (1.4.0: 79)
     assert tot["app"] >= tot["shown_before"]
