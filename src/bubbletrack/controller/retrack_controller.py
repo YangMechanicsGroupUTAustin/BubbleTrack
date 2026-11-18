@@ -14,6 +14,9 @@ with one Ctrl+Z (shared ``ResultHistory``).
 
 It runs quietly: the status bar says "Updating…" and nothing is locked; an
 edit, a Fit or a new recording simply cancels it (its snapshot is stale).
+While a fix is open or a question is asked it is held (:meth:`hold`): what was
+pending runs when the hold is released.  After an undo only the Review list is
+recomputed from the restored results (nothing else changes).
 Only a re-track still running after ``RETRACK_ESCALATE_MS`` locks editing like
 a run (``run_state_changed``) and shows the progress line with Stop.  The
 header speaks only when frames changed ("Tracking updated 2 nearby frames").
@@ -33,7 +36,9 @@ from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame, refresh_chart
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
-from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus
+from bubbletrack.event_bus import (
+    RESULT_UNDONE, RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus,
+)
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.sequence_pipeline import retrack_frames
@@ -70,6 +75,9 @@ class RetrackController(BaseController):
         self._retired: list = []  # stopped workers still finishing (keep them alive)
         self._allowed: frozenset[int] = frozenset()
         self._muted = 0
+        self._held = 0          # hold() depth: a fix is open, a question is asked
+        self._pending = False   # an edit while held: re-track when released
+        self._review_only = False  # after an undo: recompute the Review list only
         self._quiet = False
         self._own_emit = False
         self.timer = QTimer()
@@ -84,6 +92,7 @@ class RetrackController(BaseController):
         bus.subscribe(RESULTS_CHANGED, self._on_results_changed)
         bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
         bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
+        bus.subscribe(RESULT_UNDONE, self._on_undone)
 
     # -- public API ---------------------------------------------------------- #
 
@@ -102,8 +111,34 @@ class RetrackController(BaseController):
     def cancel(self) -> None:
         """Drop a pending countdown and a running re-track (results unchanged)."""
         self.timer.stop()
+        self._pending = self._review_only = False
         if self._worker is not None:
             self._abandon()
+
+    def hold(self) -> None:
+        """Pause: a fix is open or a question is asked, so nothing may land now.
+
+        A pending countdown or a running re-track (its snapshot may go stale) is
+        remembered and started again by :meth:`release_hold`.  Pairs nest.
+        """
+        if self.timer.isActive() or self._worker is not None:
+            self._pending = True
+        self.timer.stop()
+        if self._worker is not None:
+            self._abandon()
+        self._held += 1
+
+    def release_hold(self) -> None:
+        """End a :meth:`hold`; what was pending (or edited meanwhile) runs after the quiet time."""
+        self._held = max(0, self._held - 1)
+        if not self._held and self._pending:
+            self._pending = False
+            if AUTO_RETRACK_ENABLED:
+                self.timer.start()
+
+    def exclude(self, frames: Iterable[int]) -> None:
+        """Keep a running re-track off *frames* (the user skipped them: left as they are)."""
+        self._allowed = self._allowed - frozenset(frames)
 
     def stop(self) -> None:
         """The Stop button."""
@@ -126,7 +161,17 @@ class RetrackController(BaseController):
             return
         if self._worker is not None:  # an edit made its snapshot stale
             self._abandon()
-        if AUTO_RETRACK_ENABLED:
+        self._review_only = False  # a full re-track also recomputes the list
+        if self._held:
+            self._pending = True
+        elif AUTO_RETRACK_ENABLED:
+            self.timer.start()
+
+    def _on_undone(self, _edit) -> None:
+        """Ctrl+Z restored results: recompute the Review list from them (a re-track
+        had replaced it; the undo itself never triggers one)."""
+        if AUTO_RETRACK_ENABLED and not self._held:
+            self._review_only = True
             self.timer.start()
 
     def _on_run_state(self, running: bool) -> None:
@@ -140,7 +185,7 @@ class RetrackController(BaseController):
             self._quiet_turn()  # its closing RESULTS_CHANGED is not an edit
 
     def _on_source_loaded(self, _n: int) -> None:
-        self.cancel()
+        self.cancel()  # also forgets what was pending
         self._quiet_turn()
 
     def _quiet_turn(self) -> None:
@@ -161,11 +206,15 @@ class RetrackController(BaseController):
     # -- running ------------------------------------------------------------- #
 
     def _on_timer(self) -> None:
+        if self._held:
+            self._pending = True
+            return
+        review_only, self._review_only = self._review_only, False
         if not self.eligible():
             return
         state = self.state
-        allowed = retrack_frames(state, self._queued_frames())
-        if not allowed:
+        allowed = frozenset() if review_only else retrack_frames(state, self._queued_frames())
+        if not allowed and not review_only:
             return
         try:
             job = edge_support.build_job(state, self._get_max_radius())
@@ -178,8 +227,10 @@ class RetrackController(BaseController):
         worker.stopped.connect(partial(self._on_ended, worker, "stopped"))
         self._worker, self._allowed = worker, allowed
         self.w.status_bar.set_activity(UPDATING)
-        self.escalate_timer.start()
-        logger.info("Re-tracking after an edit: %d frame(s) may change", len(allowed))
+        if not review_only:  # a list update never locks editing
+            self.escalate_timer.start()
+        logger.info("Re-tracking after an %s: %d frame(s) may change",
+                    "undo (Review list only)" if review_only else "edit", len(allowed))
         worker.start()
 
     def _on_solved(self, worker, outcome) -> None:

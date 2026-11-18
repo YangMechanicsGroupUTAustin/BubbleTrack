@@ -151,8 +151,13 @@ class MLAssistController:
         Choosing an example is not a fix: it starts no re-track (one ran
         seconds later after every Looks right and locked the panel), Train and
         apply re-measures the frames around it anyway."""
-        with self._app.retrack.muted():
-            return review_actions.accept_frame(self._app, frame)
+        retrack = self._app.retrack
+        retrack.hold()  # a running re-track would land on results from before this
+        try:
+            with retrack.muted():
+                return review_actions.accept_frame(self._app, frame)
+        finally:
+            retrack.release_hold()
 
     def scope(self) -> tuple[int, ...]:
         """The frames Train and apply measures (``ml_teach_steps.train_scope``)."""

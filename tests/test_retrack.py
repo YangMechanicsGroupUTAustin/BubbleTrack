@@ -220,8 +220,14 @@ def test_ctrl_z_undoes_the_whole_retrack(qapp, app):
     controller._on_undo()
     assert all(same_result(capture(state, i), before[i]) for i in range(N))
     assert "Undid the re-track" in window.header._status_label.text()
+    top = controller.history.peek()
     _settle(qapp)
-    assert len(FakeWorker.made) == 1  # an undo does not re-track again
+    # An undo only recomputes the Review list from the restored results: the
+    # solve it starts may change no frame and adds nothing to the history.
+    assert len(FakeWorker.made) == 2 and controller.retrack._allowed == frozenset()
+    FakeWorker.made[-1].finish()
+    assert all(same_result(capture(state, i), before[i]) for i in range(N))
+    assert controller.history.peek() is top
 
 
 def test_undoing_the_edit_during_a_retrack_drops_its_result(qapp, app):
@@ -387,3 +393,57 @@ def test_real_retrack_after_an_edit_leaves_good_frames_alone(qapp, gui, drift_se
     _wait(qapp, controller.retrack.is_running, 10.0)
     _wait(qapp, lambda: not controller.retrack.is_running(), 240.0)
     assert all(same_result(capture(state, i), before[i]) for i in good)
+
+
+# -- held while a fix is open or a question is asked (2026-11-18 Review bug hunt) ----- #
+
+def test_a_fix_holds_the_countdown_and_esc_releases_it(qapp, app):
+    """Fix + Esc used to cancel the pending re-track for good."""
+    _window, controller = app
+    controller.retrack.timer.setInterval(60_000)  # stays pending while we look
+    _edit(controller)
+    assert controller.retrack.timer.isActive()
+    controller.file_ctrl.on_frame_changed(2)
+    assert controller.review.fix.start(2)
+    assert not controller.retrack.timer.isActive()  # nothing may land under the points
+    controller._on_lock_range(3, 3, locked=True)  # an edit during the fix: still held
+    assert not controller.retrack.timer.isActive()
+    controller.review.fix.cancel()
+    assert controller.retrack.timer.isActive()  # released: it runs after the quiet time
+
+
+def test_a_hold_abandons_a_running_retrack_and_restarts_it(qapp, app):
+    """Looks right (ML assist) or a question: the running solve is stale, so it is
+    dropped and started again when the hold ends."""
+    _window, controller = app
+    _edit(controller)
+    worker = _started(qapp)
+    controller.retrack.hold()
+    assert worker.stop_requested and not controller.retrack.is_running()
+    controller.retrack.release_hold()
+    _wait(qapp, lambda: len(FakeWorker.made) == 2 and FakeWorker.made[-1].started)
+
+
+def test_skipped_frames_stay_out_of_a_running_retrack(qapp, app):
+    _window, controller = app
+    state = controller._get_state()
+    _edit(controller)
+    worker = _started(qapp)
+    assert 4 in controller.retrack._allowed
+    r4 = float(state.radius[4])
+    controller.retrack.exclude([4])  # Review's Skip on the row of frame 5
+    worker.finish()
+    assert state.radius[4] == r4  # "left as it is"
+
+
+def test_a_partial_run_keeps_review_progress(qapp, app):
+    """A range refit or Train and apply used to reset "All 3 checked"."""
+    from bubbletrack.event_bus import RUN_FINISHED
+
+    _window, controller = app
+    resets = []
+    controller.review.panel.reset_progress = lambda: resets.append(1)
+    controller.bus.emit(RUN_FINISHED, {"frames": (3, 4, 5), "edge": True})
+    assert resets == []
+    controller.bus.emit(RUN_FINISHED, {"frames": tuple(range(N)), "edge": True, "ml": True})
+    assert resets == [1]

@@ -233,6 +233,7 @@ class ReviewController:
             if not self._confirm_accept_all(segment):
                 return None
             return review_actions.accept_segment(app, segment)
+        self._app.retrack.exclude(segment.frames)  # a running re-track leaves them too
         self.memory.dismiss(self._state(), segment.frames)  # skip
         return f"{span_text(segment)} skipped: left as it is"
 
@@ -254,14 +255,17 @@ class ReviewController:
         if not unseen:
             return True
         # A re-track must not land under the question (its results would be
-        # accepted unseen); the edit restarts its countdown anyway.
-        self._app.retrack.cancel()
+        # accepted unseen): held while it is asked, then it runs as before.
         frames = len(review_actions.acceptable(state, segment.frames))
-        if not review_confirm.ask_accept_all(
-                self.w, accept_all_question(frames, len(unseen)),
-                empty=segment.count - frames):
-            return False
-        return not self._fit_run and segment in self.panel.segments()
+        self._app.retrack.hold()
+        try:
+            if not review_confirm.ask_accept_all(
+                    self.w, accept_all_question(frames, len(unseen)),
+                    empty=segment.count - frames):
+                return False
+            return not self._fit_run and segment in self.panel.segments()
+        finally:
+            self._app.retrack.release_hold()
 
     def _on_fixed(self, frame: int) -> None:
         """A fix was stored on *frame*: move on as after Accept."""
@@ -320,7 +324,6 @@ class ReviewController:
     # -- bus events -------------------------------------------------------- #
 
     def _on_run_state(self, running: bool) -> None:
-        was_fit = self._fit_run
         self._running = bool(running)
         self._fit_run = self._running and self._app.auto_ctrl.is_busy()
         self.panel.setEnabled(not self._fit_run)
@@ -328,9 +331,6 @@ class ReviewController:
         if not self._running:
             self.refresh()
             self.panel.select_frame(self._frame_on_screen())  # a run moves the view
-            if was_fit:  # new results: progress counts from here
-                self.panel.reset_progress()
-                self.flow.clear()
         self.shortcuts.sync()
         self.fix_keys.sync()
 
@@ -339,7 +339,9 @@ class ReviewController:
         much of the bubble needs a check, lead with ML assist."""
         state = self._state()
         if len(info.get("frames", ())) != len(state.images or ()):
-            return  # a range refit: stay where the user was
+            return  # a range refit or Train and apply: progress and place stay
+        self.panel.reset_progress()  # new results everywhere: progress counts from here
+        self.flow.clear()
         rows = self.panel.segments()
         if rows and self.panel.select_frame(rows[0].entry, keep_row=False):
             summary = self.w.header.status()  # the run's "Done — ..." stays in view

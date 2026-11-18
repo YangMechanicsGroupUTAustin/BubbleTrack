@@ -42,6 +42,7 @@ class FixMode:
         self.strip = strip
         self._on_fixed = on_fixed
         self._start_hooks: list[Callable[[], str]] = []
+        self._holding = False  # this fix holds the re-track (released when it ends)
         app.manual_ctrl.set_view(strip)
         app.circle_ctrl.set_view(strip)
         strip.points_requested.connect(lambda: self.use_tool(TOOL_POINTS))
@@ -93,8 +94,9 @@ class FixMode:
         self.end()
         notes = [note for note in (hook() for hook in self._start_hooks) if note]
         # A re-track landing now would redraw the frame under the user's
-        # points; storing the fix restarts its countdown.
-        self._app.retrack.cancel()
+        # points: held until the fix ends (stored or cancelled), then it runs.
+        self._app.retrack.hold()
+        self._holding = True
         tool = TOOL_CIRCLE if self._app.circle_ctrl.available() else TOOL_POINTS
         self.strip.show_tool(frame, tool)
         self._apply(tool)
@@ -144,6 +146,9 @@ class FixMode:
 
     def end(self) -> None:
         """End the fix without a message (nothing is stored)."""
+        if self._holding:
+            self._holding = False
+            self._app.retrack.release_hold()
         if not self.active:
             return
         self.strip.end()
