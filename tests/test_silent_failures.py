@@ -129,7 +129,7 @@ def test_a_rejected_rmax_fit_is_logged_not_warned(caplog):
 
     from bubbletrack.model.rmax import locate_rmax
 
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.INFO, logger="bubbletrack.model.rmax")  # whatever others set
     plateau = [49, 47, 46.5, 47, 50, 47, 46.5, 47, 49]
     radius = np.array(list(np.linspace(10, 45, 8)) + plateau + list(np.linspace(45, 10, 8)))
     estimate = locate_rmax(radius, 9)
@@ -225,3 +225,11 @@ def test_fit_current_on_a_no_bubble_frame_says_no_bubble(gui, make_sequence):
     controller.file_ctrl.on_frame_changed(2)
     controller.pretune_ctrl.on_pretune_fit()
     assert window.header.status()[0].startswith('Frame 3 kept "no bubble"')
+
+
+def test_an_infinite_radius_is_never_rmax():
+    from bubbletrack.model.rmax import locate_rmax, valid_frame_mask
+
+    radius = np.array([np.inf] + list(50.0 - 0.1 * (np.arange(21) - 10.0) ** 2))
+    assert not valid_frame_mask(radius)[0]
+    assert np.isfinite(locate_rmax(radius, 9).radius)

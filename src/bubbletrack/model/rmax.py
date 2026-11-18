@@ -63,8 +63,9 @@ class RmaxEstimate:
 
 
 def valid_frame_mask(radius: np.ndarray) -> np.ndarray:
-    """Return True for frames with a usable radius (> 0 and not NaN)."""
-    return (radius > 0) & ~np.isnan(radius)
+    """Return True for frames with a usable radius (> 0 and finite: an infinite one
+    would become Rmax and t = 0)."""
+    return (radius > 0) & np.isfinite(radius)
 
 
 def _boundary_warning(
