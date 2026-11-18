@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import math
 import sys
 from pathlib import Path
 
@@ -119,13 +120,15 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error(f"--rf must be a slider value in [0, 100], got {args.rf}")
     if args.rf_area is not None and args.rf_area < 0:
         parser.error(f"--rf-area must be >= 0, got {args.rf_area}")
-    if args.fps is not None and not args.fps > 0:
-        parser.error(f"--fps must be > 0, got {args.fps}")
-    if args.scale is not None and not args.scale > 0:
-        parser.error(f"--scale must be > 0, got {args.scale}")
+    if args.fps is not None and not (math.isfinite(args.fps) and args.fps > 0):
+        parser.error(f"--fps must be a finite number > 0, got {args.fps}")
+    if args.scale is not None and not (math.isfinite(args.scale) and args.scale > 0):
+        parser.error(f"--scale must be a finite number > 0, got {args.scale}")
     out_dir = Path(args.output).resolve().parent
     if not out_dir.is_dir():
         parser.error(f"--output directory does not exist: {out_dir}")
+    if Path(args.output).is_dir():
+        parser.error(f"--output is a folder, not a file: {args.output}")
 
 
 def _validate_roi(
@@ -367,11 +370,15 @@ def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
     if fmt != "mat" and (args.fps is None or args.scale is None):
         print(f"Note: time and size columns use {fps:g} fps and {scale:g} um/px "
               "(defaults; pass --fps and --scale for this recording)", file=sys.stderr)
-    _write_output(
-        fmt, args.output, radius, centers, edge_pts, fps, scale,
-        region_count if args.mode == "area" else None,
-        metadata=run_metadata(args, images, gridx, gridy, fps, scale, reference_index),
-    )
+    try:
+        _write_output(
+            fmt, args.output, radius, centers, edge_pts, fps, scale,
+            region_count if args.mode == "area" else None,
+            metadata=run_metadata(args, images, gridx, gridy, fps, scale, reference_index),
+        )
+    except OSError as exc:  # full disk, no permission, file held open
+        print(f"Cannot write {args.output}: {exc}", file=sys.stderr)
+        sys.exit(1)
     print(f"Done. {n_valid}/{len(images)} frames fitted. Output: {args.output}")
 
 

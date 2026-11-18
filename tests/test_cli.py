@@ -130,8 +130,8 @@ class TestEarlyValidation:
     """Bad arguments fail before any frame is processed, with a clear message."""
 
     @pytest.mark.parametrize("extra", [
-        ("--fps", "0"), ("--fps", "-5"),
-        ("--scale", "0"), ("--scale", "-1"),
+        ("--fps", "0"), ("--fps", "-5"), ("--fps", "inf"),
+        ("--scale", "0"), ("--scale", "-1"), ("--scale", "inf"), ("--scale", "nan"),
         ("--threshold", "1.5"), ("--threshold", "-0.1"),
         ("--rf", "101"), ("--rf", "-1"), ("--rf-area", "-1"),
         ("--edges", "2", "0", "0", "0"),
@@ -155,6 +155,25 @@ class TestEarlyValidation:
             _run(frames, tmp_path / "no_such_dir" / "out.csv")
         assert exc.value.code == 2
         assert "--output" in capsys.readouterr().err
+
+    def test_output_that_is_a_folder(self, frames, tmp_path, capsys):
+        (tmp_path / "out.csv").mkdir()
+        with pytest.raises(SystemExit) as exc:
+            _run(frames, tmp_path / "out.csv")
+        assert exc.value.code == 2
+        assert "is a folder" in capsys.readouterr().err
+
+    def test_a_write_error_is_a_message_not_a_traceback(self, frames, tmp_path, monkeypatch, capsys):
+        from bubbletrack import cli
+
+        def full(*_a, **_k):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(cli, "export_csv", full)
+        with pytest.raises(SystemExit) as exc:
+            _run(frames, tmp_path / "out.csv", "--threshold", "0.58")
+        assert exc.value.code == 1
+        assert "Cannot write" in capsys.readouterr().err
 
     def test_full_image_roi_is_valid(self, frames, tmp_path, capsys):
         _run(frames, tmp_path / "out.csv", "--threshold", "0.58",

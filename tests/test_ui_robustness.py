@@ -223,3 +223,16 @@ def test_a_preset_is_checked_like_the_config_file(gui):
     assert panel.preset() == saved
     panel.apply_preset({**saved, "removing_factor": 1e308})  # out of range: clamped, as in config
     assert panel.get_removing_factor_slider() == 100
+
+
+def test_replacing_a_folder_is_not_called_a_file_held_open(tmp_path):
+    """Windows refuses replacing a folder with the same PermissionError as a held file."""
+    import pytest
+
+    from bubbletrack.model.atomic_write import write_text_atomic
+
+    (tmp_path / "out.csv").mkdir()
+    with pytest.raises(OSError) as exc:
+        write_text_atomic(tmp_path / "out.csv", "x")
+    assert "open in another program" not in str(exc.value)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["out.csv"]

@@ -62,6 +62,8 @@ def _replace(src: str, dst: str) -> None:
             os.replace(src, dst)
             return
         except PermissionError as exc:
+            if os.path.isdir(dst):  # Windows refuses replacing a folder the same way
+                raise IsADirectoryError(f"{os.path.basename(dst)} is a folder, not a file") from exc
             if attempt == _REPLACE_ATTEMPTS - 1:
                 # Name the user's file, not the temporary one the OS error quotes
                 raise PermissionError(
