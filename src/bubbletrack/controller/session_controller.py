@@ -104,9 +104,15 @@ def split_session(data: dict) -> tuple[str, dict, dict]:
 
 def sanitize_params(params: dict, n_frames: int,
                     full_roi: tuple[tuple[int, int], tuple[int, int]]) -> tuple[dict, list[str]]:
-    """Drop parameters that no longer fit the loaded images; return warnings."""
-    params = dict(params)
+    """Drop parameters that are invalid or no longer fit the loaded images; return warnings."""
+    params, invalid = config_module.check_session_settings(params)  # a hand-edited file
+    reference = params.get("reference_frame")
+    if reference is not None and reference >= n_frames:
+        params.pop("reference_frame")
+        invalid.append("reference_frame")
     warnings: list[str] = []
+    if invalid:
+        warnings.append("ignored invalid saved values: " + ", ".join(invalid))
     (_, h), (_, w) = full_roi
     gx, gy = params.get("gridx"), params.get("gridy")
     if gx is not None or gy is not None:

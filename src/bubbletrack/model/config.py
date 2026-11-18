@@ -72,7 +72,10 @@ def _as_number(value: Any) -> float:
     if isinstance(value, bool):  # bool is an int subclass, but never a number here
         raise ValueError("a boolean is not a number")
     if isinstance(value, (int, float)):
-        number = float(value)
+        try:
+            number = float(value)
+        except OverflowError:  # an int beyond float's range
+            raise ValueError("not a finite number") from None
     elif isinstance(value, str):
         number = float(value.strip())  # raises ValueError if not numeric
     else:
@@ -173,6 +176,64 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "fps": _positive_float_in(0.001, 99_999e6),       # FPS spin box (Hz..M)
     "rmax_fit_length": _int_in(3, 999),               # Rmax Fit spin box
 }
+
+
+_INDEX_MAX = 2**31 - 1  # Qt widgets take 32-bit ints
+
+
+def _as_index(value: Any) -> int:
+    number = _as_whole_number(value)
+    if not 0 <= number <= _INDEX_MAX:
+        raise ValueError("not a frame or pixel index")
+    return number
+
+
+def _as_roi_range(value: Any) -> tuple[int, int]:
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("expected [first, last]")
+    first, last = (_as_index(v) for v in value)
+    return first, last
+
+
+def _as_point(value: Any) -> tuple[float, float] | None:
+    if value is None:
+        return None
+    if not isinstance(value, (list, tuple)) or len(value) != 2:
+        raise ValueError("expected [row, col]")
+    row, col = (_as_number(v) for v in value)
+    return row, col
+
+
+# A session also stores the ROI, the shown frame and the Auto setup (not persisted here)
+_SESSION_VALIDATORS: dict[str, Callable[[Any], Any]] = {
+    **_VALIDATORS,
+    "gridx": _as_roi_range,
+    "gridy": _as_roi_range,
+    "image_no": _as_index,
+    "removing_obj_radius": _as_index,
+    "reference_frame": lambda value: None if value is None else _as_index(value),
+    "edge_seed": _as_point,
+}
+
+
+def check_session_settings(raw: dict[str, Any]) -> tuple[dict[str, Any], list[str]]:
+    """The settings of a loaded session checked as the config file's are.
+
+    Returns the cleaned dict (keys without a check are kept as they are) and the
+    names of the invalid values, which are dropped, so the current ones stay.
+    """
+    clean: dict[str, Any] = {}
+    invalid: list[str] = []
+    for key, value in raw.items():
+        check = _SESSION_VALIDATORS.get(key)
+        if check is None:
+            clean[key] = value
+            continue
+        try:
+            clean[key] = check(value)
+        except ValueError:
+            invalid.append(key)
+    return clean, invalid
 
 
 def _unchanged(raw: Any, clean: Any) -> bool:

@@ -245,32 +245,13 @@ def load_session(filepath: str) -> dict:
             f"Session file version {version} is too old (need >= {min_text})"
         )
 
-    # Reconstruct NumPy arrays from JSON lists (null -> NaN)
-    if data.get("radius") is not None:
-        data["radius"] = _from_json_array(data["radius"])
-    if data.get("circle_fit_par") is not None:
-        data["circle_fit_par"] = _from_json_array(data["circle_fit_par"])
-    if data.get("region_count") is not None:
-        data["region_count"] = np.array(data["region_count"], dtype=int)
-    if data.get("circle_xy") is not None:
-        data["circle_xy"] = [
-            None if xy is None else _from_json_array(xy).reshape(-1, 2)
-            for xy in data["circle_xy"]
-        ]
-    if data.get("fit_metrics") is not None:
-        data["fit_metrics"] = {k: _from_json_array(v) for k, v in data["fit_metrics"].items()}
-    if data.get("fit_flags") is not None:
-        data["fit_flags"] = [frozenset(flags) for flags in data["fit_flags"]]
-    if data.get("fit_suggestion") is not None:
-        data["fit_suggestion"] = suggestions_from_json(data["fit_suggestion"])
-    if data.get("fit_locked") is not None:
-        data["fit_locked"] = np.array(data["fit_locked"], dtype=bool)
-    if data.get("fit_confidence") is not None:
-        data["fit_confidence"] = _from_json_array(data["fit_confidence"])
-    if data.get("edge_seed") is not None:
-        data["edge_seed"] = tuple(float(v) for v in data["edge_seed"])
-    if data.get("fit_source") is not None:
-        data["fit_source"] = np.array(data["fit_source"], dtype=np.int8)
+    # The recording and its results cannot be guessed: damage there refuses the file
+    # (the settings are checked when they are applied, see check_session_settings)
+    _check_identity(data, filepath)
+    try:
+        _results_from_json(data)
+    except (TypeError, ValueError, AttributeError, KeyError, IndexError, OverflowError) as exc:
+        raise ValueError(f"Session file '{filepath}' has damaged results: {exc}") from exc
     if "ml_examples" in data:
         data["ml_examples"] = examples_from_json(data["ml_examples"])
     if "ml_assist" in data:
@@ -280,7 +261,7 @@ def load_session(filepath: str) -> dict:
         _legacy_radius_definition(data)
     if "physical_set" in data:
         values = data["physical_set"] if isinstance(data["physical_set"], list) else []
-        data["physical_set"] = frozenset(v for v in values if v in PHYSICAL_KEYS)
+        data["physical_set"] = frozenset(v for v in values if isinstance(v, str) and v in PHYSICAL_KEYS)
     else:  # before 3.3 the values were not marked; such sessions always loaded as set
         data["physical_set"] = PHYSICAL_KEYS
 
@@ -294,6 +275,66 @@ def load_session(filepath: str) -> dict:
 
     logger.info("Session loaded from %s (version %s)", filepath, version)
     return data
+
+
+def _check_identity(data: dict, filepath: str) -> None:
+    for key in ("folder_path", "video_path"):
+        if data.get(key) is not None and not isinstance(data[key], str):
+            raise ValueError(f"Session file '{filepath}' has a damaged {key}")
+    names = data.get("image_names")
+    if names is not None and not (isinstance(names, list) and all(isinstance(n, str) for n in names)):
+        raise ValueError(f"Session file '{filepath}' has damaged image_names")
+
+
+_SOURCE_CODES = frozenset(int(s) for s in FitSource)
+
+
+def _per_frame(values, dtype=float, *, columns: int | None = None) -> np.ndarray:
+    """A saved per-frame result as an array of one row per frame; raises ValueError."""
+    if dtype is bool and not (isinstance(values, list) and all(isinstance(v, bool) for v in values)):
+        raise ValueError("expected true/false per frame")
+    array = _from_json_array(values) if dtype is float else np.array(values, dtype=dtype)
+    shape_ok = array.ndim == 1 if columns is None else array.ndim == 2 and array.shape[1] == columns
+    if not shape_ok:
+        raise ValueError(f"expected one value per frame, got shape {array.shape}")
+    if dtype is float and np.isinf(array).any():
+        raise ValueError("infinite value")
+    if dtype is np.int8 and not set(array.tolist()) <= _SOURCE_CODES:
+        raise ValueError("unknown result source")
+    return array
+
+
+def _results_from_json(data: dict) -> None:
+    """Rebuild the saved result arrays in place (null -> NaN); raises on damage."""
+    if data.get("radius") is not None:
+        data["radius"] = _per_frame(data["radius"])
+    if data.get("circle_fit_par") is not None:
+        data["circle_fit_par"] = _per_frame(data["circle_fit_par"], columns=2)
+    if data.get("region_count") is not None:
+        data["region_count"] = _per_frame(data["region_count"], int)
+    if data.get("circle_xy") is not None:
+        data["circle_xy"] = [
+            None if xy is None else _from_json_array(xy).reshape(-1, 2)
+            for xy in data["circle_xy"]
+        ]
+    if data.get("fit_metrics") is not None:
+        data["fit_metrics"] = {str(k): _per_frame(v) for k, v in data["fit_metrics"].items()}
+    if data.get("fit_flags") is not None:
+        data["fit_flags"] = [frozenset(_flag_names(flags)) for flags in data["fit_flags"]]
+    if data.get("fit_suggestion") is not None:
+        data["fit_suggestion"] = suggestions_from_json(data["fit_suggestion"])
+    if data.get("fit_locked") is not None:
+        data["fit_locked"] = _per_frame(data["fit_locked"], bool)
+    if data.get("fit_confidence") is not None:
+        data["fit_confidence"] = _per_frame(data["fit_confidence"])
+    if data.get("fit_source") is not None:
+        data["fit_source"] = _per_frame(data["fit_source"], np.int8)
+
+
+def _flag_names(flags) -> list:
+    if not isinstance(flags, list) or not all(isinstance(f, str) for f in flags):
+        raise ValueError(f"expected a list of flag names, got {flags!r}")
+    return flags
 
 
 def _legacy_radius_definition(data: dict) -> None:
