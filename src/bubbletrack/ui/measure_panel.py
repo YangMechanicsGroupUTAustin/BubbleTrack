@@ -17,13 +17,13 @@ from PyQt6.QtWidgets import (
 )
 
 from bubbletrack.model.config import DETECTION_MODE_LABELS, DETECTION_MODES
+from bubbletrack.model.constants import AUTO_METHOD
 from bubbletrack.ui.classic_controls import ClassicControls
 from bubbletrack.ui.edge_options import EdgeOptionsBox
 from bubbletrack.ui.widgets import CollapsibleSection
 
 logger = logging.getLogger(__name__)
 
-AUTO_METHOD = "edge"
 CLASSIC_METHODS = tuple(mode for mode in DETECTION_MODES if mode != AUTO_METHOD)
 _METHOD_ORDER = (AUTO_METHOD, *CLASSIC_METHODS)  # Auto first: the recommended one
 

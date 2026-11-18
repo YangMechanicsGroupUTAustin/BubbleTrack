@@ -17,9 +17,9 @@ from PyQt6.QtWidgets import (
     QCheckBox, QComboBox, QGridLayout, QGroupBox, QHBoxLayout, QLabel, QPushButton, QWidget,
 )
 
+from bubbletrack.model.constants import STEEP_EDGE
 from bubbletrack.ui.widgets import CollapsibleSection
 
-STEEP_EDGE = "steep"  # the only wall position the app offers
 _POLARITIES = (
     ("Dark bubble", "dark"),
     ("Bright bubble", "bright"),

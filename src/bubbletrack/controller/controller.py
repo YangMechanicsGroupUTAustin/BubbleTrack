@@ -21,12 +21,12 @@ from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.controller.settings_controller import SettingsController
 from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus
 from bubbletrack.model.cache import ImageCache
-from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
+from bubbletrack.model.constants import (
+    AUTO_METHOD, DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS, STEEP_EDGE,
+)
 from bubbletrack.model.config import load_config, ui_setting
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.state import AppState, clear_frame_result, update_state
-from bubbletrack.ui.edge_options import STEEP_EDGE
-from bubbletrack.ui.measure_panel import AUTO_METHOD
 from bubbletrack.ui.shortcuts import setup_shortcuts
 from bubbletrack.ui.wording import plural
 

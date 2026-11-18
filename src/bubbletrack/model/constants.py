@@ -150,3 +150,13 @@ AUTOTUNE_RF_FINE_STEP: int = 3
 
 AUTOTUNE_TOP_K: int = 5
 """Number of top coarse candidates to refine."""
+
+# ------------------------------------------------------------------ #
+#  Detection modes (domain values shared by controllers and the UI)
+# ------------------------------------------------------------------ #
+
+AUTO_METHOD: str = "edge"
+"""``detection_mode`` of "Auto (reference frame)", the engine in ``model.edge``."""
+
+STEEP_EDGE: str = "steep"
+"""``edge_definition`` at the 50 % crossing of the steep edge: the only wall position the app offers."""
