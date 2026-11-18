@@ -13,6 +13,19 @@ LOG_MAX_BYTES = 5_000_000  # the log rolls over to bubbletrack.log.1, .2 (never 
 LOG_BACKUPS = 2
 
 
+class _SharedRotatingFileHandler(logging.handlers.RotatingFileHandler):
+    """Rotates like its base; when another running instance holds the file (Windows
+    refuses the rename) it keeps appending instead of losing every later record."""
+
+    def doRollover(self) -> None:  # noqa: N802 (logging API)
+        try:
+            super().doRollover()
+        except OSError:
+            self.maxBytes = 0  # no more rollovers for this instance
+            if self.stream is None:
+                self.stream = self._open()
+
+
 def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> None:
     """Configure root logger with console + optional file handler."""
     root = logging.getLogger("bubbletrack")
@@ -33,7 +46,7 @@ def setup_logging(*, level: int = logging.INFO, log_dir: Path | None = None) -> 
     # File handler (optional)
     if log_dir is not None:
         log_dir.mkdir(parents=True, exist_ok=True)
-        fh = logging.handlers.RotatingFileHandler(
+        fh = _SharedRotatingFileHandler(
             log_dir / "bubbletrack.log", maxBytes=LOG_MAX_BYTES, backupCount=LOG_BACKUPS,
             encoding="utf-8",
         )

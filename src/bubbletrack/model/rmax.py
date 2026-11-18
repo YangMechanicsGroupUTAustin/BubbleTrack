@@ -137,8 +137,8 @@ def _gap_warning(fit_frames: np.ndarray) -> str | None:
         return None
     return (
         f"{missing} frame{'s' if missing != 1 else ''} between frames {first} and {last} of "
-        f"the Rmax fit have no radius; the fit bridges the gap, so Rmax and t=0 may be "
-        f"inaccurate."
+        f"the Rmax fit have no radius; the peak may lie in the gap (the fit bridges it), "
+        f"so Rmax and t=0 may be inaccurate."
     )
 
 

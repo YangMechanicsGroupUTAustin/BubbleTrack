@@ -222,7 +222,8 @@ class PretuneController(BaseController):
             logger.exception("Edge fit failed for frame %d", idx)
             self.w.header.set_status(f"Error: {exc}", "#ef4444")
             return
-        edge_support.store_fit(self.state, idx, fit, FitSource.REFIT)
+        if not self._user_decided(idx):  # a locked frame or the user's own fit is kept
+            edge_support.store_fit(self.state, idx, fit, FitSource.REFIT)
         show_engine_view(self.state, self.w, idx)
         redraw_original(self.state, self.w)
         if fit.radius > 0:
@@ -343,16 +344,19 @@ class PretuneController(BaseController):
     # -- Auto-tune -------------------------------------------------------- #
 
     def _tune_target(self) -> tuple:
-        return (self.state.image_no, self.state.gridx, self.state.gridy)
+        state = self.state
+        return (state.image_no, state.gridx, state.gridy, state.detection_mode)
 
     def _cancel_autotune(self) -> None:
         worker = self._autotune_worker
         if worker is None:
             return
-        try:
-            worker.result_ready.disconnect(self._on_autotune_finished)
-        except TypeError:
-            pass
+        for signal, slot in ((worker.result_ready, self._on_autotune_finished),
+                             (worker.progress, self._on_autotune_progress)):
+            try:
+                signal.disconnect(slot)
+            except TypeError:
+                pass
         if worker.isRunning():
             worker.cancel()
             worker.wait()

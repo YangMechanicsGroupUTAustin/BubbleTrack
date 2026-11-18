@@ -39,7 +39,7 @@ def test_file_handler_created(tmp_path):
     handler_types = {type(h) for h in logger.handlers}
     assert logging.StreamHandler in handler_types
     # a size-capped log: it rolls over instead of growing for ever
-    assert logging.handlers.RotatingFileHandler in handler_types
+    assert any(isinstance(h, logging.handlers.RotatingFileHandler) for h in logger.handlers)
     rotating = next(h for h in logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler))
     assert rotating.maxBytes == 5_000_000 and rotating.backupCount == 2
 

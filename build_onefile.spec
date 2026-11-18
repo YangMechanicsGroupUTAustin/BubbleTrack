@@ -67,8 +67,6 @@ a = Analysis(
         'bubbletrack.controller.autotune_worker',
         'bubbletrack.controller.settings_controller',
         # Model
-        'bubbletrack.model.anomaly',
-        'bubbletrack.model.auto_optimize',
         'bubbletrack.model.cache',
         'bubbletrack.model.circle_fit',
         'bubbletrack.model.config',
@@ -77,7 +75,6 @@ a = Analysis(
         'bubbletrack.model.detection',
         'bubbletrack.model.export',
         'bubbletrack.model.image_io',
-        'bubbletrack.model.presets',
         'bubbletrack.model.removing_factor',
         'bubbletrack.model.report',
         'bubbletrack.model.session',

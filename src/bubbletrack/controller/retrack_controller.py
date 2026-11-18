@@ -79,6 +79,7 @@ class RetrackController(BaseController):
         self._pending = False   # an edit while held: re-track when released
         self._review_only = False  # after an undo: recompute the Review list only
         self._review_pending = False  # an undo while held: the list update runs at release
+        self._worker_review_only = False  # the running solve only recomputes the list
         self._quiet = False
         self._own_emit = False
         self.timer = QTimer()
@@ -122,8 +123,13 @@ class RetrackController(BaseController):
         A pending countdown or a running re-track (its snapshot may go stale) is
         remembered and started again by :meth:`release_hold`.  Pairs nest.
         """
+        list_only = (self._worker_review_only if self._worker is not None
+                     else self.timer.isActive() and self._review_only)
         if self.timer.isActive() or self._worker is not None:
-            self._pending = True
+            if list_only:  # never upgrade it: a full re-track could redo an undone one
+                self._review_pending = True
+            else:
+                self._pending = True
         self.timer.stop()
         if self._worker is not None:
             self._abandon()
@@ -236,6 +242,7 @@ class RetrackController(BaseController):
         worker.failed.connect(partial(self._on_ended, worker, "failed"))
         worker.stopped.connect(partial(self._on_ended, worker, "stopped"))
         self._worker, self._allowed = worker, allowed
+        self._worker_review_only = review_only
         self.w.status_bar.set_activity(UPDATING)
         if not review_only:  # a list update never locks editing
             self.escalate_timer.start()

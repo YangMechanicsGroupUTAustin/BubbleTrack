@@ -230,6 +230,7 @@ class TestAutoTune:
                 def disconnect(self, _slot):
                     pass
             result_ready = _Sig()
+            progress = _Sig()
 
             def isRunning(self):  # noqa: N802 (Qt name)
                 return True
@@ -264,3 +265,72 @@ class TestFolderNotes:
         window, controller = gui
         controller.file_ctrl.on_folder_selected(str(make_sequence("a", 4)))
         assert window.header.status_text() == "Ready"
+
+
+class TestRefusedRestore:
+    def test_no_choice_of_the_other_recording_is_restored(self, fitted, tmp_path):
+        """Results refused (other files): neither the picked reference and seed nor the
+        confirmed frame rate and scale of that recording may apply here."""
+        _, controller = fitted
+        controller._set_state(update_state(controller._get_state(), reference_frame=3,
+                                           edge_seed=(50.5, 60.5),
+                                           physical_set=frozenset({"fps", "scale"})))
+        path = tmp_path / "s.brt"
+        assert controller.save_session_file(str(path))
+        data = json.loads(path.read_text(encoding="utf-8"))
+        data["image_names"] = [f"other_{i}.tif" for i in range(len(data["image_names"]))]
+        path.write_text(json.dumps(data), encoding="utf-8")
+        assert controller.load_session_file(str(path))
+        state = controller._get_state()
+        assert state.reference_frame is None and state.edge_seed is None
+        assert not controller.export_ctrl.physical_set()
+
+    def test_auto_tune_applies_nothing_after_a_method_switch(self, gui, make_sequence):
+        """Switching to Auto during a classic tune made its fit take the Edge path,
+        which erased a locked manual fix."""
+        from bubbletrack.model.autotune import AutoTuneResult
+        from bubbletrack.model.provenance import FitSource
+        from bubbletrack.model.quality import FitQuality
+
+        _, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6)))
+        controller._set_state(update_state(controller._get_state(), detection_mode="intensity"))
+        state = controller._get_state()
+        state.radius[0], state.fit_source[0], state.fit_locked[0] = 77.0, FitSource.MANUAL, True
+        pretune = controller.pretune_ctrl
+        pretune._autotune_target = pretune._tune_target()
+        controller._set_state(update_state(controller._get_state(), detection_mode="edge"))
+        quality = FitQuality(score=0.9, n_edge_points=50, edge_density=1.0, rms_residual=0.5,
+                             sector_coverage=1.0, radius=30.0)
+        pretune._on_autotune_finished(AutoTuneResult(0.44, 14, quality, 10))
+        state = controller._get_state()
+        assert state.radius[0] == 77.0 and state.fit_source[0] == FitSource.MANUAL
+
+
+def test_a_refused_log_rollover_keeps_appending(tmp_path, monkeypatch):
+    """Two instances on Windows: the rename is refused; records must not be lost."""
+    import logging
+
+    from bubbletrack import logging_config
+
+    logger = logging.getLogger("bubbletrack")
+    handlers, level = list(logger.handlers), logger.level
+    try:
+        logging_config.setup_logging(log_dir=tmp_path)
+        handler = next(h for h in logger.handlers if isinstance(h, logging_config._SharedRotatingFileHandler))
+        handler.maxBytes = 200
+
+        def refuse(*_a, **_k):
+            raise PermissionError(32, "being used by another process")
+
+        monkeypatch.setattr(logging_config.logging.handlers.RotatingFileHandler, "rotate", refuse)
+        for i in range(50):
+            logger.warning("record %d", i)
+        handler.flush()
+        text = (tmp_path / "bubbletrack.log").read_text(encoding="utf-8")
+        assert "record 0" in text and "record 49" in text
+    finally:
+        for h in [h for h in logger.handlers if h not in handlers]:
+            logger.removeHandler(h)
+            h.close()
+        logger.setLevel(level)

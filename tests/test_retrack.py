@@ -463,3 +463,18 @@ def test_an_undo_during_a_hold_updates_the_list_when_released(qapp, app):
     _wait(qapp, lambda: len(FakeWorker.made) == 2 and FakeWorker.made[-1].started)
     assert rt._allowed == frozenset()  # list only
     FakeWorker.made[-1].finish()
+
+
+def test_a_hold_during_the_list_only_solve_keeps_it_list_only(qapp, app):
+    """A hold (F, a question) while the post-undo list solve runs must not turn it
+    into a full re-track at release: that would redo the re-track just undone."""
+    _window, controller = app
+    rt = controller.retrack
+    _edit(controller)
+    _started(qapp).finish()  # a re-track lands
+    controller._on_undo()  # ... and is undone: a list-only solve starts
+    _wait(qapp, lambda: len(FakeWorker.made) == 2 and FakeWorker.made[-1].started)
+    rt.hold()
+    rt.release_hold()
+    _wait(qapp, lambda: len(FakeWorker.made) == 3 and FakeWorker.made[-1].started)
+    assert rt._allowed == frozenset()  # still list-only

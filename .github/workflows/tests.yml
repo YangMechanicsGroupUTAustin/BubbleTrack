@@ -8,7 +8,7 @@ on:
 # A newer push to the same branch makes the older run pointless.
 concurrency:
   group: tests-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   pytest:
