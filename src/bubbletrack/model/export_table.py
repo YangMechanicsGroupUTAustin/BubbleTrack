@@ -105,10 +105,10 @@ def _iter_data_rows(
     rmax_frame: float | None,
     fit: FitColumns,
 ) -> Iterator[list[_Cell]]:
-    """Yield the cells of every processed frame, skipping ``radius <= 0``."""
+    """Yield the cells of every measured frame (skipping ``radius <= 0`` and NaN)."""
     for i in range(len(radius)):
-        if radius[i] <= 0:
-            continue  # skip unprocessed frames
+        if not radius[i] > 0:
+            continue  # unprocessed / no bubble (-1) or not a number
         yield _build_cells(
             i, float(radius[i]),
             float(circle_fit_par[i, 0]),

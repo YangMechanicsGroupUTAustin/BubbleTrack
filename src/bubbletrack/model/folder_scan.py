@@ -155,7 +155,7 @@ def _count_ifds(fh: BinaryIO) -> int:
 def natural_sort_key(name: str) -> list:
     """Sort key that orders embedded numbers numerically ("f2" < "f10")."""
     return [
-        int(part) if part.isdigit() else part.lower()
+        int(part) if part.isdecimal() else part.lower()  # isdigit() is also true for '²'
         for part in re.split(r"(\d+)", name)
     ]
 

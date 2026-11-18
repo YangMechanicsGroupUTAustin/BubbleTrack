@@ -6,7 +6,7 @@ import fpdf
 import numpy as np
 import pytest
 
-from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource
 from bubbletrack.model.report import (
     build_report_parameters,
     build_report_quality,
@@ -26,6 +26,9 @@ def _state(n: int = 10, **fields) -> AppState:
     state.fit_source[:] = FitSource.AUTO
     state.fit_source[[0, 1]] = FitSource.NONE
     state.fit_source[5] = FitSource.MANUAL
+    if fields.get("bubble_non_round") and fields.get("detection_mode") == "edge":
+        for i in (2, 3, 4, 6, 7, 8, 9):  # as that mode stores its results
+            state.fit_flags[i] = frozenset({AREA_RADIUS_FLAG})
     return state
 
 
@@ -39,6 +42,16 @@ class TestParameters:
         params = build_report_parameters(_state(detection_mode="edge", bubble_non_round=True))
         assert params["Radius Definition"] == (
             "area-equivalent sqrt(A/pi) of the 50% iso-contour")
+
+    def test_the_definition_follows_the_results_not_the_setting(self):
+        circle = ("least-squares circle (Taubin, one outlier pass) through the bubble outline "
+                  "(50 % steep edge)")
+        state = _state(detection_mode="edge")
+        ticked = AppState(**{**state.__dict__, "bubble_non_round": True})  # nothing refitted
+        assert build_report_parameters(ticked)["Radius Definition"] == circle
+        ticked.fit_flags[9] = frozenset({AREA_RADIUS_FLAG})  # one frame refitted by area
+        text = build_report_parameters(ticked)["Radius Definition"]
+        assert text.startswith("mixed: 1 frame area-equivalent") and "6 frames least-squares" in text
 
     def test_area_mode(self):
         params = build_report_parameters(_state(detection_mode="area"))

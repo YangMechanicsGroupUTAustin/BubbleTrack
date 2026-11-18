@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 
 from bubbletrack.model.config import DETECTION_MODE_LABELS
-from bubbletrack.model.export_meta import radius_definition
+from bubbletrack.model.export_meta import results_radius_definition
 from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.provenance import FitSource
 
@@ -44,8 +44,7 @@ def build_report_parameters(
     return {
         "Source": state.folder_path or state.video_path or "(none)",
         "Detection Mode": DETECTION_MODE_LABELS.get(state.detection_mode, state.detection_mode),
-        "Radius Definition": radius_definition(state.detection_mode, state.edge_definition,
-                                               getattr(state, "bubble_non_round", False)),
+        "Radius Definition": results_radius_definition(state),
         "Threshold": f"{state.img_thr:.2f}",
         "Removing Factor": str(state.removing_factor),
         "ROI": f"rows {state.gridx}, cols {state.gridy}",
@@ -107,13 +106,24 @@ def build_report_quality(state) -> dict[str, str]:
     }
 
 
+# The PDF's core font (Helvetica) encodes Latin-1 only: other characters, e.g.
+# a Chinese folder name, would make fpdf2 refuse the whole report.
+_PUNCTUATION = str.maketrans({"—": "-", "–": "-", "…": "...", "‘": "'",
+                              "’": "'", "“": '"', "”": '"'})
+
+
+def pdf_text(text: str) -> str:
+    """*text* in the core font's Latin-1; other characters become '?'."""
+    return str(text).translate(_PUNCTUATION).encode("latin-1", "replace").decode("latin-1")
+
+
 def _print_section(pdf, title: str, rows: dict[str, str]) -> None:
     pdf.set_font("Helvetica", "B", 12)
-    pdf.cell(0, 8, title, new_x="LMARGIN", new_y="NEXT")
+    pdf.cell(0, 8, pdf_text(title), new_x="LMARGIN", new_y="NEXT")
     pdf.set_font("Helvetica", "", 10)
     for key, value in rows.items():
-        pdf.cell(50, 6, key + ":", new_x="RIGHT")
-        pdf.cell(0, 6, str(value), new_x="LMARGIN", new_y="NEXT")
+        pdf.cell(50, 6, pdf_text(key + ":"), new_x="RIGHT")
+        pdf.cell(0, 6, pdf_text(value), new_x="LMARGIN", new_y="NEXT")
 
 
 def generate_report(

@@ -63,6 +63,40 @@ def radius_definition(detection_mode: str, edge_definition: str = "steep",
     return _RADIUS_DEFINITIONS.get(key, _CIRCLE_FIT)
 
 
+def results_radius_definition(state: AppState) -> str:
+    """What the stored radii measure, judged from the results themselves.
+
+    The settings describe the next fit, not the stored one: ticking "Bubble may be
+    non-round" or switching the method refits nothing.  A radius measured by area
+    carries the flag ``area_radius``; any other computed radius follows the current
+    method.  Manual fixes are circle fits (the per-frame ``Source`` names them).
+    With nothing measured yet, the settings are described.
+    """
+    from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource
+
+    mode, edge = state.detection_mode, state.edge_definition
+    radius, flags, sources = state.radius, state.fit_flags, state.fit_source
+    n = 0 if radius is None else len(radius)
+    if (not n or flags is None or len(flags) != n
+            or not np.any(np.asarray(radius) > 0)):
+        return radius_definition(mode, edge, bool(state.bubble_non_round))
+    measured = np.asarray(radius) > 0
+    by_area = measured & np.array([AREA_RADIUS_FLAG in f for f in flags], dtype=bool)
+    computed = measured & ~by_area
+    if sources is not None and len(sources) == n:
+        computed &= np.asarray(sources) != FitSource.MANUAL
+    n_area, n_other = int(by_area.sum()), int(computed.sum())
+    area_text = radius_definition("edge", edge, True)
+    other_text = radius_definition(mode, edge, False)
+    if not n_area:
+        return other_text
+    if not n_other:
+        return area_text
+    frames = lambda k: f"{k} frame{'' if k == 1 else 's'}"  # noqa: E731
+    return (f"mixed: {frames(n_area)} {area_text} (flag area_radius); "
+            f"{frames(n_other)} {other_text}")
+
+
 def _plain_value(value: object) -> object:
     """Convert a metadata value to plain Python data.
 
@@ -191,8 +225,7 @@ def build_export_metadata(
         "fps": fps,
         "um2px": um2px,
         "rmax_fit_length": rmax_fit_length,
-        "radius_definition": radius_definition(state.detection_mode, state.edge_definition,
-                                               getattr(state, "bubble_non_round", False)),
+        "radius_definition": results_radius_definition(state),
         "edge_definition": state.edge_definition,
         "edge_polarity": state.edge_polarity,
         "bubble_non_round": bool(getattr(state, "bubble_non_round", False)),

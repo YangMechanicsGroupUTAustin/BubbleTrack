@@ -133,15 +133,17 @@ def export_r_data(
         len(radius), fit_source=fit_source, fit_confidence=fit_confidence,
         fit_locked=fit_locked, fit_flags=fit_flags, fit_metrics=fit_metrics,
     )
-    # Replace None entries with empty arrays for savemat compatibility
-    cleaned_edges = [
-        (e if e is not None else np.empty((0, 2))) for e in edge_pts
-    ]
+    # A 1 x N cell of M x 2 arrays (None -> empty).  Filled element by element:
+    # np.array(list, dtype=object) stacks equal-length outlines into an N x M x 2
+    # array of scalars instead (every frame with the same point count, or one frame).
+    cleaned_edges = np.empty(len(edge_pts), dtype=object)
+    for i, e in enumerate(edge_pts):
+        cleaned_edges[i] = np.empty((0, 2)) if e is None else np.asarray(e)
 
     data = {
         "Radius": radius.reshape(1, -1),
         "CircleFitPar": centers,
-        "CircleXY": np.array(cleaned_edges, dtype=object),
+        "CircleXY": cleaned_edges,
     }
     if region_count is not None:
         data["RegionCount"] = region_count.reshape(1, -1)
