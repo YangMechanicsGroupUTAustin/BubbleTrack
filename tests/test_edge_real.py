@@ -19,8 +19,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from bubbletrack.model.edge import EdgeParams, choose_reference_frame, detect_edge
+from bubbletrack.model.edge import ENGINE_VERSION, EdgeParams, choose_reference_frame, detect_edge
 from bubbletrack.model.image_io import imread_unicode
+
+# Per-frame results of the labelled-frames test, tracked in git: any engine change that moves
+# a frame shows up as a diff of this file.  Regenerate deliberately with
+# BUBBLETRACK_UPDATE_BASELINES=1 and commit the new file together with the engine change.
+BASELINE = Path(__file__).with_name("baselines") / "edge_lic_labelled.json"
 
 
 def _data_root() -> Path | None:
@@ -160,10 +165,15 @@ def test_labelled_bubble_frames_on_lic():
     (5).  09: 25 -> 15 (its circles grow by ~0.7 px and leave the 2 px tolerance), 06: 21 -> 20;
     on lic_hard 79 -> 81 / 182 (01: 30 -> 31, 03: 0 -> 1, 07: 16 -> 17, 04: 1 -> 0), no-bubble
     frames accepted 1 -> 2 / 31 (03).
+
+    Since 2026-11-18 the frames behind these numbers are tracked in
+    ``tests/baselines/edge_lic_labelled.json``: any frame that moves fails the test until the
+    file is regenerated (``BUBBLETRACK_UPDATE_BASELINES=1``) and committed with the change.
     """
     labels = _labels()
     crit = labels["criterion"]
     ok = n_b = 0
+    found: dict[str, dict[str, list[int]]] = {}
     for name, info in labels["sequences"].items():
         folder = ROOT / "lic" / name
         if not folder.is_dir():
@@ -171,15 +181,47 @@ def test_labelled_bubble_frames_on_lic():
         files = _frames(folder)
         ref = imread_unicode(files[labels["reference_frame_index"]])
         params = EdgeParams(seed=tuple(info["seed"]))
+        seq = found.setdefault(name, {"correct": [], "no_bubble_accepted": []})
         for frame_no, lab in info["frames"].items():
+            res = detect_edge(imread_unicode(files[int(frame_no) - 1]), *FULL, reference=ref, params=params)
             if lab["label"] != "B":
+                if res.accepted:
+                    seq["no_bubble_accepted"].append(int(frame_no))
                 continue
             n_b += 1
-            res = detect_edge(imread_unicode(files[int(frame_no) - 1]), *FULL, reference=ref, params=params)
-            if lab["circle"] is not None and np.isfinite(res.radius):
-                ok += _agree((res.radius, res.rc, res.cc), lab["circle"], crit)
+            if (lab["circle"] is not None and np.isfinite(res.radius)
+                    and _agree((res.radius, res.rc, res.cc), lab["circle"], crit)):
+                ok += 1
+                seq["correct"].append(int(frame_no))
     assert n_b == 235
     assert ok / n_b >= 0.78, f"{ok}/{n_b}"
+    _check_baseline(BASELINE, found)
+
+
+def _check_baseline(path: Path, found: dict) -> None:
+    """*found* (per sequence: lists of frame numbers) must equal the tracked baseline.
+
+    Fails on any change, gains included, so every move is recorded deliberately:
+    run with BUBBLETRACK_UPDATE_BASELINES=1 to rewrite the file, then review its diff.
+    """
+    data = {"engine": ENGINE_VERSION, "sequences": {k: found[k] for k in sorted(found)}}
+    if os.environ.get("BUBBLETRACK_UPDATE_BASELINES") == "1" or not path.exists():
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=1) + "\n", encoding="utf-8")
+        return
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    changes = []
+    for name in sorted(set(saved["sequences"]) | set(found)):
+        old = saved["sequences"].get(name, {})
+        new = found.get(name, {})
+        for key in ("correct", "no_bubble_accepted"):
+            lost = sorted(set(old.get(key, [])) - set(new.get(key, [])))
+            won = sorted(set(new.get(key, [])) - set(old.get(key, [])))
+            if lost or won:
+                changes.append(f"{name} {key}: -{lost} +{won}")
+    assert not changes, (f"results differ from {path.name} ({saved.get('engine')} -> {ENGINE_VERSION}); "
+                         "if intended, rerun with BUBBLETRACK_UPDATE_BASELINES=1 and commit it:\n"
+                         + "\n".join(changes))
 
 
 def test_big_dark_bubble_in_dense_speckle_is_measured():
