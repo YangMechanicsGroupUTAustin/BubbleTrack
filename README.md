@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/zachtong/Bubble-Radius-Fitting/releases"><img src="https://img.shields.io/github/v/release/zachtong/Bubble-Radius-Fitting?style=flat-square&color=3b82f6" alt="Release"/></a>
+  <a href="https://github.com/YangMechanicsGroupUTAustin/BubbleTrack/releases"><img src="https://img.shields.io/github/v/release/YangMechanicsGroupUTAustin/BubbleTrack?style=flat-square&color=3b82f6" alt="Release"/></a>
   <img src="https://img.shields.io/badge/Python-3.10+-3776ab?style=flat-square&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS-lightgrey?style=flat-square" alt="Platform"/>
   <img src="https://img.shields.io/badge/GUI-PyQt6-41cd52?style=flat-square" alt="PyQt6"/>
@@ -23,8 +23,8 @@ Pre-built executables — no Python installation required:
 
 | Platform | Download | Instructions |
 |:--------:|:---------|:-------------|
-| **Windows** | [`BubbleTrack-Windows.exe`](https://github.com/zachtong/Bubble-Radius-Fitting/releases/latest) | Double-click to run |
-| **macOS** | [`BubbleTrack-macOS.zip`](https://github.com/zachtong/Bubble-Radius-Fitting/releases/latest) | Unzip, open `BubbleTrack.app` |
+| **Windows** | [`BubbleTrack-Windows.exe`](https://github.com/YangMechanicsGroupUTAustin/BubbleTrack/releases/latest) | Double-click to run |
+| **macOS** | [`BubbleTrack-macOS.zip`](https://github.com/YangMechanicsGroupUTAustin/BubbleTrack/releases/latest) | Unzip, open `BubbleTrack.app` |
 
 > **First time on macOS?** If you see "unidentified developer", right-click the app and choose *Open*.
 
@@ -42,7 +42,7 @@ Pre-built executables — no Python installation required:
 ## Features
 
 <p align="center">
-  <a href="https://zachtong.github.io/Bubble-Radius-Fitting/v3-highlights.html"><img src="https://img.shields.io/badge/See%20Full%20Feature%20Tour-6366f1?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xOCAxM3Y2YTIgMiAwIDAgMS0yIDJINWEyIDIgMCAwIDEtMi0yVjhhMiAyIDAgMCAxIDItMmg2Ii8+PHBvbHlsaW5lIHBvaW50cz0iMTUgMyAyMSAzIDIxIDkiLz48bGluZSB4MT0iMTAiIHkxPSIxNCIgeDI9IjIxIiB5Mj0iMyIvPjwvc3ZnPg==&logoColor=white" alt="Feature Tour"/></a>
+  <a href="https://yangmechanicsgrouputaustin.github.io/BubbleTrack/v3-highlights.html"><img src="https://img.shields.io/badge/See%20Full%20Feature%20Tour-6366f1?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIyNCIgaGVpZ2h0PSIyNCIgdmlld0JveD0iMCAwIDI0IDI0IiBmaWxsPSJub25lIiBzdHJva2U9IndoaXRlIiBzdHJva2Utd2lkdGg9IjIiPjxwYXRoIGQ9Ik0xOCAxM3Y2YTIgMiAwIDAgMS0yIDJINWEyIDIgMCAwIDEtMi0yVjhhMiAyIDAgMCAxIDItMmg2Ii8+PHBvbHlsaW5lIHBvaW50cz0iMTUgMyAyMSAzIDIxIDkiLz48bGluZSB4MT0iMTAiIHkxPSIxNCIgeDI9IjIxIiB5Mj0iMyIvPjwvc3ZnPg==&logoColor=white" alt="Feature Tour"/></a>
 </p>
 
 <p align="center">
@@ -60,13 +60,13 @@ Pre-built executables — no Python installation required:
 
 ### From Release (Recommended)
 
-Download from the [Releases](https://github.com/zachtong/Bubble-Radius-Fitting/releases) page and run directly.
+Download from the [Releases](https://github.com/YangMechanicsGroupUTAustin/BubbleTrack/releases) page and run directly.
 
 ### From Source
 
 ```bash
-git clone https://github.com/zachtong/Bubble-Radius-Fitting.git
-cd Bubble-Radius-Fitting
+git clone https://github.com/YangMechanicsGroupUTAustin/BubbleTrack.git
+cd BubbleTrack
 ```
 
 | Platform | Setup | Launch |
