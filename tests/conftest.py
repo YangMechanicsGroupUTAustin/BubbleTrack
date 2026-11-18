@@ -80,7 +80,7 @@ def _no_blocking_questions(monkeypatch):
 
     monkeypatch.setattr(edge_setup, "ask_bubble_reference", lambda _parent, _frame: True)
     monkeypatch.setattr(session_controller, "ask_save_review",
-                        lambda _parent, _name, _detail: "discard")
+                        lambda _parent, _name, _detail, _consequence=None: "discard")
 
 
 @pytest.fixture(scope="session")

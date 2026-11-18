@@ -487,9 +487,12 @@ class AppController:
     def _confirm_close(self) -> bool:
         """Return False to keep the window open.
 
-        A running fit needs confirmation.  Results are always kept in
-        ~/.bubbletrack/recovery/autosave.brt so closing never loses them.
+        A running fit needs confirmation; unsaved review decisions are asked about
+        as before loading another recording (the recovery autosave in
+        ~/.bubbletrack/recovery is overwritten by the next recording's).
         """
+        if not self.session_ctrl.confirm_leave(closing=True):
+            return False
         if self.auto_ctrl.is_busy():
             if not self._ask_yes_no(
                 "Fit in progress",

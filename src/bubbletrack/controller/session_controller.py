@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import QFileDialog
 
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.unsaved_review import (
-    CANCEL, SAVE, ask_save_review, describe, recording_name, review_counts, review_signature,
+    CANCEL, CLOSING, LEAVING, SAVE, ask_save_review, describe, recording_name, review_counts, review_signature,
 )
 from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SESSION_RESTORED, SOURCE_LOADED, EventBus
 from bubbletrack.model import config as config_module
@@ -235,16 +235,18 @@ class SessionController(BaseController):
         current = review_signature(self.state)
         return bool(current) and current != self._saved_review
 
-    def confirm_leave(self) -> bool:
-        """Before another recording replaces this one: True to go on.
+    def confirm_leave(self, *, closing: bool = False) -> bool:
+        """Before another recording replaces this one, or the window closes: True to go on.
 
         With unsaved decisions: "Save the review of <name> first?"
-        [Save session…] [Discard] [Cancel].
+        [Save session…] [Discard] [Cancel].  The recovery autosave is no substitute:
+        the next recording's first autosave overwrites it.
         """
         if not self.has_unsaved_review():
             return True
         detail = describe(review_counts(self.state))
-        answer = ask_save_review(self.w, recording_name(self.state), detail)
+        answer = ask_save_review(self.w, recording_name(self.state), detail,
+                                 CLOSING if closing else LEAVING)
         if answer == SAVE:
             return self.save_as()
         return answer != CANCEL
