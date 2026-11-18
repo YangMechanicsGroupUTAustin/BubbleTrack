@@ -80,8 +80,6 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-MAIN_CHECKOUT = Path(r"C:\Users\13014\OneDrive - The University of Texas at Austin\Documents\MATLABCodes"
-                     r"\Bubble_Radius_Fitting")
 FULL = ((1, 250), (1, 400))
 HERE = Path(__file__).resolve().parent
 
@@ -101,7 +99,7 @@ EX1_LOW = (75,)
 def _data_root() -> Path | None:
     env = os.environ.get("BUBBLETRACK_TEST_DATA")
     candidates = [Path(env)] if env else []
-    candidates += [p / "test_data" for p in HERE.parents] + [MAIN_CHECKOUT / "test_data"]
+    candidates += [p / "test_data" for p in HERE.parents]  # main checkout and its worktrees
     return next((c for c in candidates if (c / "lic").is_dir()), None)
 
 

@@ -8,6 +8,7 @@ processing across multiple CPU cores.  The module-level function
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
 from concurrent.futures import (
     FIRST_COMPLETED, ProcessPoolExecutor, ThreadPoolExecutor, wait,
@@ -214,6 +215,10 @@ class BatchWorker(QThread):
         try:
             executor = ThreadPoolExecutor if self.inline else ProcessPoolExecutor
             process, pool_kw = self._task()
+            if not self.inline:
+                # Never fork a process that runs Qt threads (Linux's default; deadlock-prone).
+                # Windows and macOS spawn already.
+                pool_kw = {**pool_kw, "mp_context": multiprocessing.get_context("spawn")}
             with executor(max_workers=n_workers, **pool_kw) as pool:
                 pending: dict = {}
 
