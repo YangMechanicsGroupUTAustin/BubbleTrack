@@ -130,10 +130,15 @@ def offer_session_restore(window: QWidget | None, session_ctrl, *,
     return path
 
 
-def on_about_to_quit(state) -> None:
-    """Persist the parameters, then record the clean exit (after the close autosave)."""
+def on_about_to_quit(state, *, saved: bool = True) -> None:
+    """Persist the parameters, then record the clean exit (after the close autosave).
+
+    When the close autosave could not be written (*saved* False) no clean exit is
+    recorded: the next launch then offers the last periodic autosave instead of nothing.
+    """
     save_config(state)
-    record_clean_exit()
+    if saved:
+        record_clean_exit()
 
 
 def main():
@@ -177,7 +182,8 @@ def main():
 
     # Save parameters and record a clean exit; the window's close guard has
     # already written the session autosave, so it is older than this stamp.
-    app.aboutToQuit.connect(lambda: on_about_to_quit(controller._get_state()))
+    app.aboutToQuit.connect(lambda: on_about_to_quit(
+        controller._get_state(), saved=not controller.session_ctrl.close_save_failed))
 
     # Show onboarding dialog on first launch
     if not is_onboarding_done():

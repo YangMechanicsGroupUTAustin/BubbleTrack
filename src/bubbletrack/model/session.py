@@ -6,6 +6,7 @@ session, **excluding** raw image data (only image paths are saved).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import os
@@ -135,6 +136,41 @@ def images_differ(saved: list | None, images) -> str | None:
             "results were not restored")
 
 
+_FINGERPRINT_BYTES = 1 << 16
+
+
+def source_fingerprint(state) -> str | None:
+    """A short hash of the recording's bytes: the size, start and end of a video, or of
+    the first and last frame files of a folder.  The same path or the same file names
+    can hold another shot (every HPV-X2 export is frame_001..256); None if unreadable."""
+    files = [state.video_path] if state.video_path else list(state.images[:1] + state.images[-1:])
+    if not files:
+        return None
+    digest = hashlib.sha256()
+    try:
+        for name in files:
+            with open(os_path(name), "rb") as fh:
+                size = os.fstat(fh.fileno()).st_size
+                digest.update(str(size).encode())
+                digest.update(fh.read(_FINGERPRINT_BYTES))
+                if size > 2 * _FINGERPRINT_BYTES:
+                    fh.seek(size - _FINGERPRINT_BYTES)
+                    digest.update(fh.read(_FINGERPRINT_BYTES))
+    except OSError:
+        return None
+    return digest.hexdigest()[:16]
+
+
+def source_differs(saved: str | None, state) -> str | None:
+    """Why results saved with the fingerprint *saved* do not belong to *state*'s recording."""
+    if not saved:
+        return None  # a session from before 3.1's fingerprint
+    current = source_fingerprint(state)
+    if current is None or current == saved:
+        return None
+    return "the recording's files differ from the measured ones; results were not restored"
+
+
 def session_json(data: dict) -> str:
     """*data* as strict JSON with one top-level key per line and compact values.
 
@@ -170,6 +206,7 @@ def save_session(filepath: str, state) -> None:
         "video_path": state.video_path,
         "image_no": state.image_no,
         "image_names": image_names(state),
+        "source_fingerprint": source_fingerprint(state),
         **session_parameters(state),
         "physical_set": sorted(state.physical_set),
         "radius": _to_json_array(state.radius),
@@ -278,7 +315,7 @@ def load_session(filepath: str) -> dict:
 
 
 def _check_identity(data: dict, filepath: str) -> None:
-    for key in ("folder_path", "video_path"):
+    for key in ("folder_path", "video_path", "source_fingerprint"):
         if data.get(key) is not None and not isinstance(data[key], str):
             raise ValueError(f"Session file '{filepath}' has a damaged {key}")
     names = data.get("image_names")

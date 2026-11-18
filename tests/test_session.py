@@ -187,6 +187,7 @@ class TestLoadSession:
         loaded = load_session(path)
         loaded.pop("version", None)
         loaded.pop("image_names", None)  # checked on restore, not a state field
+        loaded.pop("source_fingerprint", None)
         restored = update_state(AppState(), **loaded)
         assert restored.folder_path == "/data"
         assert restored.img_thr == 0.8
@@ -206,6 +207,7 @@ class TestLoadSession:
         loaded = load_session(path)
         loaded.pop("version", None)
         loaded.pop("image_names", None)  # checked on restore, not a state field
+        loaded.pop("source_fingerprint", None)
         restored = update_state(AppState(), **loaded)
         assert restored.folder_path == "/test"
         assert restored.image_no == 2

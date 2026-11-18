@@ -31,7 +31,7 @@ from bubbletrack.controller.unsaved_review import (
 from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SESSION_RESTORED, SOURCE_LOADED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.session import images_differ, load_session, save_session
+from bubbletrack.model.session import images_differ, load_session, save_session, source_differs
 from bubbletrack.model.state import AppState, update_state
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,8 @@ logger = logging.getLogger(__name__)
 RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_source",
                "fit_confidence", "fit_metrics", "fit_flags", "fit_locked",
                "fit_suggestion")
-_NOT_PARAMS = {"version", "folder_path", "video_path", "images", "image_names", *RESULT_KEYS}
+_NOT_PARAMS = {"version", "folder_path", "video_path", "images", "image_names",
+               "source_fingerprint", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
 
 AUTOSAVE_NAME = "autosave.brt"
@@ -127,15 +128,24 @@ def sanitize_params(params: dict, n_frames: int,
     return params, warnings
 
 
+def frame_count_differs(state: AppState, results: dict) -> str | None:
+    """Why the saved results cannot fit *state*'s frames by count, or None."""
+    radius = results.get("radius")
+    if radius is None or state.radius is None or len(radius) == len(state.radius):
+        return None
+    return (f"frame count changed ({len(radius)} saved, {len(state.radius)} now); "
+            "results were not restored")
+
+
 def restore_results(state: AppState, results: dict) -> str | None:
     """Copy saved result arrays into *state*; return a warning if impossible."""
     radius = results.get("radius")
     if radius is None or state.radius is None:
         return None
+    warning = frame_count_differs(state, results)
+    if warning:
+        return warning
     n = len(state.radius)
-    if len(radius) != n:
-        return (f"frame count changed ({len(radius)} saved, {n} now); "
-                "results were not restored")
     state.radius[:] = radius
     centers = results.get("circle_fit_par")
     if centers is not None and np.shape(centers) == (n, 2):
@@ -199,6 +209,7 @@ class SessionController(BaseController):
         # recording replaces the current one only after asking (confirm_leave).
         self._saved_review: tuple = ()
         self.choose_save_path: Callable[[], str] | None = None  # None: a file dialog
+        self.close_save_failed = False  # the autosave on close could not be written
         if file_ctrl is not None:  # None in tests of the autosave alone
             file_ctrl.confirm_leave = self.confirm_leave
         self.bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
@@ -274,19 +285,21 @@ class SessionController(BaseController):
 
         folder, params, results = split_session(data)
         names = data.get("image_names")
+        fingerprint = data.get("source_fingerprint")
         video = data.get("video_path") or ""
         if video:
-            return self._restore(path, params, results, video=video)
+            return self._restore(path, params, results, video=video, fingerprint=fingerprint)
         if folder and not os.path.isdir(folder):
             located = self._locate_folder(folder)
             if not located:
                 self.w.header.set_status(f"Image folder not found: {folder}", _ERR)
                 return False
             folder = located
-        return self._restore(path, params, results, folder=folder, names=names)
+        return self._restore(path, params, results, folder=folder, names=names,
+                             fingerprint=fingerprint)
 
-    def _restore(self, path: str, params: dict, results: dict, *,
-                 folder: str = "", video: str = "", names: list | None = None) -> bool:
+    def _restore(self, path: str, params: dict, results: dict, *, folder: str = "",
+                 video: str = "", names: list | None = None, fingerprint: str | None = None) -> bool:
         if video:
             if not os.path.isfile(video):
                 self.w.header.set_status(f"Video not found: {video}", _ERR)
@@ -309,7 +322,10 @@ class SessionController(BaseController):
             return False
 
         # The same number of frames is not the same recording (every HPV-X2 shot has 256)
-        warning = images_differ(names, self.state.images) or restore_results(self.state, results)
+        warning = (images_differ(names, self.state.images)
+                   or frame_count_differs(self.state, results)
+                   or source_differs(fingerprint, self.state)
+                   or restore_results(self.state, results))
         if warning:
             warnings.append(warning)
             # The session's choices belong to its own frames: strokes and confirmed
@@ -377,7 +393,9 @@ class SessionController(BaseController):
         self._autosave_dirty = False
         if not has_results(self.state):
             return None
-        return self._write_recovery(autosave_path())
+        written = self._write_recovery(autosave_path())
+        self.close_save_failed = written is None
+        return written
 
     def _on_run_state_changed(self, running: bool) -> None:
         if not running:

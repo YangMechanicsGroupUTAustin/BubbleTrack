@@ -69,6 +69,7 @@ class AutoController(BaseController):
         self._edge_job = None  # the run's EdgeJob, reused by tracking
         self._run_notes: list[str] = []  # routine notes, e.g. what tracking changed
         self._run_problems: list[str] = []  # what went wrong (named in the summary)
+        self._run_error: str | None = None  # the run failed as a whole (pool, video)
         self._ml_run = False  # the run measures with ML assist
         self._run_frames: tuple[int, ...] = ()  # frames of the current / last run
         # ML assist for Fit All: () -> (MLJob | None, note); set by MLAssistController.
@@ -199,15 +200,14 @@ class AutoController(BaseController):
         worker.frame_error.connect(partial(self._on_worker_frame_error, worker))
         worker.frame_meta.connect(partial(self._on_worker_frame_meta, worker))
         worker.finished.connect(partial(self._on_worker_finished, worker))
-        worker.error.connect(
-            lambda msg: self.w.header.set_status(msg, "#f59e0b"),
-        )
+        worker.error.connect(partial(self._on_worker_error, worker))
 
         self._worker = worker
         self._tracker = None
         self._edge_job = edge_job
         self._run_notes = []
         self._run_problems = list(problems)
+        self._run_error = None
         self._ml_run = ml_job is not None and edge_job is not None
         self._run_frames = tuple(range(start_idx, end_idx + 1) if frames is None else frames)
         self._protected = protected
@@ -332,14 +332,22 @@ class AutoController(BaseController):
             self._frame_errors += 1
             self._failed_frames.add(idx)
 
+    def _on_worker_error(self, worker, message: str) -> None:
+        if worker is self._worker:
+            self._run_error = message
+            self.w.header.set_status(message, "#f59e0b")
+
     def _on_worker_finished(self, worker) -> None:
         if worker is not self._worker:
             return
-        if (not self._stop_requested and self._edge_job is not None
+        # A run that failed as a whole ended early, like a stopped one: the frames it
+        # did not reach hold older results, so nothing is tracked and it says so.
+        ended_early = self._stop_requested or self._run_error is not None
+        if (not ended_early and self._edge_job is not None
                 and self.w.left_panel.measure_panel.edge_box.tracking_enabled()):
             self._start_tracking()
         else:
-            self._finish_run(stopped=self._stop_requested)
+            self._finish_run(stopped=ended_early)
 
     # -- sequence tracking (last step of an Edge-mode run) ----------------- #
 
@@ -504,11 +512,15 @@ class AutoController(BaseController):
         """The run's line in the header (see ``run_summary``)."""
         state, frames = self.state, list(self._run_frames)
         problems, details = list(self._run_problems), list(self._run_notes)
+        if self._run_error is not None:
+            problems.insert(0, self._run_error)
         if self._ml_run and state.radius is not None:
             from bubbletrack.model.ml_assist import run_counts, run_summary
             details.append(run_summary(run_counts(state, self._run_frames)))
         if self._frame_errors:
-            problems.append(f"{plural(self._frame_errors, 'frame')} could not be read")
+            # A read or a fit error: either way the frame keeps what it had (see the log)
+            problems.append(f"{plural(self._frame_errors, 'frame')} failed and kept "
+                            "their previous result (see the log)")
         if self._autosave_failed:
             problems.append("autosave failed (is the folder read-only?)")
         if scores is not None and state.radius is not None and not stopped:

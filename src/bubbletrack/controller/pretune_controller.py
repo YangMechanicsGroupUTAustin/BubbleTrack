@@ -237,9 +237,11 @@ class PretuneController(BaseController):
             suggestion_view.draw_guess(self.state, self.w.original_panel, idx)
         refresh_chart(self.state, self.w)
         self.w.left_panel.measure_panel.hide_quality()
-        self.w.header.set_status(*edge_support.status_text(idx, fit))
         if store:  # nothing changed on a kept frame: no re-track, no autosave
+            self.w.header.set_status(*edge_support.status_text(idx, fit))
             self._results_changed()
+        else:
+            self._say_kept(idx, fit.radius)
 
     def on_pretune_fit(self) -> None:
         """Detect + fit circle for the current single frame."""
@@ -315,7 +317,10 @@ class PretuneController(BaseController):
                     label = (f"Area-equivalent R = {radius:.1f} px; regions = {count}"
                              if self.state.detection_mode == "area"
                              else f"R = {radius:.1f} px")
-                    self.w.header.set_status(label, "#10b981")
+                    if store:
+                        self.w.header.set_status(label, "#10b981")
+                    else:
+                        self._say_kept(idx, radius)
 
                     # Show quality metrics
                     roi_h = self.state.gridx[1] - self.state.gridx[0] + 1
@@ -343,7 +348,16 @@ class PretuneController(BaseController):
         state = self.state
         if state.fit_locked is not None and state.fit_locked[idx]:
             return True
-        return bool(user_confirmed_mask(state.fit_source, state.total_frames)[idx])             if state.fit_source is not None else False
+        if state.fit_source is None:
+            return False
+        return bool(user_confirmed_mask(state.fit_source, state.total_frames)[idx])
+
+    def _say_kept(self, idx: int, radius: float) -> None:
+        """The fit was shown, not stored: say what the frame keeps (export uses that)."""
+        found = f"this fit, R = {radius:.1f} px," if radius > 0 else "this fit"
+        self.w.header.set_status(
+            f"Frame {idx + 1} kept R = {float(self.state.radius[idx]):.1f} px (locked or your own "
+            f"fit); {found} was not stored", "#f59e0b")
 
     # -- Auto-tune -------------------------------------------------------- #
 

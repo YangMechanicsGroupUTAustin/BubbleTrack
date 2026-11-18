@@ -210,11 +210,17 @@ def locate_rmax(radius: np.ndarray, rmax_fit_length: int) -> RmaxEstimate:
     fit_frames = window_frames[valid_mask[window_frames - 1]]
     vertex = _fit_parabola_vertex(fit_frames, R[fit_frames - 1], window)
 
+    boundary = _boundary_warning(peak_frame, valid_indices, half)
+    # A rejected fit away from the data edges has no other warning to explain it
+    fallback = None if vertex is not None or boundary is not None else (
+        f"Rmax: the parabola fit around frame {peak_frame} was rejected (no clear peak), "
+        "so Rmax and t=0 are the largest measured frame itself.")
     warnings = tuple(
         w for w in (
-            _boundary_warning(peak_frame, valid_indices, half),
+            boundary,
             _outlier_warning(R, valid_indices, peak_pos),
             _gap_warning(fit_frames),
+            fallback,
         )
         if w is not None
     )

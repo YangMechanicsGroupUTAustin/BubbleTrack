@@ -208,9 +208,8 @@ def _process_frames(
                 centers[i] = [fit.center_row, fit.center_col]
                 edge_pts[i] = fit.edge_xy
                 region_count[i] = fit.region_count
-        except Exception as exc:
-            if verbose:
-                print(f"Frame {i + 1}: {exc}", file=sys.stderr)
+        except Exception as exc:  # unreadable or unprocessable: always said, unlike a rejected fit
+            print(f"Frame {i + 1}: {exc}", file=sys.stderr)
 
         if (i + 1) % 50 == 0 or i == n - 1:
             print(f"Processed {i + 1}/{n} frames")
@@ -228,16 +227,17 @@ def _write_output(
     scale: float,
     region_count: np.ndarray | None = None,
     metadata: dict | None = None,
-) -> None:
-    """Write results to the chosen format (region counts only for area mode)."""
+) -> str | None:
+    """Write results to the chosen format (region counts only for area mode); returns
+    the export's warning about t = 0 (Rmax), if any."""
     if fmt == "csv":
-        export_csv(output_path, radius, centers, fps=fps, um2px=scale,
-                   region_count=region_count, metadata=metadata)
-    elif fmt == "xlsx":
-        export_excel(output_path, radius, centers, fps=fps, um2px=scale,
-                     region_count=region_count, metadata=metadata)
-    else:
-        export_r_data(output_path, radius, centers, edge_pts, region_count, metadata=metadata)
+        return export_csv(output_path, radius, centers, fps=fps, um2px=scale,
+                          region_count=region_count, metadata=metadata)
+    if fmt == "xlsx":
+        return export_excel(output_path, radius, centers, fps=fps, um2px=scale,
+                            region_count=region_count, metadata=metadata)
+    export_r_data(output_path, radius, centers, edge_pts, region_count, metadata=metadata)
+    return None
 
 
 def run_metadata(args: argparse.Namespace, images: list[str], gridx: tuple[int, int],
@@ -345,9 +345,8 @@ def _process_frames_edge(images: list[str], args: argparse.Namespace,
                 edge_pts[i] = fit.edge_xy
             elif args.verbose:
                 print(f"Frame {i + 1}: {fit.rejected_reason}", file=sys.stderr)
-        except Exception as exc:
-            if args.verbose:
-                print(f"Frame {i + 1}: {exc}", file=sys.stderr)
+        except Exception as exc:  # unreadable or unprocessable: always said, unlike a rejected fit
+            print(f"Frame {i + 1}: {exc}", file=sys.stderr)
         if (i + 1) % 50 == 0 or i == n - 1:
             print(f"Processed {i + 1}/{n} frames")
     return radius, centers, edge_pts, np.zeros(n, dtype=int), ref_idx
@@ -371,7 +370,7 @@ def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
         print(f"Note: time and size columns use {fps:g} fps and {scale:g} um/px "
               "(defaults; pass --fps and --scale for this recording)", file=sys.stderr)
     try:
-        _write_output(
+        warning = _write_output(
             fmt, args.output, radius, centers, edge_pts, fps, scale,
             region_count if args.mode == "area" else None,
             metadata=run_metadata(args, images, gridx, gridy, fps, scale, reference_index),
@@ -379,6 +378,8 @@ def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
     except OSError as exc:  # full disk, no permission, file held open
         print(f"Cannot write {args.output}: {exc}", file=sys.stderr)
         sys.exit(1)
+    if warning:  # the GUI shows it in the status line
+        print(f"Warning: {warning}", file=sys.stderr)
     print(f"Done. {n_valid}/{len(images)} frames fitted. Output: {args.output}")
 
 

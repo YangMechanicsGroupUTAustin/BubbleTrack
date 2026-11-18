@@ -6,6 +6,7 @@ import csv
 import logging
 
 import cv2
+import numpy as np
 import pytest
 
 from _golden_cases import SceneSpec, render_scene
@@ -252,3 +253,24 @@ class TestProvenance:
         _run(frames, out, "--mode", "edge")
         data = scipy.io.loadmat(str(out))
         assert "BubbleTrackMeta" in data
+
+
+class TestSaysWhatWentWrong:
+    """Things the GUI reports and the CLI used to keep to itself (2026-11-18 audit)."""
+
+    def test_the_rmax_warning_is_printed(self, tmp_path, capsys):
+        from conftest import write_sequence
+
+        folder = write_sequence(tmp_path / "rising", np.linspace(20, 70, 8))  # peak at the end
+        cli.main(["--folder", str(folder), "--output", str(tmp_path / "out.csv"),
+                  "--fps", "1e6", "--scale", "3.2", "--mode", "edge"])
+        assert "Warning:" in capsys.readouterr().err
+
+    def test_an_unreadable_frame_is_named_without_verbose(self, tmp_path, capsys):
+        from conftest import write_sequence
+
+        folder = write_sequence(tmp_path / "seq", np.full(6, 40.0))
+        victim = sorted(folder.iterdir())[4]
+        victim.write_bytes(victim.read_bytes()[:200])  # truncated TIFF
+        cli.main(["--folder", str(folder), "--output", str(tmp_path / "out.mat"), "--mode", "edge"])
+        assert "Frame 5:" in capsys.readouterr().err
