@@ -33,7 +33,16 @@ def test_a_long_folder_name_is_elided_and_the_count_stays(qapp, gui, make_sequen
     hint = zone.sizeHint().width()
     controller.file_ctrl.on_folder_selected(str(folder))
     first, second = zone.summary_text().split("\n")
-    assert first.startswith("✓ 06_") and "…" in first
+    # Whether the name needs eliding depends on the platform's font (headless
+    # Linux/macOS runners measure text much narrower), so judge with its metrics.
+    metrics = zone._prompt_label.fontMetrics()
+    width = max(zone._prompt_label.width(), zone.width() - 16, 40)
+    assert first.startswith("✓ 06_")
+    assert metrics.horizontalAdvance(first) <= width
+    if metrics.horizontalAdvance(f"✓ {name}") > width:
+        assert "…" in first
+    else:
+        assert first == f"✓ {name}"
     assert second == "3 images"
     assert zone.sizeHint().width() == hint  # the name does not widen the zone
     assert zone._prompt_label.toolTip() == str(folder)
