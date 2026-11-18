@@ -43,6 +43,35 @@ def _no_autosave_into_data(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _settle_qt():
+    """After each test: close its still-shown top-level widgets, let Qt deliver
+    their pending events and collect them now.
+
+    Otherwise a widget a test left shown (a chart, a panel) is destroyed by
+    Python's garbage collector at a random moment of a LATER test, while Qt
+    still has events queued for it: on macOS runners that segfaulted inside
+    the next test's processEvents() (2026-11-18).
+    """
+    yield
+    import gc
+    import sys
+
+    if "PyQt6.QtWidgets" not in sys.modules:
+        return
+    from PyQt6.QtWidgets import QApplication
+
+    app = QApplication.instance()
+    if app is None or not app.topLevelWidgets():
+        return
+    for widget in app.topLevelWidgets():
+        if widget.isVisible():
+            widget.close()
+    app.processEvents()
+    gc.collect()
+    app.processEvents()
+
+
+@pytest.fixture(autouse=True)
 def _no_blocking_questions(monkeypatch):
     """Questions that would block an offscreen test answer like the app used to
     before they were asked: a reference with a bubble is used, and loading another
