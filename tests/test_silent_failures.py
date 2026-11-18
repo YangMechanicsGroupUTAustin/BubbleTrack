@@ -233,3 +233,57 @@ def test_an_infinite_radius_is_never_rmax():
     radius = np.array([np.inf] + list(50.0 - 0.1 * (np.arange(21) - 10.0) ** 2))
     assert not valid_frame_mask(radius)[0]
     assert np.isfinite(locate_rmax(radius, 9).radius)
+
+
+class TestFingerprintSchemes:
+    """The fifth review: decodes that differ per read or per computer, older values."""
+
+    def test_16_bit_planar_rgb_tiffs_hash_the_same_every_time(self, tmp_path):
+        import tifffile
+
+        from bubbletrack.model.recording_identity import FILE_BYTES, recording_fingerprint
+
+        rgb = (np.random.default_rng(1).random((3, 40, 60)) * 65535).astype(np.uint16)
+        for name in ("a_001.tif", "a_002.tif"):
+            tifffile.imwrite(str(tmp_path / name), rgb, photometric="rgb", planarconfig="separate")
+        files = [str(tmp_path / "a_001.tif"), str(tmp_path / "a_002.tif")]
+        first = recording_fingerprint(files)
+        assert first.startswith(FILE_BYTES)  # colour: bytes, whatever the decoder returns
+        assert all(recording_fingerprint(files) == first for _ in range(5))
+
+    def test_jpeg_frames_are_hashed_by_their_bytes(self, tmp_path):
+        import cv2
+
+        from bubbletrack.model.recording_identity import FILE_BYTES, recording_fingerprint
+
+        cv2.imwrite(str(tmp_path / "a.jpg"), np.full((20, 20), 128, np.uint8))
+        assert recording_fingerprint([str(tmp_path / "a.jpg")]).startswith(FILE_BYTES)
+
+    def test_a_value_of_an_older_scheme_is_no_fingerprint(self, gui, make_sequence, tmp_path):
+        import json
+
+        _window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("A", 4)))
+        controller._get_state().radius[:] = [30.0, 31.0, 32.0, 33.0]
+        session = tmp_path / "a.brt"
+        assert controller.session_ctrl.save(str(session))
+        data = json.loads(session.read_text(encoding="utf-8"))
+        session.write_text(json.dumps({**data, "source_fingerprint": "0123456789abcdef"}),
+                           encoding="utf-8")
+        assert controller.session_ctrl.load(str(session))
+        assert controller._get_state().radius[3] == 33.0
+
+    def test_a_fingerprint_unreadable_now_keeps_the_saved_one(self, gui, make_sequence, tmp_path,
+                                                              monkeypatch):
+        from bubbletrack.controller import file_controller
+
+        _window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(make_sequence("A", 4)))
+        saved = controller._get_state().source_fingerprint
+        controller._get_state().radius[:] = [30.0, 31.0, 32.0, 33.0]
+        session = tmp_path / "a.brt"
+        assert controller.session_ctrl.save(str(session))
+        monkeypatch.setattr(file_controller, "recording_fingerprint", lambda *a, **k: None)
+        assert controller.session_ctrl.load(str(session))  # an online-only last frame
+        assert controller._get_state().radius[3] == 33.0
+        assert controller._get_state().source_fingerprint == saved

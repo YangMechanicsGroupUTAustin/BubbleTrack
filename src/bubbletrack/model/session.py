@@ -138,8 +138,12 @@ def images_differ(saved: list | None, images) -> str | None:
 def source_differs(saved: str | None, state) -> str | None:
     """Why results saved with the fingerprint *saved* do not belong to *state*'s
     recording (see ``recording_identity``), or None."""
+    from bubbletrack.model.recording_identity import SCHEMES
+
     current = state.source_fingerprint
-    if not saved or not current or current == saved:  # no fingerprint: before 3.1, unreadable
+    # None: a session from before 3.1, or a frame unreadable now; an unknown scheme:
+    # a development build that hashed differently
+    if not saved or not current or not saved.startswith(SCHEMES) or current == saved:
         return None
     return "the recording's frames differ from the measured ones; results were not restored"
 

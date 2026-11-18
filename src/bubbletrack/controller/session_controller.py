@@ -31,6 +31,7 @@ from bubbletrack.controller.unsaved_review import (
 from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SESSION_RESTORED, SOURCE_LOADED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.model.recording_identity import SCHEMES
 from bubbletrack.model.session import images_differ, load_session, save_session, source_differs
 from bubbletrack.model.state import AppState, update_state
 
@@ -327,6 +328,11 @@ class SessionController(BaseController):
                    or frame_count_differs(self.state, results)
                    or source_differs(fingerprint, self.state)
                    or restore_results(self.state, results))
+        if (not warning and self.state.source_fingerprint is None
+                and isinstance(fingerprint, str) and fingerprint.startswith(SCHEMES)):
+            # A frame unreadable now (an online-only file): keep the saved identity, or
+            # the next save would write None and the protection would be gone for good
+            self._update(source_fingerprint=fingerprint)
         if warning:
             warnings.append(warning)
             # The session's choices belong to its own frames: strokes and confirmed
