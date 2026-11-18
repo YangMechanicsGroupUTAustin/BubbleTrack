@@ -218,7 +218,6 @@ def build_export_metadata(
         "removing_obj_radius": state.removing_obj_radius,
         "area_max_regions": state.area_max_regions,
         "gradient_boundary": state.gradient_boundary,
-        "temporal_refine": state.temporal_refine,
         "bubble_cross_edges": state.bubble_cross_edges,
         "gridx": state.gridx,
         "gridy": state.gridy,

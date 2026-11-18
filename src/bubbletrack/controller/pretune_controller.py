@@ -89,7 +89,6 @@ class PretuneController(BaseController):
             detection_mode=p["detection_mode"],
             area_max_regions=p["area_max_regions"],
             gradient_boundary=p["gradient_boundary"],
-            temporal_refine=p["temporal_refine"],
             edge_definition=p["edge_definition"],
             edge_polarity=p["edge_polarity"],
             bubble_non_round=non_round,

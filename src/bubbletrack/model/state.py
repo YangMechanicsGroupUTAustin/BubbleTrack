@@ -73,7 +73,6 @@ class AppState:
     detection_mode: str = "intensity"  # "intensity" | "gradient" | "area" | "edge"
     area_max_regions: int = 1
     gradient_boundary: float = 0.0  # gradient mode ring index: 0/0.5/1 -> 1st/2nd/3rd
-    temporal_refine: bool = False  # use neighbouring frames to repair weak fits
 
     # Edge engine (detection_mode == "edge")
     edge_definition: str = "steep"  # "steep" (50% of the steep edge) | "outer" extent

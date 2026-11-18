@@ -297,7 +297,6 @@ class AppController:
             "detection_mode": self._state.detection_mode,
             "area_max_regions": self._state.area_max_regions,
             "gradient_boundary": self._state.gradient_boundary,
-            "temporal_refine": self._state.temporal_refine,
             "edge_definition": self._state.edge_definition,
             "edge_polarity": self._state.edge_polarity,
             "bubble_non_round": self._state.bubble_non_round,

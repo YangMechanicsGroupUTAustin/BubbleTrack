@@ -78,7 +78,6 @@ def session_parameters(state) -> dict:
         "detection_mode": state.detection_mode,
         "area_max_regions": state.area_max_regions,
         "gradient_boundary": state.gradient_boundary,
-        "temporal_refine": state.temporal_refine,
         "edge_definition": state.edge_definition,
         "edge_polarity": state.edge_polarity,
         "bubble_non_round": bool(getattr(state, "bubble_non_round", False)),
