@@ -23,7 +23,7 @@ from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
 from bubbletrack.model.config import load_config, ui_setting
-from bubbletrack.model.result_history import ResultHistory
+from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.state import AppState, clear_frame_result, update_state
 from bubbletrack.ui.edge_options import STEEP_EDGE
 from bubbletrack.ui.measure_panel import AUTO_METHOD
@@ -250,9 +250,9 @@ class AppController:
         # "Fix frame N..." is wired by the Review dock)
         chart = self.w.radius_chart
         chart.refit_range_requested.connect(self.auto_ctrl.fit_range)
-        chart.lock_range_requested.connect(partial(self._on_lock_range, locked=True))
-        chart.unlock_range_requested.connect(partial(self._on_lock_range, locked=False))
-        chart.no_bubble_range_requested.connect(self._on_mark_no_bubble)
+        chart.lock_range_requested.connect(partial(self._on_chart_lock, locked=True))
+        chart.unlock_range_requested.connect(partial(self._on_chart_lock, locked=False))
+        chart.no_bubble_range_requested.connect(self._on_chart_no_bubble)
 
         # Compare mode change — refresh display immediately
         self.w.compare_mode_changed.connect(self._on_compare_mode_changed)
@@ -353,6 +353,24 @@ class AppController:
         """0-based frames start..end (inclusive), clipped to the loaded results."""
         n = 0 if self._state.radius is None else len(self._state.radius)
         return range(max(start, 0), min(end, n - 1) + 1)
+
+    def _undoable(self, label: str, start: int, end: int, edit) -> None:
+        """Run *edit* on start..end as one entry of the undo history (Ctrl+Z)."""
+        frames = list(self._frames_in(start, end))
+        if not frames:
+            return
+        before = snapshot(self._state, frames)
+        edit()
+        span = f"frame {start + 1}" if start == end else f"frames {start + 1}–{end + 1}"
+        self.history.push(record_edit(self._state, f"{label} of {span}", before))
+
+    def _on_chart_lock(self, start: int, end: int, *, locked: bool) -> None:
+        self._undoable("lock" if locked else "unlock", start, end,
+                       partial(self._on_lock_range, start, end, locked=locked))
+
+    def _on_chart_no_bubble(self, start: int, end: int) -> None:
+        self._undoable("no-bubble mark", start, end,
+                       partial(self._on_mark_no_bubble, start, end))
 
     def _on_lock_range(self, start: int, end: int, *, locked: bool) -> None:
         """Lock the fitted frames of start..end (or unlock the whole range)."""

@@ -92,3 +92,24 @@ def test_frames_marked_no_bubble_export_as_no_bubble_labels(app):
     window, _, state, _ = app
     window.radius_chart.no_bubble_range_requested.emit(2, 2)
     assert frame_label(app_result(state, 2)).status == LABEL_NO_BUBBLE
+
+
+def test_a_chart_no_bubble_mark_is_one_undo(app):
+    """Ctrl+Z after the chart's "Mark as no bubble" brings the frames back, and
+    does not undo an older edit instead."""
+    window, controller, state, _ = app
+    before = state.radius.copy()
+    window.radius_chart.no_bubble_range_requested.emit(4, 8)
+    assert (state.radius[4:9] == -1.0).all()
+    controller._on_undo()
+    np.testing.assert_array_equal(state.radius, before)
+    assert not state.fit_locked.any()
+    assert "no-bubble mark of frames 5–9" in window.header._status_label.text()
+
+
+def test_a_chart_lock_is_one_undo(app):
+    window, controller, state, _ = app
+    window.radius_chart.lock_range_requested.emit(2, 3)
+    assert state.fit_locked[2] and state.fit_locked[3]
+    controller._on_undo()
+    assert not state.fit_locked.any()
