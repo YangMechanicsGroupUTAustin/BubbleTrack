@@ -355,9 +355,11 @@ class PretuneController(BaseController):
     def _say_kept(self, idx: int, radius: float) -> None:
         """The fit was shown, not stored: say what the frame keeps (export uses that)."""
         found = f"this fit, R = {radius:.1f} px," if radius > 0 else "this fit"
+        kept = float(self.state.radius[idx])
+        kept_text = f"R = {kept:.1f} px" if kept > 0 else '"no bubble"'
         self.w.header.set_status(
-            f"Frame {idx + 1} kept R = {float(self.state.radius[idx]):.1f} px (locked or your own "
-            f"fit); {found} was not stored", "#f59e0b")
+            f"Frame {idx + 1} kept {kept_text} (locked or your own fit); {found} was not stored",
+            "#f59e0b")
 
     # -- Auto-tune -------------------------------------------------------- #
 

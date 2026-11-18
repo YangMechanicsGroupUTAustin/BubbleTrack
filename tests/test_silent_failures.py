@@ -121,21 +121,20 @@ def test_a_failed_close_autosave_keeps_the_last_one_on_offer(gui, make_sequence,
     assert sc.claim_pending_recovery() is not None
 
 
-def test_a_rejected_rmax_fit_is_said(tmp_path):
-    """A noisy plateau gives a convex best-fit parabola: Rmax and t=0 quietly became the
-    largest measured frame, with RmaxFitLength still recorded as if fitted."""
-    from bubbletrack.model.export import export_rof_t_data
+def test_a_rejected_rmax_fit_is_logged_not_warned(caplog):
+    """A noisy plateau gives a convex best-fit parabola and the largest frame is used.
+    On broad noisy peaks that happens in a quarter of ordinary recordings and is as good
+    as an accepted vertex, so it is logged, not shown as a warning."""
+    import logging
+
     from bubbletrack.model.rmax import locate_rmax
 
+    caplog.set_level(logging.INFO)
     plateau = [49, 47, 46.5, 47, 50, 47, 46.5, 47, 49]
     radius = np.array(list(np.linspace(10, 45, 8)) + plateau + list(np.linspace(45, 10, 8)))
     estimate = locate_rmax(radius, 9)
-    assert not estimate.fitted
-    assert any("rejected" in w for w in estimate.warnings)
-    _ok, message = export_rof_t_data(str(tmp_path / "r.mat"), radius, 3.2, 1e6, 9)
-    assert "rejected" in message
-    clear = 50.0 - 0.1 * (np.arange(21) - 10.0) ** 2
-    assert not locate_rmax(clear, 9).warnings  # a clear peak: nothing to say
+    assert not estimate.fitted and not any("rejected" in w for w in estimate.warnings)
+    assert any("rejected" in r.getMessage() for r in caplog.records)
 
 
 def test_fit_current_on_a_kept_frame_says_what_it_keeps(gui, make_sequence):
@@ -179,3 +178,50 @@ def test_a_frame_whose_fit_raises_is_not_called_unreadable(qapp, gui, make_seque
     _fit_all(qapp, controller)
     text = window.header.status()[0]
     assert "1 frame failed and kept their previous result" in text and "could not be read" not in text
+
+
+
+def test_the_fingerprint_is_of_the_frames_measured_not_of_the_files_at_save(
+        gui, make_sequence, tmp_path):
+    """Shot B exported over shot A while A's results were open, then saved: the session
+    carried B's fingerprint with A's results (and refused A's own files later)."""
+    window, controller = gui
+    folder = make_sequence("A", 6)
+    controller.file_ctrl.on_folder_selected(str(folder))
+    controller._get_state().radius[:] = [30.0, 31.0, 32.0, 33.0, 34.0, 35.0]
+    make_sequence("A", 6, r_min=10, r_max=12)  # B written while A is open
+    session = tmp_path / "a.brt"
+    assert controller.session_ctrl.save(str(session))
+    assert controller.session_ctrl.load(str(session))
+    assert not np.any(controller._get_state().radius > 0)
+    assert "results were not restored" in window.header.status()[0]
+
+
+def test_the_same_frames_rewritten_with_other_metadata_still_match(gui, make_sequence, tmp_path):
+    import cv2
+    import tifffile
+
+    _window, controller = gui
+    folder = make_sequence("A", 6)
+    controller.file_ctrl.on_folder_selected(str(folder))
+    controller._get_state().radius[:] = [30.0, 31.0, 32.0, 33.0, 34.0, 35.0]
+    session = tmp_path / "a.brt"
+    assert controller.session_ctrl.save(str(session))
+    first = sorted(folder.iterdir())[0]
+    pixels = cv2.imread(str(first), cv2.IMREAD_UNCHANGED)
+    tifffile.imwrite(str(first), pixels, description="opened and saved by a viewer")
+    assert controller.session_ctrl.load(str(session))
+    assert controller._get_state().radius[5] == 35.0
+
+
+def test_fit_current_on_a_no_bubble_frame_says_no_bubble(gui, make_sequence):
+    from bubbletrack.model.state import update_state
+
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6, r_min=20, r_max=40)))
+    controller._set_state(update_state(controller._get_state(), detection_mode="edge"))
+    controller._on_chart_no_bubble(2, 2)
+    controller.retrack.cancel()
+    controller.file_ctrl.on_frame_changed(2)
+    controller.pretune_ctrl.on_pretune_fit()
+    assert window.header.status()[0].startswith('Frame 3 kept "no bubble"')

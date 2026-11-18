@@ -22,6 +22,7 @@ from bubbletrack.model.image_io import (
     load_and_normalize,
     normalize_frame,
 )
+from bubbletrack.model.recording_identity import recording_fingerprint
 from bubbletrack.ui.frame_scrubber import frame_file_labels
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,7 @@ class FileController(BaseController):
         self._update(
             folder_path=folder,
             images=tuple(images),
+            source_fingerprint=recording_fingerprint(images),
             image_no=0,
             img_grayscale_max=bit_depth,
             reference_frame=None,  # the previous recording's choices do not apply here
@@ -179,6 +181,7 @@ class FileController(BaseController):
             video_reader=reader,
             folder_path=os.path.dirname(video_path),
             images=virtual_images,
+            source_fingerprint=recording_fingerprint((), video_path, reader),
             image_no=0,
             img_grayscale_max=255,  # corrected from the first frame below
             reference_frame=None,  # the previous recording's choices do not apply here

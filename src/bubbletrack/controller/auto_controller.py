@@ -506,7 +506,7 @@ class AutoController(BaseController):
         self._show_summary(stopped, scores)
         self.bus.emit(RUN_FINISHED, {"stopped": stopped, "ml": self._ml_run,
                                        "edge": self._edge_job is not None,
-                                       "frames": self._run_frames})
+                                       "frames": self._run_frames, "error": self._run_error})
 
     def _show_summary(self, stopped: bool, scores) -> None:
         """The run's line in the header (see ``run_summary``)."""

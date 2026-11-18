@@ -331,6 +331,8 @@ class MLAssistController:
         measured = int(np.sum(np.asarray(state.radius)[frames] > 0)) if frames else 0
         text = steps.summary_text(measured, len(frames), self._app.review.check_count,
                                   stopped=bool(info.get("stopped")))
+        if info.get("error"):  # the run failed as a whole: never hide why
+            text += f" — {info['error']}"
         details = self.w.header.status_details()
         self.teach.leave()
         self._show_review(first_row=True)

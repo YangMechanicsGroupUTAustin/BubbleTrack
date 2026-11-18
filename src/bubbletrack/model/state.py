@@ -48,6 +48,7 @@ class AppState:
     images: tuple[str, ...] = ()
     folder_path: str = ""
     image_no: int = 0  # 0-indexed (UI displays +1)
+    source_fingerprint: str | None = None  # of the recording as loaded (recording_identity)
 
     # Threshold / binarisation
     img_thr: float = 0.5  # adaptive sensitivity [0, 1]
