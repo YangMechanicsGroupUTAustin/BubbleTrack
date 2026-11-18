@@ -1,2 +1,0 @@
-matlab_implementation/example/*.tif filter=lfs diff=lfs merge=lfs -text
-matlab_implementation/example/*.tiff filter=lfs diff=lfs merge=lfs -text

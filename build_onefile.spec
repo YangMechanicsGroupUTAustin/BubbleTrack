@@ -146,7 +146,7 @@ if IS_MAC:
         icon=icon_icns if os.path.exists(icon_icns) else None,
         bundle_identifier='com.utaustin.bubbletrack',
         info_plist={
-            'CFBundleShortVersionString': '3.0.0',
+            'CFBundleShortVersionString': '3.1.0',
             'NSHighResolutionCapable': True,
         },
     )
