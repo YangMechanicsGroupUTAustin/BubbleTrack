@@ -205,3 +205,21 @@ def test_fit_current_frame_on_a_locked_frame_announces_nothing(gui, make_sequenc
     controller.pretune_ctrl.on_pretune_fit()
     assert float(controller._get_state().radius[4]) == radius
     assert not events and not controller.retrack.timer.isActive()
+
+
+def test_a_preset_is_checked_like_the_config_file(gui):
+    """Huge or infinite numbers overflowed the sliders (OverflowError escaped the load)."""
+    import pytest
+
+    window, _controller = gui
+    panel = window.left_panel.measure_panel
+    saved = panel.preset()
+    for bad in ({"threshold": float("inf")}, {"threshold": 10 ** 400}, {"removing_factor": "x"},
+                {"area_max_regions": float("inf")}, {"edge_polarity": "x"}):
+        with pytest.raises(ValueError):
+            panel.apply_preset({**saved, **bad})
+        assert panel.preset() == saved
+    panel.apply_preset(saved)  # a saved preset loads back unchanged
+    assert panel.preset() == saved
+    panel.apply_preset({**saved, "removing_factor": 1e308})  # out of range: clamped, as in config
+    assert panel.get_removing_factor_slider() == 100

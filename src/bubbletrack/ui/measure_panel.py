@@ -10,14 +10,14 @@ from __future__ import annotations
 
 import json
 import logging
-import math
 
 from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QVBoxLayout, QWidget,
 )
 
-from bubbletrack.model.config import DETECTION_MODE_LABELS, DETECTION_MODES
+from bubbletrack.model.atomic_write import write_text_atomic
+from bubbletrack.model.config import DETECTION_MODE_LABELS, DETECTION_MODES, check_session_settings
 from bubbletrack.model.constants import AUTO_METHOD
 from bubbletrack.ui.classic_controls import ClassicControls
 from bubbletrack.ui.edge_options import EdgeOptionsBox
@@ -43,8 +43,8 @@ _FILTER_KEYS = (
     "gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius", "detection_mode",
     "edge_polarity", "bubble_non_round", "area_max_regions", "gradient_boundary", "temporal_refine",
 )
-_NUMERIC_FILTER_KEYS = ("gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius",
-                        "area_max_regions", "gradient_boundary")
+# Preset keys named differently from the setting they hold (the rest share the name)
+_PRESET_SETTING = {"threshold": "img_thr", "edge_flags": "bubble_cross_edges"}
 
 
 def is_classic(mode: str) -> bool:
@@ -52,24 +52,18 @@ def is_classic(mode: str) -> bool:
 
 
 def _checked_preset(preset: dict) -> dict:
-    """*preset* with its values converted; raises before anything is applied."""
-    out = dict(preset)
-    if "threshold" in out:
-        out["threshold"] = float(out["threshold"])
-    if "removing_factor" in out:
-        out["removing_factor"] = int(out["removing_factor"])
+    """*preset* with its values checked like the config file's (clamped to the
+    controls' ranges); raises ValueError before anything is applied."""
+    if "detection_mode" in preset and preset["detection_mode"] not in DETECTION_MODES:
+        raise ValueError(f"unknown detection mode {preset['detection_mode']!r}")
+    clean, invalid = check_session_settings(
+        {_PRESET_SETTING.get(key, key): value for key, value in preset.items()})
+    if invalid:
+        raise ValueError("invalid " + ", ".join(sorted(invalid)))
+    names = {setting: key for key, setting in _PRESET_SETTING.items()}
+    out = {names.get(key, key): value for key, value in clean.items()}
     if "edge_flags" in out:
-        flags = out["edge_flags"]
-        if not isinstance(flags, list) or len(flags) != 4:
-            raise ValueError("edge_flags must be four values (top, right, down, left)")
-        out["edge_flags"] = [bool(v) for v in flags]
-    if "detection_mode" in out and out["detection_mode"] not in DETECTION_MODES:
-        raise ValueError(f"unknown detection mode {out['detection_mode']!r}")
-    for key in _NUMERIC_FILTER_KEYS:  # checked, not converted: the controls take them as saved
-        value = out.get(key)
-        if key in out and (isinstance(value, bool) or not isinstance(value, (int, float))
-                           or not math.isfinite(value)):
-            raise ValueError(f"{key} must be a number, got {value!r}")
+        out["edge_flags"] = list(out["edge_flags"])
     return out
 
 
@@ -245,8 +239,7 @@ class MeasurePanel(QWidget):
         if not path:
             return
         try:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.preset(), f, indent=2)
+            write_text_atomic(path, json.dumps(self.preset(), indent=2))
         except OSError as exc:
             QMessageBox.warning(self, "Preset not saved", f"Could not write {path}:\n{exc}")
 
