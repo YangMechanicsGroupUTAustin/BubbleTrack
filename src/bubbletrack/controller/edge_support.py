@@ -21,6 +21,12 @@ _reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current ref
 GUESS_HINT = "Auto's guess is shown dashed (see Review)"
 
 
+def forget_references() -> None:
+    """Drop the cached reference choices and pixels (a new source was loaded)."""
+    _reference_cache.clear()
+    _reference_raw_cache.clear()
+
+
 def _source_key(state: AppState) -> tuple:
     return (state.folder_path, state.video_path, len(state.images), state.reference_frame)
 

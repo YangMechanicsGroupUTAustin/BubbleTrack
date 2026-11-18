@@ -8,18 +8,23 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
+import os
+import unicodedata
 
 import numpy as np
 
+from bubbletrack.model.atomic_write import write_text_atomic
+from bubbletrack.model.long_paths import os_path
 from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource
 from bubbletrack.model.suggestion import from_json as suggestions_from_json
 from bubbletrack.model.suggestion import to_json as suggestion_json
 
 logger = logging.getLogger(__name__)
 
-# 3.1 adds circle_xy + fit_source, 3.2 bubble_non_round (the radius definition); 3.0 files still load
-SESSION_VERSION = "3.2"
+# 3.1 adds circle_xy + fit_source, 3.2 bubble_non_round (the radius definition),
+# 3.3 physical_set + image_names; 3.0 files still load
+SESSION_VERSION = "3.3"
+PHYSICAL_KEYS = frozenset({"fps", "scale"})
 MIN_SUPPORTED_VERSION = (3, 0)
 _ENGINE_SOURCES = frozenset({FitSource.AUTO, FitSource.REFIT, FitSource.NEIGHBOR, FitSource.TRACKED,
                              FitSource.GUIDED, FitSource.ML})
@@ -106,6 +111,30 @@ def examples_from_json(data):
         return None
 
 
+def image_names(state) -> list[str] | None:
+    """The file names of a folder's frames (None for a video: its path names it)."""
+    if state.video_path or not state.images:
+        return None
+    return [os.path.basename(p) for p in state.images]
+
+
+def images_differ(saved: list | None, images) -> str | None:
+    """Why results saved for the files *saved* do not belong to *images*, or None.
+
+    Only same-length lists are compared (a count change is reported elsewhere).
+    Names are compared in NFC: macOS and Windows spell accented names differently.
+    """
+    if not saved or not images or len(saved) != len(images):
+        return None
+    current = [os.path.basename(p) for p in images]
+    norm = lambda name: unicodedata.normalize("NFC", str(name))  # noqa: E731
+    differ = sum(norm(a) != norm(b) for a, b in zip(saved, current))
+    if not differ:
+        return None
+    return (f"{differ} of {len(current)} image names differ from the measured ones; "
+            "results were not restored")
+
+
 def save_session(filepath: str, state) -> None:
     """Serialize the current AppState to a ``.brt`` JSON file.
 
@@ -126,7 +155,9 @@ def save_session(filepath: str, state) -> None:
         "folder_path": state.folder_path,
         "video_path": state.video_path,
         "image_no": state.image_no,
+        "image_names": image_names(state),
         **session_parameters(state),
+        "physical_set": sorted(state.physical_set),
         "radius": _to_json_array(state.radius),
         "circle_fit_par": _to_json_array(state.circle_fit_par),
         "region_count": (
@@ -156,8 +187,8 @@ def save_session(filepath: str, state) -> None:
         ),
     }
     # allow_nan=False guarantees strict JSON (MATLAB's jsondecode rejects NaN)
-    Path(filepath).write_text(json.dumps(data, indent=2, allow_nan=False),
-                              encoding="utf-8")
+    # Atomic: an interrupted save must never destroy the previous session file
+    write_text_atomic(filepath, json.dumps(data, indent=2, allow_nan=False))
     logger.info("Session saved to %s", filepath)
 
 
@@ -184,7 +215,8 @@ def load_session(filepath: str) -> dict:
     FileNotFoundError
         If the file does not exist.
     """
-    raw = Path(filepath).read_text(encoding="utf-8")
+    with open(os_path(filepath), encoding="utf-8") as fh:
+        raw = fh.read()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:
@@ -233,6 +265,11 @@ def load_session(filepath: str) -> dict:
 
     if "bubble_non_round" not in data:
         _legacy_radius_definition(data)
+    if "physical_set" in data:
+        values = data["physical_set"] if isinstance(data["physical_set"], list) else []
+        data["physical_set"] = frozenset(v for v in values if v in PHYSICAL_KEYS)
+    else:  # before 3.3 the values were not marked; such sessions always loaded as set
+        data["physical_set"] = PHYSICAL_KEYS
 
     # Reconstruct tuples from lists
     if "gridx" in data and isinstance(data["gridx"], list):

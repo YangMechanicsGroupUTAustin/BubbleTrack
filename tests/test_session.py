@@ -186,6 +186,7 @@ class TestLoadSession:
         save_session(path, original)
         loaded = load_session(path)
         loaded.pop("version", None)
+        loaded.pop("image_names", None)  # checked on restore, not a state field
         restored = update_state(AppState(), **loaded)
         assert restored.folder_path == "/data"
         assert restored.img_thr == 0.8
@@ -204,6 +205,7 @@ class TestLoadSession:
         save_session(path, state)
         loaded = load_session(path)
         loaded.pop("version", None)
+        loaded.pop("image_names", None)  # checked on restore, not a state field
         restored = update_state(AppState(), **loaded)
         assert restored.folder_path == "/test"
         assert restored.image_no == 2

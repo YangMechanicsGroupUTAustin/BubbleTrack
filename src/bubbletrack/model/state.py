@@ -116,6 +116,9 @@ class AppState:
     um2px: float = DEFAULT_UM2PX
     fps: float = DEFAULT_FPS
     rmax_fit_length: int = DEFAULT_RMAX_FIT_LENGTH
+    # The physical values the user typed or confirmed for this recording ("fps", "scale").
+    # Others came from the config (another recording) or a video container: unconfirmed.
+    physical_set: frozenset = frozenset()
 
     # Export
     save_path: str = ""

@@ -7,8 +7,9 @@ The dialog's frame rate, scale and Rmax fit length go straight into the
 state, so sessions, the config and reports record the values exported with.
 
 Frame rate and scale count as set for a recording only once the user typed or
-confirmed them in the dialog, or a session file restored them: the values in
-the config belong to whatever recording came before.  Until then the dialog
+confirmed them in the dialog (``AppState.physical_set``, kept in sessions): the
+values in the config belong to whatever recording came before, and a video's
+container frame rate is often its playback rate.  Until then the dialog
 marks them and physical export waits; pixel exports record them as unknown,
 and the status bar says "Scale: not set".
 """
@@ -132,21 +133,22 @@ class ExportController(BaseController):
     def __init__(self, bus, get_state, set_state, window) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._units = "physical"  # the last export's choice, offered next time
-        self._set_fields: frozenset[str] = frozenset()  # 'fps' / 'scale' set for this recording
         bus.subscribe("source_loaded", lambda _n: self._set_physical(frozenset()))
-        bus.subscribe(SESSION_RESTORED, lambda: self._set_physical(PHYSICAL_FIELDS))
+        bus.subscribe(SESSION_RESTORED, lambda: self._set_physical(self.state.physical_set))
 
     # -- frame rate and scale of this recording ------------------------------ #
 
     def physical_set(self) -> bool:
-        """Frame rate and scale were set (or restored) for the loaded recording."""
-        return self._set_fields == PHYSICAL_FIELDS
+        """Frame rate and scale were set (or restored as set) for the loaded recording."""
+        return self.state.physical_set == PHYSICAL_FIELDS
 
     def _set_physical(self, fields: frozenset[str]) -> None:
-        self._set_fields = frozenset(fields) & PHYSICAL_FIELDS
+        fields = frozenset(fields) & PHYSICAL_FIELDS
+        if fields != self.state.physical_set:
+            self._update(physical_set=fields)
         status_bar = getattr(self.w, "status_bar", None)
         if status_bar is not None:
-            status_bar.update_scale(self.state.um2px if "scale" in self._set_fields else None)
+            status_bar.update_scale(self.state.um2px if "scale" in fields else None)
 
     # -- the dialog ---------------------------------------------------------- #
 
@@ -155,7 +157,7 @@ class ExportController(BaseController):
         dialog = ExportDialog(
             fps=state.fps, um2px=state.um2px, fit_length=state.rmax_fit_length,
             fmt=config.get_meta("last_export_format") or "mat", units=self._units,
-            default_path=self.default_path, unset=PHYSICAL_FIELDS - self._set_fields,
+            default_path=self.default_path, unset=PHYSICAL_FIELDS - self.state.physical_set,
             parent=self.w,
         )
         dialog.physical_params_changed.connect(lambda: self.on_physical_params_changed(dialog))

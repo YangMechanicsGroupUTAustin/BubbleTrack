@@ -15,6 +15,8 @@ import time
 from pathlib import Path
 from typing import Any, Callable
 
+from bubbletrack.model.atomic_write import write_text_atomic
+
 logger = logging.getLogger(__name__)
 
 CONFIG_DIR: Path = Path.home() / ".bubbletrack"
@@ -206,7 +208,7 @@ def validate_config(raw: dict[str, Any]) -> dict[str, Any]:
 def _write_config(data: dict[str, Any]) -> None:
     """Write *data* as CONFIG_FILE, creating the directory; raises OSError."""
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    CONFIG_FILE.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    write_text_atomic(CONFIG_FILE, json.dumps(data, indent=2))  # never a truncated config
 
 
 def save_config(state: object) -> None:

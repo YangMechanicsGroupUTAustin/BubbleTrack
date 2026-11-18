@@ -8,6 +8,7 @@ from collections.abc import Callable
 
 import numpy as np
 
+from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame
 from bubbletrack.event_bus import EventBus
@@ -94,6 +95,8 @@ class FileController(BaseController):
             images=tuple(images),
             image_no=0,
             img_grayscale_max=bit_depth,
+            reference_frame=None,  # the previous recording's choices do not apply here
+            edge_seed=None,
         )
         self.state = self.state.with_results_initialized(len(images))
 
@@ -148,6 +151,8 @@ class FileController(BaseController):
             images=virtual_images,
             image_no=0,
             img_grayscale_max=255,  # corrected from the first frame below
+            reference_frame=None,  # the previous recording's choices do not apply here
+            edge_seed=None,
         )
         self.state = self.state.with_results_initialized(n)
 
@@ -203,6 +208,11 @@ class FileController(BaseController):
         scrubber emits a frame change to the old last frame and the shown
         frame, state.image_no and the scrubber disagree.
         """
+        # Cached frames are keyed by path (video frames by index only) and a folder can
+        # be re-exported in place: nothing cached belongs to the new source.
+        if self._cache is not None:
+            self._cache.invalidate()
+        edge_support.forget_references()
         scrubber = self.w.frame_scrubber
         # "Frame 12/91 · _023": the file number next to every frame index
         labels = frame_file_labels(self.state.images)

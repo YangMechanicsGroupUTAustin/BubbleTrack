@@ -87,8 +87,8 @@ class TestAutosave:
         assert path == str(sc.autosave_path())
         assert sc.autosave_path().parent == config.CONFIG_DIR / "recovery"
         assert load_session(path)["radius"][1] == 12.5
-        assert saves == [path + ".tmp"]  # written next to it, then renamed
-        assert not os.path.exists(path + ".tmp")
+        assert saves == [path]  # save_session itself writes a temp file, then renames
+        assert [p.name for p in sc.autosave_path().parent.iterdir()] == [sc.AUTOSAVE_NAME]
 
     def test_at_most_once_per_interval(self, make, saves):
         ctrl, clock, _ = make()

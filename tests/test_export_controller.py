@@ -65,11 +65,12 @@ class _FakePanel:
 
 def _make_controller(radius: np.ndarray, *, physical_set: bool = True):
     """A controller over *radius*; with *physical_set*, frame rate and scale count
-    as set for the recording (as after a session restored them)."""
+    as set for the recording (as after a session restored them as confirmed)."""
     n = len(radius)
     state = AppState(
         folder_path="",
         images=tuple(f"img_{i:04d}.tif" for i in range(n)),
+        physical_set=frozenset({"fps", "scale"}) if physical_set else frozenset(),
     ).with_results_initialized(n)
     np.copyto(state.radius, radius)
     state.circle_fit_par[:] = 50.0

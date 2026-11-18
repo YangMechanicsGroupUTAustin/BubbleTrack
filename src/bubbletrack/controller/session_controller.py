@@ -31,7 +31,7 @@ from bubbletrack.controller.unsaved_review import (
 from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
-from bubbletrack.model.session import load_session, save_session
+from bubbletrack.model.session import images_differ, load_session, save_session
 from bubbletrack.model.state import AppState, update_state
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ logger = logging.getLogger(__name__)
 RESULT_KEYS = ("radius", "circle_fit_par", "circle_xy", "region_count", "fit_source",
                "fit_confidence", "fit_metrics", "fit_flags", "fit_locked",
                "fit_suggestion")
-_NOT_PARAMS = {"version", "folder_path", "video_path", "images", *RESULT_KEYS}
+_NOT_PARAMS = {"version", "folder_path", "video_path", "images", "image_names", *RESULT_KEYS}
 _STATE_FIELDS = {f.name for f in dataclasses.fields(AppState)}
 
 AUTOSAVE_NAME = "autosave.brt"
@@ -269,6 +269,7 @@ class SessionController(BaseController):
             return False
 
         folder, params, results = split_session(data)
+        names = data.get("image_names")
         video = data.get("video_path") or ""
         if video:
             return self._restore(path, params, results, video=video)
@@ -278,10 +279,10 @@ class SessionController(BaseController):
                 self.w.header.set_status(f"Image folder not found: {folder}", _ERR)
                 return False
             folder = located
-        return self._restore(path, params, results, folder=folder)
+        return self._restore(path, params, results, folder=folder, names=names)
 
     def _restore(self, path: str, params: dict, results: dict, *,
-                 folder: str = "", video: str = "") -> bool:
+                 folder: str = "", video: str = "", names: list | None = None) -> bool:
         if video:
             if not os.path.isfile(video):
                 self.w.header.set_status(f"Video not found: {video}", _ERR)
@@ -303,7 +304,8 @@ class SessionController(BaseController):
             self.w.header.set_status(f"Restore failed: {exc}", _ERR)
             return False
 
-        warning = restore_results(self.state, results)
+        # The same number of frames is not the same recording (every HPV-X2 shot has 256)
+        warning = images_differ(names, self.state.images) or restore_results(self.state, results)
         if warning:
             warnings.append(warning)
         self._saved_review = review_signature(self.state)
@@ -387,11 +389,9 @@ class SessionController(BaseController):
         Written to a temporary file and renamed, so a crash mid-write never
         destroys the previous good autosave.
         """
-        tmp = path.with_name(path.name + ".tmp")
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            save_session(str(tmp), self.state)
-            os.replace(tmp, path)
+            save_session(str(path), self.state)  # atomic (temp file + rename)
         except Exception as exc:
             logger.warning("Could not write %s: %s", path, exc)
             return None
