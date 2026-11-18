@@ -200,3 +200,36 @@ class TestRadiusFilter:
         )
         _run_params_only(frames, tmp_path / "out.csv")
         assert f"{fitted}/3 frames fitted" in capsys.readouterr().out
+
+
+class TestProvenance:
+    """CLI exports carry the same provenance record as the GUI's."""
+
+    def test_csv_gets_a_metadata_sidecar(self, frames, tmp_path, capsys):
+        import json
+
+        out = tmp_path / "r.csv"
+        _run(frames, out, "--mode", "edge", "--fps", "2e6", "--scale", "1.5")
+        meta = json.loads((tmp_path / "r.meta.json").read_text(encoding="utf-8"))
+        assert meta["source_tool"] == "bubbletrack-cli"
+        assert meta["fps"] == 2e6 and meta["um2px"] == 1.5
+        assert meta["fps_given"] and meta["um2px_given"]
+        assert meta["detection_mode"] == "edge" and meta["radius_definition"].startswith("least-squares")
+        assert "defaults" not in capsys.readouterr().err
+
+    def test_default_units_are_said_and_recorded(self, frames, tmp_path, capsys):
+        import json
+
+        out = tmp_path / "r.csv"
+        _run(frames, out, "--mode", "edge")
+        assert "defaults; pass --fps and --scale" in capsys.readouterr().err
+        meta = json.loads((tmp_path / "r.meta.json").read_text(encoding="utf-8"))
+        assert meta["fps"] == 1e6 and not meta["fps_given"] and not meta["um2px_given"]
+
+    def test_mat_gets_the_metadata_struct(self, frames, tmp_path):
+        import scipy.io
+
+        out = tmp_path / "r.mat"
+        _run(frames, out, "--mode", "edge")
+        data = scipy.io.loadmat(str(out))
+        assert "BubbleTrackMeta" in data

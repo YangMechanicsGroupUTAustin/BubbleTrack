@@ -12,15 +12,19 @@ import numpy as np
 from bubbletrack.logging_config import setup_logging
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.config import DETECTION_MODES, EDGE_DEFINITIONS
-from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR
-from bubbletrack.model.export import export_csv, export_excel, export_r_data
+from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR, DEFAULT_RMAX_FIT_LENGTH
+from bubbletrack.model.export import build_export_metadata, export_csv, export_excel, export_r_data
 from bubbletrack.model.frame_pipeline import FrameParams, fit_image_file
 from bubbletrack.model.image_io import imread_unicode, scan_folder
 from bubbletrack.model.removing_factor import compute_removing_factor
+from bubbletrack.model.state import AppState
 
 logger = logging.getLogger(__name__)
 
 EVAL_CASES = "eval-cases"  # subcommand: the hard-case regression runner (cases_cli)
+# Used when --fps / --scale are not given (the lab's usual camera); the run says so
+_DEFAULT_FPS = 1e6
+_DEFAULT_SCALE = 3.2
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -89,12 +93,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Output file path (.mat / .csv / .xlsx)",
     )
     parser.add_argument(
-        "--fps", type=float, default=1e6,
-        help="Frames per second for time column (default: 1e6)",
+        "--fps", type=float, default=None,
+        help=f"Frames per second for the time column (default: {_DEFAULT_FPS:g})",
     )
     parser.add_argument(
-        "--scale", type=float, default=3.2,
-        help="Micrometres per pixel (default: 3.2)",
+        "--scale", type=float, default=None,
+        help=f"Micrometres per pixel (default: {_DEFAULT_SCALE:g})",
     )
     parser.add_argument(
         "--format", choices=["mat", "csv", "xlsx"], default=None,
@@ -115,9 +119,9 @@ def _validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) ->
         parser.error(f"--rf must be a slider value in [0, 100], got {args.rf}")
     if args.rf_area is not None and args.rf_area < 0:
         parser.error(f"--rf-area must be >= 0, got {args.rf_area}")
-    if not args.fps > 0:
+    if args.fps is not None and not args.fps > 0:
         parser.error(f"--fps must be > 0, got {args.fps}")
-    if not args.scale > 0:
+    if args.scale is not None and not args.scale > 0:
         parser.error(f"--scale must be > 0, got {args.scale}")
     out_dir = Path(args.output).resolve().parent
     if not out_dir.is_dir():
@@ -220,16 +224,40 @@ def _write_output(
     fps: float,
     scale: float,
     region_count: np.ndarray | None = None,
+    metadata: dict | None = None,
 ) -> None:
     """Write results to the chosen format (region counts only for area mode)."""
     if fmt == "csv":
         export_csv(output_path, radius, centers, fps=fps, um2px=scale,
-                   region_count=region_count)
+                   region_count=region_count, metadata=metadata)
     elif fmt == "xlsx":
         export_excel(output_path, radius, centers, fps=fps, um2px=scale,
-                     region_count=region_count)
+                     region_count=region_count, metadata=metadata)
     else:
-        export_r_data(output_path, radius, centers, edge_pts, region_count)
+        export_r_data(output_path, radius, centers, edge_pts, region_count, metadata=metadata)
+
+
+def run_metadata(args: argparse.Namespace, images: list[str], gridx: tuple[int, int],
+                 gridy: tuple[int, int], fps: float, scale: float,
+                 reference_index: int | None = None) -> dict:
+    """The provenance record of a CLI run, built like the GUI's export metadata."""
+    state = AppState(
+        folder_path=str(Path(args.folder).resolve()), images=tuple(images),
+        detection_mode=args.mode, img_thr=args.threshold, removing_factor=int(round(args.rf)),
+        bubble_cross_edges=tuple(bool(e) for e in args.edges), gridx=gridx, gridy=gridy,
+        edge_definition=args.edge_definition, bubble_non_round=bool(args.non_round),
+        reference_frame=None if args.reference is None else args.reference - 1,
+        fps=fps, um2px=scale,
+    )
+    meta = build_export_metadata(state, fps=fps, um2px=scale,
+                                 rmax_fit_length=DEFAULT_RMAX_FIT_LENGTH,
+                                 reference_index=reference_index)
+    meta["source_tool"] = "bubbletrack-cli"
+    meta["fps_given"] = args.fps is not None
+    meta["um2px_given"] = args.scale is not None
+    if args.rf_area is not None:
+        meta["removing_area_px"] = int(args.rf_area)
+    return meta
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -265,8 +293,8 @@ def main(argv: list[str] | None = None) -> None:
     gridx, gridy = _resolve_roi(args, shape)
 
     if args.mode == "edge":
-        result = _process_frames_edge(images, args, gridx, gridy, float(max(shape)))
-        _finish(args, images, *result)
+        *result, ref_idx = _process_frames_edge(images, args, gridx, gridy, float(max(shape)))
+        _finish(args, images, *result, gridx=gridx, gridy=gridy, reference_index=ref_idx)
         return
     params = FrameParams(
         sensitivity=args.threshold,
@@ -281,13 +309,14 @@ def main(argv: list[str] | None = None) -> None:
     radius, centers, edge_pts, region_count = _process_frames(
         images, params, args.verbose,
     )
-    _finish(args, images, radius, centers, edge_pts, region_count)
+    _finish(args, images, radius, centers, edge_pts, region_count, gridx=gridx, gridy=gridy)
 
 
 def _process_frames_edge(images: list[str], args: argparse.Namespace,
                          gridx: tuple[int, int], gridy: tuple[int, int],
-                         max_radius: float) -> tuple[np.ndarray, np.ndarray, list, np.ndarray]:
-    """Fit every frame with the Edge engine, using the GUI's acceptance rules."""
+                         max_radius: float) -> tuple[np.ndarray, np.ndarray, list, np.ndarray, int | None]:
+    """Fit every frame with the Edge engine, using the GUI's acceptance rules
+    (the last value is the 0-based reference frame used, None without one)."""
     explicit = args.reference - 1 if args.reference is not None else None
     ref_idx = edge_pipeline.resolve_reference_index(
         lambda i: edge_pipeline.read_raw(images[i]), len(images), explicit,
@@ -318,11 +347,13 @@ def _process_frames_edge(images: list[str], args: argparse.Namespace,
                 print(f"Frame {i + 1}: {exc}", file=sys.stderr)
         if (i + 1) % 50 == 0 or i == n - 1:
             print(f"Processed {i + 1}/{n} frames")
-    return radius, centers, edge_pts, np.zeros(n, dtype=int)
+    return radius, centers, edge_pts, np.zeros(n, dtype=int), ref_idx
 
 
 def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
-            centers: np.ndarray, edge_pts: list, region_count: np.ndarray) -> None:
+            centers: np.ndarray, edge_pts: list, region_count: np.ndarray, *,
+            gridx: tuple[int, int], gridy: tuple[int, int],
+            reference_index: int | None = None) -> None:
     n_valid = int((radius > 0).sum())
     if n_valid == 0:
         # Do not overwrite a previous result with an all-invalid file.
@@ -331,9 +362,15 @@ def _finish(args: argparse.Namespace, images: list[str], radius: np.ndarray,
         sys.exit(1)
 
     fmt = _detect_format(args.output, args.format)
+    fps = _DEFAULT_FPS if args.fps is None else args.fps
+    scale = _DEFAULT_SCALE if args.scale is None else args.scale
+    if fmt != "mat" and (args.fps is None or args.scale is None):
+        print(f"Note: time and size columns use {fps:g} fps and {scale:g} um/px "
+              "(defaults; pass --fps and --scale for this recording)", file=sys.stderr)
     _write_output(
-        fmt, args.output, radius, centers, edge_pts, args.fps, args.scale,
+        fmt, args.output, radius, centers, edge_pts, fps, scale,
         region_count if args.mode == "area" else None,
+        metadata=run_metadata(args, images, gridx, gridy, fps, scale, reference_index),
     )
     print(f"Done. {n_valid}/{len(images)} frames fitted. Output: {args.output}")
 
