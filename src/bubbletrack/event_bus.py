@@ -8,9 +8,28 @@ from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
+# Every event on the bus.  Use these names, never string literals: a typo in a
+# literal subscribes to an event nobody emits, silently.
+
+# Emitted (number of frames) after a folder, video or .dat recording was loaded.
+SOURCE_LOADED = "source_loaded"
+# Emitted (frame index) after the frame on screen changed.
+FRAME_CHANGED = "frame_changed"
+# Emitted (running: bool) when a Fit All / refit run starts or ends.
+RUN_STATE_CHANGED = "run_state_changed"
+# Emitted (done, total) while a run measures frames.
+RUN_PROGRESS = "run_progress"
+# Emitted after a run, tracking included, has finished.
+RUN_FINISHED = "run_finished"
+# Emitted with the frames tracking wants reviewed.
+TRACKING_REVIEW = "tracking_review"
 # Emitted (no arguments) after anything edits per-frame results in place:
-# autosave, the review queue and the filmstrip listen for it.
+# autosave, the review queue, re-tracking and ML assist listen for it.
 RESULTS_CHANGED = "results_changed"
+# Emitted (no arguments) after a session file restored the recording and its parameters.
+SESSION_RESTORED = "session_restored"
+# Emitted (ResultEdit) after Ctrl+Z restored an edit.
+RESULT_UNDONE = "result_undone"
 
 # Emitted with (name, value) after a Settings switch changed (see config.UI_SETTINGS).
 UI_SETTING_CHANGED = "ui_setting_changed"

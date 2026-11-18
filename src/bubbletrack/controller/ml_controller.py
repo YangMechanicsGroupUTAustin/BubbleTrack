@@ -37,7 +37,7 @@ from bubbletrack.controller import edge_support, review_actions
 from bubbletrack.controller import ml_teach_steps as steps
 from bubbletrack.controller.display_mixin import current_source, display_frame
 from bubbletrack.controller.ml_teach import TeachingMode
-from bubbletrack.event_bus import RESULTS_CHANGED
+from bubbletrack.event_bus import RESULTS_CHANGED, RUN_FINISHED, RUN_PROGRESS, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.ml_assist import (
     UNAVAILABLE_TIP, examples_for_run, failures, make_job, ml_available, protected_frames,
@@ -107,10 +107,10 @@ class MLAssistController:
         window.left_panel.measure_panel.filters_changed.connect(self._on_method_changed)
         app.auto_ctrl.ml_job_provider = self.job_for_fit_all
         bus = app.bus
-        bus.subscribe("source_loaded", self._on_source_loaded)
-        bus.subscribe("run_state_changed", self._on_run_state)
-        bus.subscribe("run_progress", lambda current, total: panel.set_progress(current, total))
-        bus.subscribe("run_finished", self._on_run_finished)
+        bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
+        bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
+        bus.subscribe(RUN_PROGRESS, lambda current, total: panel.set_progress(current, total))
+        bus.subscribe(RUN_FINISHED, self._on_run_finished)
         bus.subscribe(RESULTS_CHANGED, lambda *_: self._on_results_changed())
         self.refresh_state_line()
 

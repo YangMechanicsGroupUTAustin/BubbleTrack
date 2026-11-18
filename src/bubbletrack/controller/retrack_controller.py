@@ -33,7 +33,7 @@ from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame, refresh_chart
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
-from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.sequence_pipeline import retrack_frames
@@ -82,8 +82,8 @@ class RetrackController(BaseController):
         self.escalate_timer.setInterval(RETRACK_ESCALATE_MS)
         self.escalate_timer.timeout.connect(self._escalate)
         bus.subscribe(RESULTS_CHANGED, self._on_results_changed)
-        bus.subscribe("run_state_changed", self._on_run_state)
-        bus.subscribe("source_loaded", self._on_source_loaded)
+        bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
+        bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
 
     # -- public API ---------------------------------------------------------- #
 
@@ -200,7 +200,7 @@ class RetrackController(BaseController):
             self.w.header.set_status(f"Tracking updated {plural(n, 'nearby frame')} "
                                      "— Ctrl+Z undoes", _OK)
         with self.muted():
-            self.bus.emit("tracking_review", tuple(review_items(outcome.result)))
+            self.bus.emit(TRACKING_REVIEW, tuple(review_items(outcome.result)))
             if n:
                 self._results_changed()
 
@@ -234,7 +234,7 @@ class RetrackController(BaseController):
         self._locked = running
         self._own_emit = True
         try:
-            self.bus.emit("run_state_changed", running)
+            self.bus.emit(RUN_STATE_CHANGED, running)
         finally:
             self._own_emit = False
         lp = self.w.left_panel

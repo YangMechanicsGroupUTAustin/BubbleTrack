@@ -33,7 +33,7 @@ from PyQt6.QtWidgets import QApplication
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import current_source, display_frame, refresh_chart
-from bubbletrack.event_bus import CIRCLE_FIXED, EventBus
+from bubbletrack.event_bus import CIRCLE_FIXED, FRAME_CHANGED, RESULT_UNDONE, RUN_STATE_CHANGED, SOURCE_LOADED, EventBus
 from bubbletrack.model import edge_pipeline, guided_fit
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.guided_fit import CENTRE_TOLERANCE, MIN_CONFIDENCE, UserCircle
@@ -48,7 +48,6 @@ from bubbletrack.ui.overlay_legend import FOUND_COLOUR, USER_CIRCLE_COLOUR
 logger = logging.getLogger(__name__)
 
 _OK, _WARN, _ERR = "#10b981", "#f59e0b", "#ef4444"
-RESULT_UNDONE = "result_undone"  # bus event (ResultEdit) after Ctrl+Z restored an edit
 _MANUAL_OUTLINE_POINTS = 72  # a stored circle's outline, for both panels
 
 
@@ -138,9 +137,9 @@ class CircleController(BaseController):
         self._pending: Refusal | None = None  # refused circle on screen
         self._active = False  # the user chose the tool (Review's Fix)
         self._view: FixView = NoFixView()
-        bus.subscribe("run_state_changed", lambda _running: self.sync_tool())
-        bus.subscribe("frame_changed", self._on_frame_changed)
-        bus.subscribe("source_loaded", self._on_source_loaded)
+        bus.subscribe(RUN_STATE_CHANGED, lambda _running: self.sync_tool())
+        bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
+        bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
         # Every redraw of the refused frame shows the decision, not the result.
         window.frame_display_hooks.append(self._on_display)
 

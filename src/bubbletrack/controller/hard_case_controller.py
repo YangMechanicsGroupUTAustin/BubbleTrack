@@ -17,6 +17,7 @@ import numpy as np
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
+from bubbletrack.event_bus import RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.display_mixin import current_source
 from bubbletrack.model import config, edge_pipeline
@@ -47,8 +48,8 @@ class HardCaseController:
         self.w = window
         self._app = app
         self._sample: tuple[tuple, np.ndarray] | None = None  # (source key, one raw frame)
-        app.bus.subscribe("source_loaded", lambda *_: self._forget_sample())
-        app.bus.subscribe("run_state_changed", self._on_run_state)
+        app.bus.subscribe(SOURCE_LOADED, lambda *_: self._forget_sample())
+        app.bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
         window.export_hard_case_requested.connect(self.on_export_requested)
         app.review.panel.export_case_requested.connect(
             lambda segment: self.ask_and_export(segment.start, segment.end))

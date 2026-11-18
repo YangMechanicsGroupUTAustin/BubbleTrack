@@ -16,7 +16,7 @@ from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import (
     FITTED_CIRCLE, redraw_original, refresh_chart,
 )
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import FRAME_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
@@ -66,7 +66,7 @@ class ManualController(BaseController):
         self._cache = cache
         self._selecting = False
         self._view: FixView = NoFixView()
-        bus.subscribe("frame_changed", self._on_frame_changed)
+        bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
 
     def set_view(self, view: FixView) -> None:
         """Show the point count in *view* (the Review dock's fix strip)."""

@@ -11,7 +11,7 @@ import numpy as np
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import FRAME_CHANGED, SOURCE_LOADED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import frame_to_display
 from bubbletrack.model.folder_scan import scan_folder_report, tiff_page_count
@@ -218,7 +218,7 @@ class FileController(BaseController):
         scrubber.blockSignals(True)
         scrubber.set_value(idx)
         scrubber.blockSignals(False)
-        self.bus.emit("frame_changed", idx)
+        self.bus.emit(FRAME_CHANGED, idx)
         display_frame(self.state, self.w, idx, self._set_state, self._cache)
 
     def _reset_views(self, n: int, file_ext: str) -> None:
@@ -248,4 +248,4 @@ class FileController(BaseController):
         self.w.radius_chart.set_total_frames(n)
         self.w.status_bar.update_frame(frame_to_display(0), n)
         self.w.status_bar.update_format(file_ext)
-        self.bus.emit("source_loaded", n)
+        self.bus.emit(SOURCE_LOADED, n)

@@ -16,7 +16,7 @@ from bubbletrack.controller.display_mixin import (
     refresh_chart,
     show_engine_view,
 )
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import SOURCE_LOADED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.conventions import clamp_roi
 from bubbletrack.model.detection import detect_bubble_with_mode, measure_detection
@@ -51,7 +51,7 @@ class PretuneController(BaseController):
         self._autotune_target: tuple | None = None  # (frame, ROI) the running tune is for
         self.edge_setup = EdgeSetup(bus, get_state, set_state, window)
         # A tune of the previous recording must never land on the new one
-        bus.subscribe("source_loaded", lambda _n: self._cancel_autotune())
+        bus.subscribe(SOURCE_LOADED, lambda _n: self._cancel_autotune())
 
     # -- public handlers -------------------------------------------------- #
 

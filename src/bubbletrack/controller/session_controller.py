@@ -28,7 +28,7 @@ from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.unsaved_review import (
     CANCEL, SAVE, ask_save_review, describe, recording_name, review_counts, review_signature,
 )
-from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SESSION_RESTORED, SOURCE_LOADED, EventBus
 from bubbletrack.model import config as config_module
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.session import images_differ, load_session, save_session
@@ -48,8 +48,6 @@ AUTOSAVE_MIN_INTERVAL_S = 60.0  # at most one autosave per minute ...
 AUTOSAVE_DEBOUNCE_S = 2.0       # ... starting this long after the first change
 RECOVERY_MTIME_SLACK_S = 2.0    # file-time resolution (FAT: 2 s) vs the clean-exit stamp
 RESULTS_CHANGED_EVENT = RESULTS_CHANGED  # bus event: any controller edited results
-# Bus event (no arguments): a session file restored the recording and its parameters.
-SESSION_RESTORED = "session_restored"
 SESSION_FILTER = "BubbleTrack Session (*.brt);;All Files (*)"
 
 _OK, _WARN, _ERR, _DIM = "#10b981", "#f59e0b", "#ef4444", "#a1a1aa"
@@ -197,7 +195,7 @@ class SessionController(BaseController):
         self.choose_save_path: Callable[[], str] | None = None  # None: a file dialog
         if file_ctrl is not None:  # None in tests of the autosave alone
             file_ctrl.confirm_leave = self.confirm_leave
-        self.bus.subscribe("source_loaded", self._on_source_loaded)
+        self.bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
 
         self._clock = clock
         self._autosave_dirty = False
@@ -206,7 +204,7 @@ class SessionController(BaseController):
         self._autosave_timer = QTimer()
         self._autosave_timer.setSingleShot(True)
         self._autosave_timer.timeout.connect(self.autosave_if_due)
-        self.bus.subscribe("run_state_changed", self._on_run_state_changed)
+        self.bus.subscribe(RUN_STATE_CHANGED, self._on_run_state_changed)
         self.bus.subscribe(RESULTS_CHANGED_EVENT, lambda *_: self.notify_results_changed())
 
     def save(self, path: str) -> bool:

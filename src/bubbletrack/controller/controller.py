@@ -19,7 +19,7 @@ from bubbletrack.controller.pretune_controller import PretuneController
 from bubbletrack.controller.retrack_controller import RetrackController
 from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.controller.settings_controller import SettingsController
-from bubbletrack.event_bus import RESULTS_CHANGED, EventBus
+from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS
 from bubbletrack.model.config import load_config, ui_setting
@@ -131,7 +131,7 @@ class AppController:
         self.settings = SettingsController(self.w, self)
 
         # Lock everything that mutates results while a worker writes into them
-        self.bus.subscribe("run_state_changed", self._apply_run_lock)
+        self.bus.subscribe(RUN_STATE_CHANGED, self._apply_run_lock)
         self.w.set_close_guard(self._confirm_close)
 
         self._connect_signals()
@@ -140,7 +140,7 @@ class AppController:
         # Review queue dock (suspicious frames, one-key triage)
         from bubbletrack.controller.review_controller import install_review
         self.review = install_review(self.w, self)
-        self.bus.subscribe("tracking_review", self.review.set_extra)
+        self.bus.subscribe(TRACKING_REVIEW, self.review.set_extra)
         self.auto_ctrl.review_count = lambda: self.review.check_count  # "· 3 to check in Review"
 
         # Key-frame filmstrip above the R(t) chart
@@ -228,7 +228,7 @@ class AppController:
         eb.auto_reference_clicked.connect(self.pretune_ctrl.on_auto_reference)
         eb.pick_seed_clicked.connect(self.pretune_ctrl.on_pick_seed)
         eb.clear_seed_clicked.connect(self.pretune_ctrl.on_clear_seed)
-        self.bus.subscribe("source_loaded", lambda _n: self.pretune_ctrl.refresh_edge_labels())
+        self.bus.subscribe(SOURCE_LOADED, lambda _n: self.pretune_ctrl.refresh_edge_labels())
 
         # Fit (every frame) and Stop
         lp.fit_controls.fit_clicked.connect(self.auto_ctrl.on_auto_fit)

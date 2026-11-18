@@ -23,6 +23,7 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+from bubbletrack.event_bus import SOURCE_LOADED
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.session_controller import SESSION_RESTORED
@@ -133,7 +134,7 @@ class ExportController(BaseController):
     def __init__(self, bus, get_state, set_state, window) -> None:
         super().__init__(bus, get_state, set_state, window)
         self._units = "physical"  # the last export's choice, offered next time
-        bus.subscribe("source_loaded", lambda _n: self._set_physical(frozenset()))
+        bus.subscribe(SOURCE_LOADED, lambda _n: self._set_physical(frozenset()))
         bus.subscribe(SESSION_RESTORED, lambda: self._set_physical(self.state.physical_set))
 
     # -- frame rate and scale of this recording ------------------------------ #

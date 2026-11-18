@@ -18,7 +18,7 @@ from bubbletrack.controller.live_view import show_live_frame
 from bubbletrack.controller.run_summary import RunOutcome, summary_line
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.controller.worker import BatchWorker
-from bubbletrack.event_bus import EventBus
+from bubbletrack.event_bus import RUN_FINISHED, RUN_PROGRESS, RUN_STATE_CHANGED, TRACKING_REVIEW, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
 from bubbletrack.model.conventions import frame_to_display
@@ -90,7 +90,7 @@ class AutoController(BaseController):
                 worker.wait(timeout_ms)
 
     def _set_run_state(self, running: bool) -> None:
-        self.bus.emit("run_state_changed", running)
+        self.bus.emit(RUN_STATE_CHANGED, running)
 
     # -- public handlers -------------------------------------------------- #
 
@@ -387,7 +387,7 @@ class AutoController(BaseController):
         else:
             eta_text = "Calculating..."
         self.w.left_panel.fit_controls.set_progress(current, total, eta_text)
-        self.bus.emit("run_progress", current, total)
+        self.bus.emit(RUN_PROGRESS, current, total)
 
     def _on_auto_frame_done(self, idx: int, radius: float, edge_xy, binary_roi,
                             rc: float, cc: float, count: int) -> None:
@@ -491,10 +491,10 @@ class AutoController(BaseController):
         scores = refresh_chart(self.state, self.w)
         # The tracking review list (empty when tracking did not run) and the
         # frames it re-measured; the Review queue is up to date afterwards.
-        self.bus.emit("tracking_review", tuple(review))
+        self.bus.emit(TRACKING_REVIEW, tuple(review))
         self._results_changed()
         self._show_summary(stopped, scores)
-        self.bus.emit("run_finished", {"stopped": stopped, "ml": self._ml_run,
+        self.bus.emit(RUN_FINISHED, {"stopped": stopped, "ml": self._ml_run,
                                        "edge": self._edge_job is not None,
                                        "frames": self._run_frames})
 

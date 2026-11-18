@@ -30,7 +30,7 @@ from bubbletrack.controller.review_flow import ALL_DONE, ReviewFlow
 from bubbletrack.controller.review_memory import ReviewMemory
 from bubbletrack.controller.review_queue import ReviewItem, build_review_items, in_lifetime
 from bubbletrack.controller.review_segments import ReviewSegment, build_segments
-from bubbletrack.event_bus import RESULTS_CHANGED
+from bubbletrack.event_bus import FRAME_CHANGED, RESULTS_CHANGED, RUN_FINISHED, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.model import ml_assist
 from bubbletrack.model.result_history import ResultEdit
 from bubbletrack.model.state import AppState
@@ -80,10 +80,10 @@ class ReviewController:
         panel.action_requested.connect(self.perform)
         panel.segment_changed.connect(self._show_range)
         panel.export_requested.connect(lambda: self.w.export_requested.emit())
-        app.bus.subscribe("run_state_changed", self._on_run_state)
-        app.bus.subscribe("source_loaded", self._on_source_loaded)
-        app.bus.subscribe("frame_changed", self._on_frame_changed)
-        app.bus.subscribe("run_finished", self._on_run_finished)
+        app.bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
+        app.bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
+        app.bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
+        app.bus.subscribe(RUN_FINISHED, self._on_run_finished)
         app.bus.subscribe(RESULTS_CHANGED, lambda *_: self.refresh())
         app.bus.subscribe(RESULT_UNDONE, self._on_undone)
 

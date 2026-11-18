@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-from bubbletrack.event_bus import CIRCLE_FIXED
+from bubbletrack.event_bus import CIRCLE_FIXED, FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.ui.circle_tool import TOOL_CIRCLE, TOOL_POINTS
 from bubbletrack.ui.fix_strip import FixStrip
 from bubbletrack.ui.status_bar import MEASURE_MODE
@@ -51,9 +51,9 @@ class FixMode:
         strip.use_circle_clicked.connect(app.circle_ctrl.use_circle_as_manual)
         bus = app.bus
         bus.subscribe(CIRCLE_FIXED, self._on_circle_fixed)
-        bus.subscribe("frame_changed", self._on_frame_changed)
-        bus.subscribe("source_loaded", lambda _n: self.end())
-        bus.subscribe("run_state_changed", self._on_run_state)
+        bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
+        bus.subscribe(SOURCE_LOADED, lambda _n: self.end())
+        bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
 
     # -- state ------------------------------------------------------------- #
 

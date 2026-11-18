@@ -17,6 +17,7 @@ import numpy as np
 from PyQt6.QtCore import QObject, QPointF, QTimer
 from PyQt6.QtGui import QColor, QImage, QPainter, QPen, QPixmap, QPolygonF
 
+from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED
 from bubbletrack.controller.display_mixin import current_source
 from bubbletrack.controller.key_frames import (  # noqa: F401 (re-exported)
     KeyFrame, choose_key_frames, find_collapses, key_frame_tooltip, to_check_frames,
@@ -166,9 +167,9 @@ class FilmstripController(QObject):
 
         strip.frame_clicked.connect(jump_to)
         strip.expanded_changed.connect(lambda expanded: expanded and self.refresh())
-        bus.subscribe("run_state_changed", self._on_run_state)
-        bus.subscribe("source_loaded", self._on_source_loaded)
-        bus.subscribe("frame_changed", self._on_frame_changed)
+        bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
+        bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
+        bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
         if chart is not None and hasattr(chart, "data_changed"):
             chart.data_changed.connect(self.schedule_refresh)
 
