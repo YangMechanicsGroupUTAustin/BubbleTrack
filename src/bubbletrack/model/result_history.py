@@ -3,7 +3,9 @@
 An edit records each changed frame's result before and after.  Undo puts
 the "before" back exactly, but only while every frame still holds what the
 edit wrote: a later change (a delete, a refit, Fit All, another source) is
-never overwritten by an old snapshot.  Qt-free.
+never overwritten by an old snapshot.  Nor is an edit of a frame a Fit ran on
+since (:meth:`ResultHistory.note_fit`): a lock or a fix kept that frame out of
+the Fit, and its "before" is a result of the older run.  Qt-free.
 """
 
 from __future__ import annotations
@@ -142,10 +144,22 @@ class ResultHistory:
 
     def __init__(self, max_size: int = 50) -> None:
         self._stack = UndoStack(max_size)
+        self._fitted: dict[int, int] = {}  # id(edit) -> a frame of it a Fit ran on since
 
     def push(self, edit: ResultEdit | None) -> None:
         if edit is not None:
             self._stack.push(edit)
+            self._fitted.pop(id(edit), None)
+
+    def note_fit(self, frames: Iterable[int]) -> None:
+        """A Fit ran on *frames*: the edits so far of any of them can no longer be undone."""
+        ran = {int(f) for f in frames}
+        edits = self._stack.items()
+        self._fitted = {k: v for k, v in self._fitted.items() if k in {id(e) for e in edits}}
+        for edit in edits:
+            hit = sorted(ran.intersection(edit.frames))
+            if hit and id(edit) not in self._fitted:
+                self._fitted[id(edit)] = hit[0]
 
     def can_undo(self) -> bool:
         return self._stack.can_undo()
@@ -156,6 +170,7 @@ class ResultHistory:
 
     def clear(self) -> None:
         self._stack.clear()
+        self._fitted.clear()
 
     def undo(self, state) -> UndoOutcome:
         """Restore the newest edit; refused (and dropped) if its frames changed since."""
@@ -164,6 +179,10 @@ class ResultHistory:
             return UndoOutcome(None, False, "Nothing to undo")
         if state.radius is None or len(state.radius) != edit.n_frames:
             return UndoOutcome(edit, False, f"Cannot undo the {edit.label}: other data is loaded")
+        fitted = self._fitted.pop(id(edit), None)
+        if fitted is not None:
+            return UndoOutcome(edit, False, f"Cannot undo the {edit.label}: "
+                                            f"a Fit ran on frame {fitted + 1} since")
         moved = [i for i in edit.frames if not same_result(capture(state, i), edit.after[i])]
         if moved:
             return UndoOutcome(edit, False, f"Cannot undo the {edit.label}: "

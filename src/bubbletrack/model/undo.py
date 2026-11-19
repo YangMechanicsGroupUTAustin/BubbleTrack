@@ -48,6 +48,10 @@ class UndoStack:
     def can_undo(self) -> bool:
         return len(self._undo) > 0
 
+    def items(self) -> tuple[Any, ...]:
+        """The states ``undo()`` would return, oldest first."""
+        return tuple(self._undo)
+
     def can_redo(self) -> bool:
         return len(self._redo) > 0
 

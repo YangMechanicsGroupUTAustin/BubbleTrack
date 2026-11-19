@@ -118,6 +118,26 @@ def test_undo_is_last_in_first_out():
     assert history.undo(state).edit.label == "first" and state.radius[1] == 20.0
 
 
+def test_an_edit_of_a_frame_a_fit_ran_on_since_is_not_undone():
+    state = _state()
+    history = ResultHistory()
+    before = snapshot(state, [1])
+    _edit_frame(state, 1, 33.0)
+    history.push(record_edit(state, "circle fix on frame 2", before))
+    other = snapshot(state, [3])
+    _edit_frame(state, 3, 44.0)
+    history.push(record_edit(state, "circle fix on frame 4", other))
+    history.note_fit([0, 1, 2])  # e.g. a chart range: frame 2 kept (locked or kept fix)
+    newer = snapshot(state, [2])
+    _edit_frame(state, 2, 55.0)
+    history.push(record_edit(state, "circle fix on frame 3", newer))
+    assert history.undo(state).done and state.radius[2] == -1.0  # after the Fit: undone
+    assert history.undo(state).done and state.radius[3] == 40.0  # the Fit did not run on it
+    outcome = history.undo(state)
+    assert not outcome.done and "a Fit ran on frame 2 since" in outcome.message
+    assert state.radius[1] == 33.0
+
+
 def test_empty_history_has_nothing_to_undo():
     outcome = ResultHistory().undo(_state())
     assert not outcome.done and outcome.edit is None and "Nothing" in outcome.message

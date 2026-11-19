@@ -19,7 +19,9 @@ from bubbletrack.controller.pretune_controller import PretuneController
 from bubbletrack.controller.retrack_controller import RetrackController
 from bubbletrack.controller.session_controller import SessionController
 from bubbletrack.controller.settings_controller import SettingsController
-from bubbletrack.event_bus import RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus
+from bubbletrack.event_bus import (
+    RESULTS_CHANGED, RUN_FINISHED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus,
+)
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import (
     AUTO_METHOD, DISPLAY_DEBOUNCE_MS, PREVIEW_DEBOUNCE_MS, STEEP_EDGE,
@@ -133,6 +135,8 @@ class AppController:
         # Lock everything that mutates results while a worker writes into them
         self._run_locked = False
         self.bus.subscribe(RUN_STATE_CHANGED, self._apply_run_lock)
+        # Edits of frames a Fit ran on cannot be undone after it (see ResultHistory)
+        self.bus.subscribe(RUN_FINISHED, lambda info: self.history.note_fit(info.get("frames", ())))
         self.w.set_close_guard(self._confirm_close)
 
         self._connect_signals()

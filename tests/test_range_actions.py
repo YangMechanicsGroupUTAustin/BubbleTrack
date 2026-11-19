@@ -107,6 +107,25 @@ def test_a_chart_no_bubble_mark_is_one_undo(app):
     assert "no-bubble mark of frames 5–9" in window.header._status_label.text()
 
 
+def test_ctrl_z_after_a_fit_keeps_an_edit_of_a_frame_it_ran_on(app, qapp, monkeypatch):
+    """A lock kept frames 3-4 out of Fit All; undoing it afterwards would leave them
+    unlocked with results of the older run, which the Fit never re-measured."""
+    from bubbletrack.controller import worker as worker_module
+
+    window, controller, state, _ = app
+    window.radius_chart.lock_range_requested.emit(2, 3)
+    monkeypatch.setattr(worker_module.BatchWorker, "inline", True)
+    controller.auto_ctrl.on_auto_fit()
+    _wait(qapp, lambda: not controller.auto_ctrl.is_busy())
+    controller._on_undo()
+    assert state.fit_locked[2] and state.fit_locked[3]
+    assert "Cannot undo the lock of frames 3–4: a Fit ran on frame 3 since" \
+        in window.header._status_label.text()
+    window.radius_chart.lock_range_requested.emit(6, 6)  # an edit after the Fit
+    controller._on_undo()
+    assert not state.fit_locked[6]
+
+
 def test_a_chart_lock_is_one_undo(app):
     window, controller, state, _ = app
     window.radius_chart.lock_range_requested.emit(2, 3)
