@@ -68,9 +68,10 @@ def results_radius_definition(state: AppState) -> str:
 
     The settings describe the next fit, not the stored one: ticking "Bubble may be
     non-round" or switching the method refits nothing.  A radius measured by area
-    carries the flag ``area_radius``; any other computed radius follows the current
-    method.  Manual fixes are circle fits (the per-frame ``Source`` names them).
-    With nothing measured yet, the settings are described.
+    carries the flag ``area_radius``; a classic dark-region area its region count
+    (``Region_Count`` > 0); any other computed radius follows the current method.
+    Manual fixes are circle fits (the per-frame ``Source`` names them).  With
+    nothing measured yet, the settings are described.
     """
     from bubbletrack.model.provenance import AREA_RADIUS_FLAG, FitSource
 
@@ -82,19 +83,25 @@ def results_radius_definition(state: AppState) -> str:
         return radius_definition(mode, edge, bool(state.bubble_non_round))
     measured = np.asarray(radius) > 0
     by_area = measured & np.array([AREA_RADIUS_FLAG in f for f in flags], dtype=bool)
-    computed = measured & ~by_area
+    counts = state.region_count
+    by_regions = measured & ~by_area
+    if mode == "area" or counts is None or len(counts) != n:
+        by_regions &= False                      # in area mode they follow the method anyway
+    else:
+        by_regions &= np.asarray(counts) > 0
+    computed = measured & ~by_area & ~by_regions
     if sources is not None and len(sources) == n:
         computed &= np.asarray(sources) != FitSource.MANUAL
-    n_area, n_other = int(by_area.sum()), int(computed.sum())
-    area_text = radius_definition("edge", edge, True)
-    other_text = radius_definition(mode, edge, False)
-    if not n_area:
-        return other_text
-    if not n_other:
-        return area_text
+    groups = [(int(by_area.sum()), radius_definition("edge", edge, True), " (flag area_radius)"),
+              (int(by_regions.sum()), radius_definition("area"), " (Region_Count > 0)"),
+              (int(computed.sum()), radius_definition(mode, edge, False), "")]
+    present = [g for g in groups if g[0]]
+    if not present:
+        return groups[-1][1]
+    if len(present) == 1:
+        return present[0][1]
     frames = lambda k: f"{k} frame{'' if k == 1 else 's'}"  # noqa: E731
-    return (f"mixed: {frames(n_area)} {area_text} (flag area_radius); "
-            f"{frames(n_other)} {other_text}")
+    return "mixed: " + "; ".join(f"{frames(k)} {text}{note}" for k, text, note in present)
 
 
 def _plain_value(value: object) -> object:

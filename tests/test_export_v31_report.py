@@ -57,6 +57,19 @@ class TestParameters:
         params = build_report_parameters(_state(detection_mode="area"))
         assert params["Radius Definition"] == "area-equivalent (dark regions)"
 
+    def test_classic_area_results_stay_area_after_switching_to_auto(self):
+        # Fit All with "Dark region area" (each result keeps its region count), then the
+        # method switched to Auto before exporting: nothing was refitted.
+        state = _state(detection_mode="area")
+        state.region_count[[2, 3, 4, 6, 7, 8, 9]] = 1  # frame 5 is a manual fit
+        switched = AppState(**{**state.__dict__, "detection_mode": "edge"})
+        definition = build_report_parameters(switched)["Radius Definition"]
+        assert definition == "area-equivalent (dark regions)"
+        switched.region_count[9] = 0  # one frame refitted by Auto since
+        text = build_report_parameters(switched)["Radius Definition"]
+        assert text.startswith("mixed: 6 frames area-equivalent (dark regions) (Region_Count > 0); "
+                               "1 frame least-squares circle"), text
+
 
 class TestQuality:
     def test_confidence_summary_over_scored_fits(self):
