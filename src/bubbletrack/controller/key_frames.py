@@ -64,12 +64,16 @@ def choose_key_frames(
     radius: np.ndarray,
     to_check: Sequence[int] = (),
     *,
+    collapses: Sequence[int] | None = None,
     max_check: int = MAX_TO_CHECK,
     max_total: int = MAX_KEY_FRAMES,
 ) -> list[KeyFrame]:
     """First fitted frame, Rmax, collapses and last fitted frame, plus the
     first *max_check* frames of *to_check* (Review's, most likely wrong
-    first); ordered by frame.  Nothing else is ever "to check"."""
+    first); ordered by frame.  Nothing else is ever "to check".
+
+    *collapses*: the sequence solver's collapse frames after tracking (the ones
+    Review calls "Near collapse"); None = find them here (``find_collapses``)."""
     r = np.asarray(radius, dtype=float)
     valid = np.isfinite(r) & (r > 0)
     if not valid.any():
@@ -82,7 +86,9 @@ def choose_key_frames(
 
     add(idx[0], "first")
     add(idx[np.argmax(r[idx])], "Rmax")
-    for frame in find_collapses(r):
+    found = find_collapses(r) if collapses is None else sorted(
+        {int(f) for f in collapses if 0 <= f < len(r) and valid[f]})[:MAX_COLLAPSES]
+    for frame in found:
         add(frame, "collapse")
     add(idx[-1], "last")
     n = len(r)

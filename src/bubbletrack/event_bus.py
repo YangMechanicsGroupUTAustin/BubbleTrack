@@ -23,6 +23,9 @@ RUN_PROGRESS = "run_progress"
 RUN_FINISHED = "run_finished"
 # Emitted with the frames tracking wants reviewed.
 TRACKING_REVIEW = "tracking_review"
+# Emitted with the collapse frames tracking found (0-based), after the results it
+# stored; None after a run that did not track (its results replaced the solved ones).
+TRACKING_COLLAPSES = "tracking_collapses"
 # Emitted (no arguments) after anything edits per-frame results in place:
 # autosave, the review queue, re-tracking and ML assist listen for it.
 RESULTS_CHANGED = "results_changed"

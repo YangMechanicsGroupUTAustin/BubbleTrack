@@ -18,7 +18,9 @@ from bubbletrack.controller.live_view import show_live_frame
 from bubbletrack.controller.run_summary import RunOutcome, summary_line
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.controller.worker import BatchWorker
-from bubbletrack.event_bus import RUN_FINISHED, RUN_PROGRESS, RUN_STATE_CHANGED, TRACKING_REVIEW, EventBus
+from bubbletrack.event_bus import (
+    RUN_FINISHED, RUN_PROGRESS, RUN_STATE_CHANGED, TRACKING_COLLAPSES, TRACKING_REVIEW, EventBus,
+)
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
 from bubbletrack.model.conventions import frame_to_display
@@ -238,6 +240,7 @@ class AutoController(BaseController):
             return
         if self.state.images:
             self.state = self.state.with_results_initialized(len(self.state.images))
+        self.bus.emit(TRACKING_COLLAPSES, None)  # nothing tracked is left
         self.w.left_panel.fit_controls.reset_progress()
         self.w.radius_chart.clear()
         display_frame(
@@ -369,7 +372,8 @@ class AutoController(BaseController):
         if changed:
             self._run_notes.append(f"tracking re-measured {plural(len(changed), 'frame')}")
         self._finish_run(stopped=False,
-                         review=review_items(outcome.result, allowed_frames=self._tracking_scope()))
+                         review=review_items(outcome.result, allowed_frames=self._tracking_scope()),
+                         collapses=outcome.result.collapse_frames)
 
     def _tracking_scope(self) -> frozenset[int] | None:
         """Frames tracking may change: any after a run over every frame (Fit All),
@@ -484,9 +488,12 @@ class AutoController(BaseController):
             logger.warning("Auto-save to %s failed: %s", path, exc)
             return False
 
-    def _finish_run(self, stopped: bool, review=None) -> None:
+    def _finish_run(self, stopped: bool, review=None, collapses=()) -> None:
         self._running = False
         self._tracker = None
+        # Before the run ends (the strip refreshes then): tracking's collapses, or None
+        # when this run did not track (its results replaced the solved ones).
+        self.bus.emit(TRACKING_COLLAPSES, None if review is None else tuple(collapses))
         self._set_run_state(False)
         self.w.left_panel.fit_controls.set_running(False)
         self._write_autosave()  # final state, not just the last multiple of 50

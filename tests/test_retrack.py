@@ -4,6 +4,7 @@ limited to frames that do not look good, and undone in one Ctrl+Z."""
 
 from __future__ import annotations
 
+import dataclasses
 import time
 
 import cv2
@@ -266,6 +267,18 @@ def test_review_receives_the_solver_list(qapp, app):
     _edit(controller)
     _started(qapp).finish()
     assert [item.frame for item in seen[0]] == [2]
+
+
+def test_the_filmstrip_receives_the_solvers_collapses(qapp, app):
+    _, controller = app
+    seen = []
+    controller.bus.subscribe("tracking_collapses", seen.append)
+    _edit(controller)
+    worker = _started(qapp)
+    outcome = _outcome(worker.n, 5.0)
+    worker.solved.emit(TrackingOutcome(dataclasses.replace(outcome.result, collapse_frames=(3,)),
+                                       outcome.redetector))
+    assert seen == [(3,)]
 
 
 def test_edit_during_a_retrack_cancels_and_restarts_it(qapp, app):

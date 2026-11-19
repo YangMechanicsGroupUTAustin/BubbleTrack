@@ -21,8 +21,9 @@ from bubbletrack.controller.display_mixin import current_source
 from bubbletrack.controller.key_frames import (  # noqa: F401 (re-exported)
     KeyFrame, choose_key_frames, find_collapses, key_frame_tooltip, to_check_frames,
 )
+from bubbletrack.controller.review_memory import result_key
 from bubbletrack.controller.review_queue import ReviewItem
-from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED
+from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_COLLAPSES
 from bubbletrack.model.conventions import roi_to_slice
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode, to_grayscale
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail
@@ -148,8 +149,9 @@ def results_signature(state) -> int:
 class FilmstripController(QObject):
     """Keeps the strip in step with the results and the Review queue;
     debounced and cached.  *review_rows* returns the Review rows (none: the
-    strip shows no frame "to check").  A child of the strip: its Qt
-    connections end with it."""
+    strip shows no frame "to check").  After tracking, its collapses are the
+    solver's (each while its frame keeps the result it was found on, like
+    Review's items).  A child of the strip: its Qt connections end with it."""
 
     def __init__(self, strip: Filmstrip, get_state: Callable, jump_to: Callable[[int], None],
                  bus, chart=None, review_rows: ReviewRows | None = None) -> None:
@@ -160,6 +162,9 @@ class FilmstripController(QObject):
         self._cache = ThumbnailCache()
         self._running = False
         self._built_for: int | None = None  # signature of the shown strip
+        # Tracking's collapse frames -> the result each was found on; None: no tracking
+        # result for these results (the strip finds collapses itself).
+        self._solver_collapses: dict[int, tuple] | None = None
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(REFRESH_DEBOUNCE_MS)
@@ -170,6 +175,7 @@ class FilmstripController(QObject):
         bus.subscribe(RUN_STATE_CHANGED, self._on_run_state)
         bus.subscribe(SOURCE_LOADED, self._on_source_loaded)
         bus.subscribe(FRAME_CHANGED, self._on_frame_changed)
+        bus.subscribe(TRACKING_COLLAPSES, self._on_tracking_collapses)
         if chart is not None and hasattr(chart, "data_changed"):
             chart.data_changed.connect(self.schedule_refresh)
 
@@ -196,15 +202,25 @@ class FilmstripController(QObject):
         rows = list(self._review_rows()) if self._review_rows is not None else []
         items = {item.frame: item for row in rows for item in row.items}
         candidates = to_check_frames(rows)
-        signature = hash((results_signature(state), tuple(candidates), frozenset(items)))
+        collapses = self._collapses(state)
+        signature = hash((results_signature(state), tuple(candidates), frozenset(items),
+                          None if collapses is None else tuple(collapses)))
         if signature == self._built_for and not force:
             return
         self._built_for = signature
-        keys = choose_key_frames(state.radius, candidates)
+        keys = choose_key_frames(state.radius, candidates, collapses=collapses)
         thumbs = [t for t in (self._thumbnail(state, k, items.get(k.frame)) for k in keys)
                   if t is not None]
         self._strip.set_thumbnails(thumbs)
         self._strip.set_current(state.image_no)
+
+    def _collapses(self, state) -> list[int] | None:
+        """Tracking's collapse frames that still hold their result (None: no tracking)."""
+        if self._solver_collapses is None:
+            return None
+        n = len(state.radius)
+        return [f for f, key in sorted(self._solver_collapses.items())
+                if f < n and result_key(state, f) == key]
 
     def _thumbnail(self, state, key: KeyFrame, item: ReviewItem | None) -> Thumbnail | None:
         idx = key.frame
@@ -231,9 +247,20 @@ class FilmstripController(QObject):
         if not running:
             self.refresh()
 
+    def _on_tracking_collapses(self, frames) -> None:
+        state = self._get_state()
+        if frames is None or state.radius is None:
+            self._solver_collapses = None
+        else:
+            n = len(state.radius)
+            self._solver_collapses = {int(f): result_key(state, int(f)) for f in frames
+                                      if 0 <= int(f) < n}
+        self.schedule_refresh()
+
     def _on_source_loaded(self, _n: int) -> None:
         self._cache.clear()
         self._built_for = None
+        self._solver_collapses = None
         self._strip.set_thumbnails([])  # also when collapsed (refresh skips it then)
         self.refresh(force=True)
 

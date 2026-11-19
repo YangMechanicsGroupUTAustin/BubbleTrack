@@ -18,6 +18,7 @@ from bubbletrack.controller.key_frames import (
 )
 from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.controller.review_segments import ReviewSegment
+from bubbletrack.event_bus import TRACKING_COLLAPSES
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.state import update_state
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail
@@ -76,6 +77,21 @@ class TestKeyFrameChoice:
         peak = int(np.argmax(r))
         kinds = {k.frame: k.kinds for k in choose_key_frames(r, to_check=[peak])}
         assert kinds[peak] == ("Rmax", "to check")
+
+    def test_the_solvers_collapses_replace_the_strips_own_rule(self):
+        """After tracking the strip shows the sequence solver's collapses (Review's "Near
+        collapse" rows), never a minimum its own rule finds (e.g. one bad frame mid-growth)."""
+        r = _two_cycles()
+        own = find_collapses(r)
+
+        def shown(**kw):
+            return [k.frame for k in choose_key_frames(r, **kw) if "collapse" in k.kinds]
+
+        assert shown() == own
+        assert shown(collapses=(30, 12)) == [12, 30]
+        assert shown(collapses=()) == []          # the solver found no collapse
+        r[12] = -1                                # a frame without a result is never shown
+        assert shown(collapses=(30, 12)) == [30]
 
     def test_one_frame_per_review_row_to_check_in_queue_order(self):
         def row(category, severity, *frames):
@@ -333,6 +349,39 @@ class TestToCheckFollowsReview:
             "No result · confidence 0.95", "To check: no result"]
         for b in window.filmstrip.buttons():
             assert "flags" not in b.toolTip() and "saturation" not in b.toolTip()
+
+    @staticmethod
+    def _collapses(window) -> list[int]:
+        return [int(b.property("frame")) for b in window.filmstrip.buttons()
+                if "collapse" in b.toolTip().splitlines()[0]]
+
+    def test_collapses_follow_tracking_while_its_frames_keep_their_results(self, gui, make_sequence):
+        window, controller = self._fitted(gui, make_sequence)
+        state = controller._get_state()
+        own = find_collapses(state.radius)
+        assert self._collapses(window) == own and 5 not in own
+        controller.bus.emit(TRACKING_COLLAPSES, (5,))   # tracking found its collapse at frame 5
+        controller.filmstrip.refresh()
+        assert self._collapses(window) == [5]
+        state.radius[5] = 40.0                          # a fix: tracking's verdict is stale there
+        controller.filmstrip.refresh()
+        assert self._collapses(window) == []
+        controller.bus.emit(TRACKING_COLLAPSES, None)   # a run that did not track
+        controller.filmstrip.refresh()
+        assert self._collapses(window) == find_collapses(state.radius)
+
+    def test_a_run_without_tracking_and_a_new_source_drop_trackings_collapses(
+            self, gui, make_sequence, monkeypatch):
+        window, controller = self._fitted(gui, make_sequence)
+        auto = controller.auto_ctrl
+        seen = []
+        controller.bus.subscribe(TRACKING_COLLAPSES, seen.append)
+        monkeypatch.setattr(auto, "_show_summary", lambda *a: None)
+        auto._finish_run(stopped=True)                  # e.g. a classic Fit All, or Stop
+        auto._finish_run(stopped=False, review=[], collapses=(3, 9))
+        assert seen == [None, (3, 9)]
+        controller.file_ctrl.on_folder_selected(str(make_sequence("other", 8)))
+        assert controller.filmstrip._solver_collapses is None
 
     def test_a_settled_frame_leaves_the_strip(self, gui, make_sequence, qapp):
         window, controller = self._fitted(gui, make_sequence)

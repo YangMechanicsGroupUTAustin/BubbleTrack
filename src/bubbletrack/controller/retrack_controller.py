@@ -37,7 +37,8 @@ from bubbletrack.controller.base import BaseController
 from bubbletrack.controller.display_mixin import display_frame, refresh_chart
 from bubbletrack.controller.tracking import TrackingWorker, apply_tracking, review_items
 from bubbletrack.event_bus import (
-    RESULT_UNDONE, RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_REVIEW, EventBus,
+    RESULT_UNDONE, RESULTS_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_COLLAPSES,
+    TRACKING_REVIEW, EventBus,
 )
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
@@ -270,6 +271,7 @@ class RetrackController(BaseController):
         with self.muted():
             self.bus.emit(TRACKING_REVIEW,
                           tuple(review_items(outcome.result, allowed_frames=self._allowed)))
+            self.bus.emit(TRACKING_COLLAPSES, tuple(outcome.result.collapse_frames))
             if n:
                 self._results_changed()
 
