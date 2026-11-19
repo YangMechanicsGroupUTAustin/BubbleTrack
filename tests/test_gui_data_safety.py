@@ -191,13 +191,16 @@ class TestRunSafety:
             stale, 1, 42.0, np.zeros((3, 2)), None, 10.0, 10.0, 0)
         assert controller._get_state().radius[1] == -1.0
 
-    def test_final_autosave_and_sources_after_fit_all(self, qapp, gui, make_sequence):
+    def test_fit_all_writes_nothing_into_the_image_folder(self, qapp, gui, make_sequence):
+        # Data folders may be shared, synced or read-only: the session recovery
+        # autosave lives in ~/.bubbletrack/recovery instead.
         window, controller = gui
         folder = make_sequence("A", 12)
+        before = sorted(p.name for p in folder.iterdir())
         _load(controller, folder)
         _use_owner_params(controller)
         _run_fit_all(qapp, window, controller)
-        assert (folder / ".bubbletrack_autosave.mat").exists()
+        assert sorted(p.name for p in folder.iterdir()) == before
         state = controller._get_state()
         assert (state.radius > 0).all()
         assert (state.fit_source == FitSource.AUTO).all()

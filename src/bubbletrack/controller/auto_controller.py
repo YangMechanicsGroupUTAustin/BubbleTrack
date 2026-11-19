@@ -6,7 +6,6 @@ import logging
 import time
 from collections.abc import Callable
 from functools import partial
-from pathlib import Path
 
 import numpy as np
 from PyQt6.QtWidgets import QMessageBox
@@ -24,24 +23,10 @@ from bubbletrack.event_bus import (
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.constants import AUTO_DISPLAY_THROTTLE_MS, QUALITY_WARN_THRESHOLD
 from bubbletrack.model.conventions import frame_to_display
-from bubbletrack.model.export import export_r_data
 from bubbletrack.model.provenance import FitSource, is_user_confirmed
 from bubbletrack.ui.wording import plural, score_name
 
 logger = logging.getLogger(__name__)
-
-AUTOSAVE_INTERVAL = 50  # frames between incremental auto-saves
-AUTOSAVE_NAME = ".bubbletrack_autosave.mat"
-# A file with this name in a source folder or any of its parents turns the
-# source-folder autosave off there (reference data sets, read-only archives).
-NO_AUTOSAVE_MARKER = ".bubbletrack_no_autosave"
-
-
-def autosave_disabled(folder: Path) -> bool:
-    """True when *folder* or one of its parents holds ``NO_AUTOSAVE_MARKER``."""
-    folder = Path(folder).resolve()
-    return any((d / NO_AUTOSAVE_MARKER).is_file() for d in (folder, *folder.parents))
-
 
 class AutoController(BaseController):
     """Manages automatic batch fitting with a background worker thread.
@@ -67,7 +52,6 @@ class AutoController(BaseController):
         self._frame_errors = 0
         self._failed_frames: set[int] = set()
         self._frames_done = 0
-        self._autosave_failed = False
         self._edge_job = None  # the run's EdgeJob, reused by tracking
         self._run_notes: list[str] = []  # routine notes, e.g. what tracking changed
         self._run_problems: list[str] = []  # what went wrong (named in the summary)
@@ -218,7 +202,6 @@ class AutoController(BaseController):
         self._frame_errors = 0
         self._failed_frames = set()
         self._frames_done = 0
-        self._autosave_failed = False
         self._running = True
         self._set_run_state(True)
 
@@ -430,9 +413,6 @@ class AutoController(BaseController):
         if state.fit_source is not None:
             state.fit_source[idx] = source
 
-        if (idx + 1) % AUTOSAVE_INTERVAL == 0:
-            self._write_autosave()
-
         self._update_live_view(idx, radius, binary_roi)
 
     def _update_live_view(self, idx: int, radius: float, binary_roi) -> None:
@@ -454,41 +434,6 @@ class AutoController(BaseController):
             frames = np.arange(1, len(self.state.radius) + 1)
             self.w.radius_chart.plot_all(frames, self.state.radius)
 
-    def _autosave_path(self) -> Path | None:
-        """Next to the images, or next to the video (one file per video).
-
-        None when there is no source or the source sits under a folder that
-        holds a ``NO_AUTOSAVE_MARKER`` file.
-        """
-        if self.state.video_reader is not None and self.state.video_path:
-            video = Path(self.state.video_path)
-            path = video.with_name(f".{video.stem}{AUTOSAVE_NAME}")
-        elif self.state.folder_path:
-            path = Path(self.state.folder_path) / AUTOSAVE_NAME
-        else:
-            return None
-        return None if autosave_disabled(path.parent) else path
-
-    def _write_autosave(self) -> bool:
-        """Write the incremental autosave; never raises."""
-        path = self._autosave_path()
-        if path is None:
-            return False
-        try:
-            export_r_data(
-                str(path),
-                self.state.radius,
-                self.state.circle_fit_par,
-                self.state.circle_xy,
-                self.state.region_count,
-            )
-            logger.info("Auto-saved to %s", path)
-            return True
-        except Exception as exc:
-            self._autosave_failed = True
-            logger.warning("Auto-save to %s failed: %s", path, exc)
-            return False
-
     def _finish_run(self, stopped: bool, review=None, collapses=()) -> None:
         self._running = False
         self._tracker = None
@@ -497,7 +442,6 @@ class AutoController(BaseController):
         self.bus.emit(TRACKING_COLLAPSES, None if review is None else tuple(collapses))
         self._set_run_state(False)
         self.w.left_panel.fit_controls.set_running(False)
-        self._write_autosave()  # final state, not just the last multiple of 50
 
         # Final full display update
         if self.state.images:
@@ -529,8 +473,6 @@ class AutoController(BaseController):
             # A read or a fit error: either way the frame keeps what it had (see the log)
             problems.append(f"{plural(self._frame_errors, 'frame')} failed and kept "
                             "their previous result (see the log)")
-        if self._autosave_failed:
-            problems.append("autosave failed (is the folder read-only?)")
         if scores is not None and state.radius is not None and not stopped:
             low = int(np.sum((state.radius > 0) & (scores < QUALITY_WARN_THRESHOLD)))
             if low:
