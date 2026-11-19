@@ -34,6 +34,7 @@ def show_live_frame(state: AppState, window, idx: int,
         cur_img, _, _, _ = normalize_source(
             current_source(state, idx), state.img_thr, state.gridx, state.gridy,
             gaussian_sigma=state.gaussian_sigma, clahe_clip=state.clahe_clip,
+            divisor=state.counts_divisor,
         )
         panel = window.original_panel
         panel.set_image(cur_img)

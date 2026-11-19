@@ -51,7 +51,7 @@ def _build_cache_key(filepath: str, state: AppState) -> str:
     return (
         f"{filepath}:{state.img_thr}:{state.gridx}:{state.gridy}"
         f":{state.gaussian_sigma}:{state.clahe_clip}:{state.detection_mode}"
-        f":{state.gradient_boundary}:{state.area_max_regions}"
+        f":{state.gradient_boundary}:{state.area_max_regions}:{state.counts_divisor}"
     )
 
 
@@ -97,6 +97,7 @@ def display_frame(
                 state.gridy,
                 gaussian_sigma=state.gaussian_sigma,
                 clahe_clip=state.clahe_clip,
+                divisor=state.counts_divisor,
             )
             if cache is not None:
                 cache.put(
@@ -111,6 +112,7 @@ def display_frame(
                 state.gridy,
                 gaussian_sigma=state.gaussian_sigma,
                 clahe_clip=state.clahe_clip,
+                divisor=state.counts_divisor,
             )
             if cache is not None:
                 cache.put(

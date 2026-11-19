@@ -45,6 +45,7 @@ def run_autotune(
     opening_radius: int = 0,
     closing_radius: int = 0,
     max_radius: float = float("inf"),
+    divisor: int | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     cancel_check: Callable[[], bool] | None = None,
 ) -> AutoTuneResult | None:
@@ -98,6 +99,7 @@ def run_autotune(
                 image_path, thr, gridx, gridy,
                 gaussian_sigma=gaussian_sigma,
                 clahe_clip=clahe_clip,
+                divisor=divisor,
             )
             _binary_cache[round(thr, 4)] = binary_roi
         except Exception:
@@ -161,6 +163,7 @@ def run_autotune(
                         image_path, thr, gridx, gridy,
                         gaussian_sigma=gaussian_sigma,
                         clahe_clip=clahe_clip,
+                        divisor=divisor,
                     )
                     _binary_cache[thr_key] = binary_roi
                 except Exception:

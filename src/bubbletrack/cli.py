@@ -16,7 +16,7 @@ from bubbletrack.model.config import DETECTION_MODES, EDGE_DEFINITIONS
 from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR, DEFAULT_RMAX_FIT_LENGTH
 from bubbletrack.model.export import build_export_metadata, export_csv, export_excel, export_r_data
 from bubbletrack.model.frame_pipeline import FrameParams, fit_image_file
-from bubbletrack.model.image_io import imread_unicode, scan_folder
+from bubbletrack.model.image_io import imread_unicode, sample_counts_divisor, scan_folder
 from bubbletrack.model.removing_factor import compute_removing_factor
 from bubbletrack.model.state import AppState
 
@@ -307,6 +307,9 @@ def main(argv: list[str] | None = None) -> None:
         edges=tuple(bool(e) for e in args.edges),
         mode=args.mode,
         max_radius=float(max(shape)),  # the GUI's sanity bound
+        # Chosen once for the recording, as the GUI does at load
+        counts_divisor=sample_counts_divisor(
+            lambda i: imread_unicode(images[i]), len(images)),
     )
 
     radius, centers, edge_pts, region_count = _process_frames(

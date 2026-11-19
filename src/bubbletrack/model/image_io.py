@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import cv2
@@ -291,7 +292,56 @@ def _counts_divisor(peak: float) -> int:
     return UINT16_DIVISOR
 
 
-def to_threshold_uint8(gray: np.ndarray) -> np.ndarray:
+def frame_counts_divisor(gray: np.ndarray) -> int | None:
+    """The divisor :func:`to_threshold_uint8` gives this frame's camera counts on its
+    own (4, 16 or 256, from its peak); None when its values are not camera counts
+    (8-bit, normalised floats, negative or beyond 16 bits)."""
+    if gray.dtype == np.uint8:
+        return None
+    if gray.dtype == np.uint16:
+        return _counts_divisor(int(gray.max())) if gray.size else None
+    is_float = np.issubdtype(gray.dtype, np.floating)
+    values = _replace_non_finite(gray.astype(np.float64)) if is_float else gray.astype(np.float64)
+    if values.size == 0:
+        return None
+    lo, hi = float(values.min()), float(values.max())
+    if (is_float and lo >= 0.0 and hi <= 1.0) or not (lo >= 0.0 and hi <= np.iinfo(np.uint16).max):
+        return None
+    return _counts_divisor(hi)
+
+
+def recording_counts_divisor(frames: Iterable[np.ndarray]) -> int | None:
+    """One divisor for a whole recording, from a few of its frames (the brightest one's).
+
+    Chosen once per recording, so a dark frame of 12-bit data (peak <= 1023) is not
+    divided by 4 instead of 16, which would change its threshold.  None when no frame
+    holds camera counts (each frame then follows its own rule).
+    """
+    found = [frame_counts_divisor(to_grayscale(f)) for f in frames]
+    known = [d for d in found if d is not None]
+    return max(known) if known else None
+
+
+COUNTS_SAMPLE_FRAMES = 5  # frames read at load to choose a recording's counts divisor
+
+
+def sample_counts_divisor(read: Callable[[int], np.ndarray], n_frames: int,
+                          samples: int = COUNTS_SAMPLE_FRAMES) -> int | None:
+    """:func:`recording_counts_divisor` of up to *samples* evenly spaced frames
+    (``read(index)``, the first included); unreadable frames are skipped."""
+    frames = []
+    for idx in sorted({int(i) for i in np.linspace(0, max(n_frames - 1, 0), max(1, min(samples, n_frames)))}):
+        try:
+            raw = read(idx)
+        except Exception as exc:  # one bad frame must not stop a load
+            logger.debug("Counts divisor: frame %d unreadable: %s", idx + 1, exc)
+            continue
+        if raw is not None:
+            frames.append(raw)
+    return recording_counts_divisor(frames)
+
+
+def to_threshold_uint8(gray: np.ndarray, divisor: int | None = None) -> np.ndarray:
     """Convert a 2-D grey frame to the uint8 image used for adaptive thresholding.
 
     The adaptive-threshold offset is in absolute 8-bit grey levels, so camera
@@ -304,7 +354,9 @@ def to_threshold_uint8(gray: np.ndarray) -> np.ndarray:
       the original conversion, unchanged bit for bit.
     * ``uint16`` with max <= 4095 (12-bit) or <= 1023 (10-bit data stored in
       uint16): divided by 16 or 4 instead, so the frame spans 256 grey
-      levels rather than 16 or 4.  The choice is made per frame.
+      levels rather than 16 or 4.  *divisor* (the recording's, see
+      :func:`recording_counts_divisor`) replaces this per-frame choice;
+      brighter counts then saturate at 255.
     * floats whose finite values all lie in [0, 1]: normalised intensities,
       multiplied by 255.
     * other types (floats, signed or 32-bit integers) whose values lie in
@@ -320,7 +372,8 @@ def to_threshold_uint8(gray: np.ndarray) -> np.ndarray:
     if gray.dtype == np.uint8:
         return gray.astype(np.uint8)
     if gray.dtype == np.uint16:
-        return (gray / _counts_divisor(int(gray.max()))).astype(np.uint8)
+        own = divisor if divisor is not None else _counts_divisor(int(gray.max()))
+        return np.minimum(gray / own, 255.0).astype(np.uint8)
 
     is_float = np.issubdtype(gray.dtype, np.floating)
     values = _replace_non_finite(gray.astype(np.float64)) if is_float else gray.astype(np.float64)
@@ -328,7 +381,7 @@ def to_threshold_uint8(gray: np.ndarray) -> np.ndarray:
     if is_float and lo >= 0.0 and hi <= 1.0:
         scaled = values * 255.0
     elif lo >= 0.0 and hi <= np.iinfo(np.uint16).max:
-        scaled = values / _counts_divisor(hi)
+        scaled = values / (divisor if divisor is not None else _counts_divisor(hi))
     elif hi > lo:
         scaled = (values - lo) / (hi - lo) * 255.0
     else:
@@ -344,6 +397,7 @@ def normalize_frame(
     *,
     gaussian_sigma: float = 0.0,
     clahe_clip: float = 0.0,
+    divisor: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Normalise a raw greyscale frame, adaptive-threshold, and extract ROI.
 
@@ -362,6 +416,9 @@ def normalize_frame(
         1-indexed inclusive row bounds for the ROI.
     gridy : (col_start, col_end)
         1-indexed inclusive column bounds for the ROI.
+    divisor : int, optional
+        The recording's counts divisor (:func:`recording_counts_divisor`);
+        None = chosen from this frame.
 
     Returns
     -------
@@ -395,7 +452,7 @@ def normalize_frame(
     block_size = max(block_size, 3)
 
     # For adaptive thresholding we need uint8 input
-    raw_8 = to_threshold_uint8(raw)
+    raw_8 = to_threshold_uint8(raw, divisor)
 
     # Pre-threshold filters
     if gaussian_sigma > 0:
@@ -437,6 +494,7 @@ def load_and_normalize(
     *,
     gaussian_sigma: float = 0.0,
     clahe_clip: float = 0.0,
+    divisor: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Load an image, normalise to [0,1], adaptive-threshold, and extract ROI.
 
@@ -470,7 +528,7 @@ def load_and_normalize(
 
     return normalize_frame(
         raw, sensitivity, gridx, gridy,
-        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
+        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip, divisor=divisor,
     )
 
 

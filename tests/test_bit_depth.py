@@ -15,6 +15,8 @@ from bubbletrack.model.detection import detect_bubble_with_mode, measure_detecti
 from bubbletrack.model.image_io import (
     ImageLoadError,
     normalize_frame,
+    recording_counts_divisor,
+    sample_counts_divisor,
     to_grayscale,
     to_threshold_uint8,
 )
@@ -156,3 +158,83 @@ def test_normalised_image_ignores_nan(tmp_path):
     cur_img, binary, _, _ = normalize_frame(raw, 0.5, (1, 250), (1, 400))
     assert np.isfinite(cur_img).all()
     assert binary.any() and not binary.all()
+
+
+# --------------------------------------------------------------------------- #
+#  One divisor per recording (classic methods)
+# --------------------------------------------------------------------------- #
+BRIGHT12 = (FRAME16 >> 4).astype(np.uint16)         # 12-bit camera data
+DARK12 = (BRIGHT12 // 5).astype(np.uint16)          # the same camera, a dark frame: peak <= 1023
+
+
+class TestOneDivisorPerRecording:
+    """A dark frame of a 12-bit recording keeps the recording's /16; on its own it would be
+    divided by 4, which moves its threshold."""
+
+    def test_the_recordings_divisor_is_its_brightest_frames(self):
+        assert DARK12.max() <= 1023 < BRIGHT12.max() <= 4095
+        assert recording_counts_divisor([DARK12, BRIGHT12, DARK12]) == 16
+        assert recording_counts_divisor([DARK12]) == 4
+        assert recording_counts_divisor([FRAME16, DARK12]) == 256
+        assert recording_counts_divisor([_FRAME8, np.dstack([_FRAME8] * 3)]) is None
+        assert recording_counts_divisor([]) is None
+
+    def test_a_dark_frame_keeps_the_recordings_divisor(self):
+        np.testing.assert_array_equal(to_threshold_uint8(DARK12, 16), (DARK12 / 16).astype(np.uint8))
+        np.testing.assert_array_equal(to_threshold_uint8(DARK12), (DARK12 / 4).astype(np.uint8))  # alone
+        np.testing.assert_array_equal(to_threshold_uint8(DARK12.astype(np.float64), 16),
+                                      to_threshold_uint8(DARK12, 16))
+        brighter = to_threshold_uint8(BRIGHT12, 4)  # brighter than the frames sampled: saturates
+        assert brighter.dtype == np.uint8 and brighter.max() == 255
+        np.testing.assert_array_equal(brighter, np.minimum(BRIGHT12 // 4, 255))
+        np.testing.assert_array_equal(to_threshold_uint8(_FRAME8, 16), _FRAME8)  # 8-bit: as is
+
+    def test_sampling_skips_unreadable_frames(self):
+        frames = {0: DARK12, 2: BRIGHT12}
+
+        def read(i):
+            if i not in frames:
+                raise ImageLoadError("locked")
+            return frames[i]
+        assert sample_counts_divisor(read, 3) == 16
+        assert sample_counts_divisor(lambda i: None, 3) is None
+
+    def test_the_app_chooses_it_at_load_and_uses_it_for_every_frame(self, gui, tmp_path, monkeypatch):
+        import cv2
+
+        from bubbletrack.controller import auto_controller
+        from bubbletrack.controller.display_mixin import display_frame
+
+        folder = tmp_path / "twelve_bit"
+        folder.mkdir()
+        for i, frame in enumerate((BRIGHT12, DARK12, DARK12)):
+            assert cv2.imwrite(str(folder / f"f_{i + 1:03d}.tif"), frame)
+        window, controller = gui
+        controller.file_ctrl.on_folder_selected(str(folder))
+        state = controller._get_state()
+        assert state.counts_divisor == 16
+        display_frame(state, window, 1, controller._set_state)
+        shown = controller._get_state().cur_img_binary_roi
+        h, w = DARK12.shape
+        once = normalize_frame(DARK12, state.img_thr, (1, h), (1, w), divisor=16)[3]
+        alone = normalize_frame(DARK12, state.img_thr, (1, h), (1, w))[3]
+        assert not np.array_equal(once, alone)       # the divisor matters for this frame
+        np.testing.assert_array_equal(shown, once)
+
+        made = []
+
+        class _Worker:
+            def __init__(self, **kwargs):
+                made.append(kwargs)
+                for name in ("progress", "frame_done", "frame_error", "frame_meta", "finished", "error"):
+                    setattr(self, name, type("Signal", (), {"connect": lambda self, slot: None})())
+
+            def start(self):
+                pass
+
+            def isRunning(self):  # noqa: N802 (QThread API)
+                return False
+        monkeypatch.setattr(auto_controller, "BatchWorker", _Worker)
+        controller.auto_ctrl.on_auto_fit()
+        assert made and made[0]["counts_divisor"] == 16
+        controller.auto_ctrl._finish_run(stopped=True)

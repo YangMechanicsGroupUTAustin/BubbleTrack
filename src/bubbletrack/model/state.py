@@ -111,6 +111,10 @@ class AppState:
     fit_locked: object = None       # np.ndarray (N,) bool, accepted in review: never overwritten
     fit_suggestion: object = None   # list[Suggestion | None]: Auto's rejected guess (display only)
 
+    # The classic methods' 8-bit divisor of this recording's camera counts (4 / 16 / 256),
+    # chosen once at load (``image_io.sample_counts_divisor``); None = per frame (8-bit data).
+    counts_divisor: int | None = None
+
     # Display parameters
     img_grayscale_max: int = 65535
     um2px: float = DEFAULT_UM2PX

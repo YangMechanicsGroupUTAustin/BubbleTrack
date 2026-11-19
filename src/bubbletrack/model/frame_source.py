@@ -53,14 +53,17 @@ def normalize_source(
     *,
     gaussian_sigma: float = 0.0,
     clahe_clip: float = 0.0,
+    divisor: int | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """Like :func:`load_and_normalize`, but *source* may also be a raw frame."""
+    """Like :func:`load_and_normalize`, but *source* may also be a raw frame.
+
+    *divisor*: the recording's counts divisor (``AppState.counts_divisor``)."""
     if isinstance(source, np.ndarray):
         return normalize_frame(
             source, sensitivity, gridx, gridy,
-            gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
+            gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip, divisor=divisor,
         )
     return load_and_normalize(
         source, sensitivity, gridx, gridy,
-        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
+        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip, divisor=divisor,
     )

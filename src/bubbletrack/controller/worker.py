@@ -30,7 +30,9 @@ def _process_single_frame(args: tuple):
         closing_radius, opening_radius, detection_mode, gradient_boundary,
         area_max_regions,
         max_radius,
+        *rest,
     ) = args
+    divisor = rest[0] if rest else None  # the recording's counts divisor (None: per frame)
 
     # Import inside the function — each worker process needs its own imports
     from bubbletrack.model.frame_pipeline import FrameParams, fit_rois
@@ -40,7 +42,7 @@ def _process_single_frame(args: tuple):
     # ``filepath`` is an image path, or a raw frame already decoded from a video
     _, _, cur_img_roi, binary_roi = normalize_source(
         filepath, sensitivity, gridx, gridy,
-        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
+        gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip, divisor=divisor,
     )
     # The one classic per-frame fit (also the CLI's and the case replay's)
     fit = fit_rois(binary_roi, cur_img_roi, FrameParams(
@@ -50,7 +52,7 @@ def _process_single_frame(args: tuple):
         gaussian_sigma=gaussian_sigma, clahe_clip=clahe_clip,
         closing_radius=closing_radius, opening_radius=opening_radius,
         gradient_boundary=gradient_boundary, area_max_regions=area_max_regions,
-        max_radius=max_radius,
+        max_radius=max_radius, counts_divisor=divisor,
     ))
     return (idx, fit.radius, fit.edge_xy, fit.mask, fit.center_row, fit.center_col,
             fit.region_count)
@@ -117,8 +119,10 @@ class BatchWorker(QThread):
         ml_job=None,
         ml_stored=None,
         frames=None,
+        counts_divisor: int | None = None,
     ):
         super().__init__()
+        self._counts_divisor = counts_divisor  # the recording's (classic methods only)
         # Explicit frames to process (any order / gaps) instead of start..end.
         self._frames = tuple(range(start, end + 1)) if frames is None else tuple(frames)
         self._edge_job = edge_job  # EdgeJob when detection_mode == "edge"
@@ -161,7 +165,7 @@ class BatchWorker(QThread):
             self._gaussian_sigma, self._clahe_clip,
             self._closing_radius, self._opening_radius,
             self._detection_mode, self._gradient_boundary,
-            self._area_max_regions, self._max_radius,
+            self._area_max_regions, self._max_radius, self._counts_divisor,
         )
 
     def _task(self) -> tuple:

@@ -40,6 +40,9 @@ class FrameParams:
     gradient_boundary: float = 0.0
     area_max_regions: int = 1
     max_radius: float = math.inf
+    counts_divisor: int | None = None
+    """The recording's 8-bit divisor of camera counts (``image_io.recording_counts_divisor``);
+    None = chosen per frame."""
 
 
 @dataclass(frozen=True)
@@ -118,5 +121,6 @@ def fit_image_file(path: str, params: FrameParams) -> FrameFit:
     _, _, gray_roi, binary_roi = load_and_normalize(
         path, params.sensitivity, params.gridx, params.gridy,
         gaussian_sigma=params.gaussian_sigma, clahe_clip=params.clahe_clip,
+        divisor=params.counts_divisor,
     )
     return fit_rois(binary_roi, gray_roi, params)

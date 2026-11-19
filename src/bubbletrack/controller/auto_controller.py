@@ -194,6 +194,7 @@ class AutoController(BaseController):
             ml_job=ml_job,
             ml_stored=stored,
             frames=frames,
+            counts_divisor=self.state.counts_divisor,
         )
         # Every slot is bound to *this* worker: results from an older run
         # (e.g. one still draining after Stop) can never reach new arrays.

@@ -152,6 +152,7 @@ class PretuneController(BaseController):
                     self.state.gridx, self.state.gridy,
                     gaussian_sigma=self.state.gaussian_sigma,
                     clahe_clip=self.state.clahe_clip,
+                    divisor=self.state.counts_divisor,
                 )
                 self._last_binary_roi = (cur_img_roi, binary_roi)
                 self._last_binary_params = current_params
@@ -262,6 +263,7 @@ class PretuneController(BaseController):
                 self.state.gridx, self.state.gridy,
                 gaussian_sigma=self.state.gaussian_sigma,
                 clahe_clip=self.state.clahe_clip,
+                divisor=self.state.counts_divisor,
             )
             processed, edge_xy = detect_bubble_with_mode(
                 binary_roi, cur_img_roi, self.state.detection_mode,
@@ -417,6 +419,7 @@ class PretuneController(BaseController):
             opening_radius=self.state.opening_radius,
             closing_radius=self.state.closing_radius,
             max_radius=self._get_max_radius(),
+            divisor=self.state.counts_divisor,
         )
         self._autotune_worker.progress.connect(self._on_autotune_progress)
         self._autotune_worker.result_ready.connect(self._on_autotune_finished)

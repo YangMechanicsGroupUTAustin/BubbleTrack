@@ -37,6 +37,7 @@ class AutoTuneWorker(QThread):
         opening_radius: int = 0,
         closing_radius: int = 0,
         max_radius: float = float("inf"),
+        divisor: int | None = None,
     ) -> None:
         super().__init__()
         self._image_path = image_path
@@ -48,6 +49,7 @@ class AutoTuneWorker(QThread):
         self._opening_radius = opening_radius
         self._closing_radius = closing_radius
         self._max_radius = max_radius
+        self._divisor = divisor
         self._cancel_event = threading.Event()
 
     def run(self) -> None:
@@ -61,6 +63,7 @@ class AutoTuneWorker(QThread):
             opening_radius=self._opening_radius,
             closing_radius=self._closing_radius,
             max_radius=self._max_radius,
+            divisor=self._divisor,
             progress_callback=self._on_progress,
             cancel_check=self._cancel_event.is_set,
         )

@@ -29,7 +29,7 @@ from bubbletrack.model.cases.schema import CaseFormatError, HardCase
 from bubbletrack.model.config import validate_config
 from bubbletrack.model.constants import DEFAULT_REMOVING_FACTOR
 from bubbletrack.model.frame_pipeline import FrameParams, fit_rois
-from bubbletrack.model.image_io import normalize_frame
+from bubbletrack.model.image_io import normalize_frame, recording_counts_divisor
 from bubbletrack.model.removing_factor import compute_removing_factor
 
 ReadFrame = Callable[[int], np.ndarray]
@@ -87,7 +87,8 @@ def _legacy_params(p: dict, mode: str, gridx, gridy, max_radius: float) -> Frame
 def _fit_legacy(raw: np.ndarray, params: FrameParams) -> Replayed:
     _, _, gray_roi, binary_roi = normalize_frame(
         raw, params.sensitivity, params.gridx, params.gridy,
-        gaussian_sigma=params.gaussian_sigma, clahe_clip=params.clahe_clip)
+        gaussian_sigma=params.gaussian_sigma, clahe_clip=params.clahe_clip,
+        divisor=params.counts_divisor)
     fit = fit_rois(binary_roi, gray_roi, params)
     if not fit.fitted:
         return Replayed(None, reason="no plausible bubble")
@@ -216,7 +217,9 @@ def replay_case(case: HardCase, read_frame: ReadFrame, *,
     p = _clean_params(case.detection.params)
     mode = case.detection.mode
     if mode != "edge":
-        params = _legacy_params(p, mode, gridx, gridy, case.detection.max_radius)
+        params = dataclasses.replace(  # one divisor for the case's frames, as for a recording
+            _legacy_params(p, mode, gridx, gridy, case.detection.max_radius),
+            counts_divisor=recording_counts_divisor(images.values()))
         results = {i: _fit_legacy(images[i], params) for i in order}
     else:
         job = _edge_job(case, p, read_frame)

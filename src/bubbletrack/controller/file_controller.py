@@ -19,8 +19,10 @@ from bubbletrack.model.frame_source import open_recording
 from bubbletrack.model.hpvx2_dat import DAT_EXTS
 from bubbletrack.model.image_io import (
     detect_bit_depth,
+    imread_unicode,
     load_and_normalize,
     normalize_frame,
+    sample_counts_divisor,
 )
 from bubbletrack.model.recording_identity import recording_fingerprint
 from bubbletrack.ui.frame_scrubber import frame_file_labels
@@ -92,6 +94,8 @@ class FileController(BaseController):
                 images[0], 0.5, (1, 99999), (1, 99999),
             )
             bit_depth = detect_bit_depth(images[0])
+            divisor = sample_counts_divisor(
+                lambda i: imread_unicode(images[i]), len(images))
         except Exception as exc:
             logger.error("Cannot load %s: %s", images[0], exc)
             self.w.header.set_status(
@@ -113,6 +117,7 @@ class FileController(BaseController):
             source_fingerprint=recording_fingerprint(images),
             image_no=0,
             img_grayscale_max=bit_depth,
+            counts_divisor=divisor,
             reference_frame=None,  # the previous recording's choices do not apply here
             edge_seed=None,
         )
@@ -156,6 +161,8 @@ class FileController(BaseController):
         try:
             first_raw = reader.read_frame(0)
             first_img, _, _, _ = normalize_frame(first_raw, 0.5, (1, 99999), (1, 99999))
+            divisor = sample_counts_divisor(
+                lambda i: first_raw if i == 0 else reader.read_frame(i), n)
         except Exception as exc:
             logger.error("Cannot read the first frame of %s: %s", video_path, exc)
             reader.close()
@@ -184,6 +191,7 @@ class FileController(BaseController):
             source_fingerprint=recording_fingerprint((), video_path, reader),
             image_no=0,
             img_grayscale_max=255,  # corrected from the first frame below
+            counts_divisor=divisor,
             reference_frame=None,  # the previous recording's choices do not apply here
             edge_seed=None,
         )
