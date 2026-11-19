@@ -6,6 +6,17 @@ from bubbletrack.controller.manual_controller import is_duplicate_point
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
 
 
+def test_a_click_on_the_centre_of_pixel_k_is_stored_as_k(gui, make_sequence):
+    """Manual points are 1-based like Auto's results, so a manual centre and an Auto one
+    of the same bubble agree (they were half a pixel apart)."""
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("a", 3)))
+    manual = controller.manual_ctrl
+    manual.on_manual_select()
+    manual.on_point_clicked(19.5, 9.5)  # scene (x, y): the middle of row 10, column 20
+    assert manual._manual_points == [(10.0, 20.0)]
+
+
 class TestPointDeduplication:
     def test_distant_points_accepted(self):
         """Two points > 5px apart should both be kept."""

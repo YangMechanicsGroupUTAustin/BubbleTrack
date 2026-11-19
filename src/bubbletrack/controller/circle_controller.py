@@ -287,14 +287,14 @@ class CircleController(BaseController):
         if refusal is None or refusal.frame != idx:
             return
         circle = refusal.circle
-        # Drawn where the user drew it (scene = 1-based - 0.5); the Auto view is the ROI.
+        # Drawn where the user drew it; the Auto view is the ROI.
         roi = np.array([state.gridx[0] - 1, state.gridy[0] - 1], dtype=float)
         for panel, origin in ((self.w.original_panel, np.zeros(2)), (self.w.binary_panel, roi)):
             panel.clear_overlays()
             if refusal.found is not None:
                 panel.draw_fit_outline(refusal.found - origin, FOUND_COLOUR)
             if circle.dragged:
-                panel.draw_circle(circle.rc - 0.5 - origin[0], circle.cc - 0.5 - origin[1],
+                panel.draw_circle(circle.rc - origin[0], circle.cc - origin[1],
                                   circle.radius, USER_CIRCLE_COLOUR, dashed=True)
 
     def discard_prompt(self) -> bool:

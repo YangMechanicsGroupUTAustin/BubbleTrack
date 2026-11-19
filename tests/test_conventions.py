@@ -4,8 +4,16 @@ from bubbletrack.model.conventions import (
     clamp_roi,
     display_to_frame,
     frame_to_display,
+    image_to_scene,
     roi_to_slice,
+    scene_to_image,
 )
+
+
+def test_scene_and_image_coordinates_are_half_a_pixel_apart():
+    # 1-based pixel k spans scene [k - 1, k): its centre is k in the image, k - 0.5 in the scene
+    assert scene_to_image(9.5) == 10.0 and image_to_scene(10.0) == 9.5
+    assert image_to_scene(scene_to_image(3.25)) == 3.25
 
 
 class TestClampRoi:

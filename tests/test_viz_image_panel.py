@@ -49,6 +49,25 @@ def panel(qapp):
     p.close()
 
 
+class TestPixelCentres:
+    """Results are 1-based (pixel k's centre = k); the scene puts pixel k over [k - 1, k)."""
+
+    def test_a_circle_at_pixel_k_is_drawn_centred_on_pixel_k(self, panel):
+        panel.set_image(np.zeros((40, 60)))
+        panel.draw_circle(10.0, 20.0, 5.0)
+        centre = panel._overlay_items[-1].rect().center()
+        assert (centre.x(), centre.y()) == (19.5, 9.5)    # the middle of row 10, column 20
+
+    def test_points_and_outlines_too(self, panel):
+        panel.set_image(np.zeros((40, 60)))
+        panel.draw_points(np.array([[10.0, 20.0]]), size=2.0)
+        dot = panel._overlay_items[-1].path().boundingRect().center()
+        assert (dot.x(), dot.y()) == (19.5, 9.5)
+        panel.draw_contour(np.array([[10.0, 20.0], [12.0, 20.0], [12.0, 24.0]]))
+        first = panel._overlay_items[-1].path().elementAt(0)
+        assert (first.x, first.y) == (19.5, 9.5)
+
+
 def _scale(panel: ImagePanel) -> float:
     return panel._view.transform().m11()
 

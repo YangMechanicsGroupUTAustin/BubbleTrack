@@ -24,7 +24,7 @@ from bubbletrack.controller.key_frames import (  # noqa: F401 (re-exported)
 from bubbletrack.controller.review_memory import result_key
 from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.event_bus import FRAME_CHANGED, RUN_STATE_CHANGED, SOURCE_LOADED, TRACKING_COLLAPSES
-from bubbletrack.model.conventions import roi_to_slice
+from bubbletrack.model.conventions import PIXEL_CENTRE, roi_to_slice
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode, to_grayscale
 from bubbletrack.ui.filmstrip import THUMB_HEIGHT, THUMB_MAX_WIDTH, Filmstrip, Thumbnail
 from bubbletrack.ui.frame_scrubber import frame_file_label
@@ -86,8 +86,8 @@ def render_thumbnail(base: _ThumbBase, circle: tuple[float, float, float] | None
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     r0, c0 = base.origin
 
-    def to_xy(row: float, col: float) -> QPointF:
-        return QPointF((col - c0) * base.scale, (row - r0) * base.scale)
+    def to_xy(row: float, col: float) -> QPointF:  # 1-based pixel k: its centre, k - 0.5
+        return QPointF((col - PIXEL_CENTRE - c0) * base.scale, (row - PIXEL_CENTRE - r0) * base.scale)
 
     if circle is not None and all(np.isfinite(circle)):
         painter.setPen(QPen(QColor(CIRCLE_COLOUR), 1.5))

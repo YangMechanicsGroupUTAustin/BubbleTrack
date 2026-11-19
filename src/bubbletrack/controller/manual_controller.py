@@ -20,6 +20,7 @@ from bubbletrack.event_bus import FRAME_CHANGED, EventBus
 from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.circle_fit import circle_fit_taubin
 from bubbletrack.model.constants import MIN_POINT_DISTANCE_PX
+from bubbletrack.model.conventions import scene_to_image
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.result_history import ResultHistory, record_edit, snapshot
 from bubbletrack.model.undo import UndoStack
@@ -112,9 +113,10 @@ class ManualController(BaseController):
         self.w.original_panel.set_mode("normal")
 
     def on_point_clicked(self, x: float, y: float) -> None:
-        """x = col, y = row in scene coordinates."""
+        """x = col, y = row in scene coordinates; stored 1-based, like Auto's results."""
         if not self._selecting:
             return  # clicks while not selecting belong to someone else (e.g. seed pick)
+        x, y = scene_to_image(x), scene_to_image(y)
         new_pt = np.array([y, x])  # row, col
         if is_duplicate_point(new_pt, self._manual_points):
             logger.info("Ignoring duplicate point near (%.1f, %.1f)", x, y)

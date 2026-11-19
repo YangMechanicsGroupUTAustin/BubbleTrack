@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QBrush, QColor, QImage, QPainterPath, QPen, QPixmap
 from PyQt6.QtWidgets import QGraphicsPathItem, QGraphicsScene, QGraphicsView
 
-from bubbletrack.model.conventions import roi_to_slice
+from bubbletrack.model.conventions import PIXEL_CENTRE, image_to_scene, roi_to_slice
 from bubbletrack.ui.circle_drag import dashed_pen
 from bubbletrack.ui.contour_shape import is_ordered_contour
 from bubbletrack.ui.overlay_legend import (
@@ -31,7 +31,8 @@ class OverlayDrawingMixin:
     """Drawing API of :class:`~bubbletrack.ui.image_panel.ImagePanel`.
 
     The host provides ``_scene`` and ``_view`` and calls :meth:`_init_overlays`.
-    Coordinates are scene pixels, given as (row, col) = (y, x).
+    Coordinates are 1-based (row, col) of the shown image, as the engine and the
+    results use them (pixel k's centre = k); they are drawn at scene k - 0.5.
     """
 
     _scene: QGraphicsScene
@@ -44,9 +45,10 @@ class OverlayDrawingMixin:
     def draw_circle(self, row_c: float, col_c: float, radius: float,
                     colour: str = CIRCLE_COLOUR, width: float = 2.0, *, dashed: bool = False,
                     legend: str | None = None) -> None:
-        """Draw a circle overlay. Coordinates are (row, col) = (y, x)."""
+        """Draw a circle overlay centred on 1-based (row, col)."""
+        x, y = image_to_scene(col_c), image_to_scene(row_c)
         item = self._scene.addEllipse(
-            col_c - radius, row_c - radius, 2 * radius, 2 * radius,
+            x - radius, y - radius, 2 * radius, 2 * radius,
             dashed_pen(colour, width) if dashed else cosmetic_pen(colour, width),
         )
         self._keep(item, colour, "dash" if dashed else "line", legend)
@@ -57,7 +59,7 @@ class OverlayDrawingMixin:
 
         All points form one path item, so thousands of edge points stay cheap.
         """
-        pts = np.asarray(points, dtype=float).reshape(-1, 2)
+        pts = np.asarray(points, dtype=float).reshape(-1, 2) - PIXEL_CENTRE
         if len(pts) == 0:
             return
         path = QPainterPath()
@@ -71,7 +73,7 @@ class OverlayDrawingMixin:
                      width: float = 1.5, closed: bool = True, *, dashed: bool = False,
                      legend: str | None = None) -> None:
         """Draw *points* (N, 2) ``[row, col]`` as a connected polyline."""
-        pts = np.asarray(points, dtype=float).reshape(-1, 2)
+        pts = np.asarray(points, dtype=float).reshape(-1, 2) - PIXEL_CENTRE
         if len(pts) < 2:
             return
         path = QPainterPath()
