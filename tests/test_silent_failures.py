@@ -7,6 +7,7 @@ import time
 import numpy as np
 
 from bubbletrack.controller import worker as worker_module
+from bubbletrack.model.provenance import FitSource
 
 
 def _wait(qapp, predicate, timeout_s=60.0):
@@ -177,7 +178,33 @@ def test_a_frame_whose_fit_raises_is_not_called_unreadable(qapp, gui, make_seque
     monkeypatch.setattr(worker_module.BatchWorker, "_task", task)
     _fit_all(qapp, controller)
     text = window.header.status()[0]
-    assert "1 frame failed and kept their previous result" in text and "could not be read" not in text
+    assert "1 frame failed to fit (no result" in text and "could not be read" not in text
+    # Its result from the earlier run (other parameters, maybe another engine) is gone.
+    state = controller._get_state()
+    assert state.radius[2] == -1.0 and state.fit_source[2] == FitSource.NONE
+    assert np.isnan(state.fit_confidence[2]) and np.isnan(state.circle_fit_par[2]).all()
+    assert (state.radius[[0, 1, 3, 4, 5]] > 0).all()
+
+
+def test_a_failed_fit_keeps_the_users_result_and_an_unreadable_frame_its_own(gui, make_sequence):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("a", 6)))
+    state = controller._get_state()
+    state.radius[:] = 30.0
+    state.circle_fit_par[:] = [100.0, 150.0]
+    state.fit_source[:] = FitSource.AUTO
+    state.fit_source[4] = FitSource.MANUAL
+    state.fit_confidence[:] = 0.9
+    auto = controller.auto_ctrl
+    nothing = (-1.0, np.empty((0, 2)), None, np.nan, np.nan, 0)
+    for idx, unreadable in ((2, True), (3, False), (4, False)):
+        auto._on_worker_frame_error(auto._worker, idx, "boom", unreadable)
+        auto._on_auto_frame_done(idx, *nothing)
+    assert state.radius[2] == 30.0 and state.fit_confidence[2] == 0.9   # locked file: kept
+    assert state.radius[3] == -1.0 and state.fit_source[3] == FitSource.NONE  # cleared
+    assert np.isnan(state.fit_confidence[3])
+    assert state.radius[4] == 30.0 and state.fit_source[4] == FitSource.MANUAL  # the user's
+
 
 
 

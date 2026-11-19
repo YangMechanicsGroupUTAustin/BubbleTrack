@@ -49,8 +49,8 @@ class AutoController(BaseController):
         # Per-run bookkeeping
         self._protected: frozenset[int] = frozenset()
         self._stop_requested = False
-        self._frame_errors = 0
-        self._failed_frames: set[int] = set()
+        self._unreadable: set[int] = set()  # could not be read: they keep their result
+        self._fit_failed: set[int] = set()  # the fit raised: their automatic result is cleared
         self._frames_done = 0
         self._edge_job = None  # the run's EdgeJob, reused by tracking
         self._run_notes: list[str] = []  # routine notes, e.g. what tracking changed
@@ -199,8 +199,8 @@ class AutoController(BaseController):
         self._run_frames = tuple(range(start_idx, end_idx + 1) if frames is None else frames)
         self._protected = protected
         self._stop_requested = False
-        self._frame_errors = 0
-        self._failed_frames = set()
+        self._unreadable = set()
+        self._fit_failed = set()
         self._frames_done = 0
         self._running = True
         self._set_run_state(True)
@@ -314,10 +314,9 @@ class AutoController(BaseController):
         if source is not None and self.state.fit_source is not None and self.state.radius[idx] > 0:
             self.state.fit_source[idx] = source
 
-    def _on_worker_frame_error(self, worker, idx: int, message: str) -> None:
+    def _on_worker_frame_error(self, worker, idx: int, message: str, unreadable: bool = True) -> None:
         if worker is self._worker:
-            self._frame_errors += 1
-            self._failed_frames.add(idx)
+            (self._unreadable if unreadable else self._fit_failed).add(idx)
 
     def _on_worker_error(self, worker, message: str) -> None:
         if worker is self._worker:
@@ -393,8 +392,11 @@ class AutoController(BaseController):
             return  # keep the user's manual fit
 
         state = self.state
-        if idx in self._failed_frames:
+        if idx in self._unreadable:
             return  # unreadable now (file locked, offline): keep its last result and guess
+        if idx in self._fit_failed and state.fit_source is not None \
+                and is_user_confirmed(state.fit_source[idx]):
+            return  # the fit raised: only an automatic result is cleared, never the user's
         # An Edge run's frame_meta (emitted after this) brings confidence, flags and
         # guess; a classic run has none, so nothing of an earlier Auto run may stay.
         edge_support.forget_meta(state, idx)
@@ -469,10 +471,12 @@ class AutoController(BaseController):
         if self._ml_run and state.radius is not None:
             from bubbletrack.model.ml_assist import run_counts, run_summary
             details.append(run_summary(run_counts(state, self._run_frames)))
-        if self._frame_errors:
-            # A read or a fit error: either way the frame keeps what it had (see the log)
-            problems.append(f"{plural(self._frame_errors, 'frame')} failed and kept "
-                            "their previous result (see the log)")
+        if self._unreadable:  # e.g. a file locked by a sync client: tried again next time
+            problems.append(f"{plural(len(self._unreadable), 'frame')} could not be read "
+                            "(previous result kept; see the log)")
+        if self._fit_failed:
+            problems.append(f"{plural(len(self._fit_failed), 'frame')} failed to fit "
+                            "(no result; see the log)")
         if scores is not None and state.radius is not None and not stopped:
             low = int(np.sum((state.radius > 0) & (scores < QUALITY_WARN_THRESHOLD)))
             if low:

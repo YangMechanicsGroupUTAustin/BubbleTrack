@@ -18,6 +18,8 @@ import numpy as np
 
 from PyQt6.QtCore import QThread, pyqtSignal
 
+from bubbletrack.model.image_io import ImageLoadError
+
 logger = logging.getLogger(__name__)
 
 
@@ -86,7 +88,9 @@ class BatchWorker(QThread):
 
     progress = pyqtSignal(int, int)
     frame_done = pyqtSignal(int, float, object, object, float, float, int)
-    frame_error = pyqtSignal(int, str)  # (frame_idx, error_message)
+    # (frame_idx, error_message, unreadable): unreadable = the frame could not be read
+    # (it keeps its result), else its fit raised (its automatic result is cleared)
+    frame_error = pyqtSignal(int, str, bool)
     frame_meta = pyqtSignal(int, object)  # (frame_idx, {confidence, flags, metrics, suggestion}) — Edge only
 
     # Run frames in this process (threads) instead of a process pool.
@@ -178,9 +182,9 @@ class BatchWorker(QThread):
             return _process_single_frame_edge, {}
         return _process_single_frame, {}
 
-    def _emit_failure(self, idx: int, exc: Exception) -> None:
-        logger.error("Frame %d failed: %s", idx, exc)
-        self.frame_error.emit(idx, str(exc))
+    def _emit_failure(self, idx: int, exc: Exception, *, unreadable: bool) -> None:
+        logger.error("Frame %d %s: %s", idx, "could not be read" if unreadable else "failed", exc)
+        self.frame_error.emit(idx, str(exc), unreadable)
         self.frame_done.emit(
             idx, -1.0, np.empty((0, 2)), None, float("nan"), float("nan"), 0,
         )
@@ -225,7 +229,7 @@ class BatchWorker(QThread):
                         try:
                             source = reader.read_frame(i) if reader else self._images[i]
                         except Exception as exc:  # unreadable video frame
-                            self._emit_failure(i, exc)
+                            self._emit_failure(i, exc, unreadable=True)
                             done_count += 1
                             self.progress.emit(done_count, total)
                             continue
@@ -245,8 +249,8 @@ class BatchWorker(QThread):
                             self.frame_done.emit(*result[:7])
                             if len(result) > 7:
                                 self.frame_meta.emit(idx, result[7])
-                        except Exception as exc:
-                            self._emit_failure(idx, exc)
+                        except Exception as exc:  # a file that cannot be read, or the fit raised
+                            self._emit_failure(idx, exc, unreadable=isinstance(exc, ImageLoadError))
                         done_count += 1
                         self.progress.emit(done_count, total)
                     if self._stop:

@@ -211,7 +211,7 @@ class TestRunSafety:
         (folder / "frame_005.tiff").write_bytes(b"corrupt")
         _load(controller, folder)
         _run_fit_all(qapp, window, controller)
-        assert "1 frame" in _status(window).lower()
+        assert "1 frame could not be read" in _status(window).lower()
 
     def test_stop_reports_stopped_not_done(self, gui, make_sequence):
         window, controller = gui
