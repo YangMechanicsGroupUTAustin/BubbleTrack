@@ -90,14 +90,19 @@ def recording_name(state: AppState) -> str:
     return os.path.basename(os.path.normpath(state.folder_path)) if state.folder_path else ""
 
 
-def unsaved_review_dialog(parent, name: str, detail: str) -> tuple[QMessageBox, dict]:
+# What happens to the unsaved decisions, by the moment of the question
+LEAVING = "Loading another recording replaces them."
+CLOSING = "Closing BubbleTrack does not keep them."
+
+
+def unsaved_review_dialog(parent, name: str, detail: str,
+                          consequence: str = LEAVING) -> tuple[QMessageBox, dict]:
     """The question box and its buttons by answer (Save session… is the default)."""
     box = QMessageBox(parent)
     box.setIcon(QMessageBox.Icon.Question)
     box.setWindowTitle("Unsaved review")
     box.setText(f"Save the review of {name} first?")
-    box.setInformativeText(f"{detail} — not saved in a session file. "
-                           "Loading another recording replaces them.")
+    box.setInformativeText(f"{detail} — not saved in a session file. {consequence}")
     buttons = {
         SAVE: box.addButton("Save session…", QMessageBox.ButtonRole.AcceptRole),
         DISCARD: box.addButton("Discard", QMessageBox.ButtonRole.DestructiveRole),
@@ -108,9 +113,9 @@ def unsaved_review_dialog(parent, name: str, detail: str) -> tuple[QMessageBox, 
     return box, buttons
 
 
-def ask_save_review(parent, name: str, detail: str) -> str:
+def ask_save_review(parent, name: str, detail: str, consequence: str = LEAVING) -> str:
     """'Save the review of <name> first?' -> SAVE, DISCARD or CANCEL."""
-    box, buttons = unsaved_review_dialog(parent, name, detail)
+    box, buttons = unsaved_review_dialog(parent, name, detail, consequence)
     box.exec()
     clicked = box.clickedButton()
     return next((answer for answer, button in buttons.items() if button is clicked), CANCEL)

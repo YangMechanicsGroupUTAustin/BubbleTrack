@@ -23,11 +23,13 @@ def answers(monkeypatch):
 
     class Answers(list):
         next = CANCEL
+        consequences: list = []
 
     record = Answers()
 
-    def ask(_parent, name, detail):
+    def ask(_parent, name, detail, consequence=unsaved_review.LEAVING):
         record.append((name, detail))
+        record.consequences.append(consequence)
         return record.next
 
     monkeypatch.setattr(session_controller, "ask_save_review", ask)
@@ -162,3 +164,23 @@ def test_recording_name_is_the_video_or_the_folder(gui, make_sequence):
     folder = make_sequence("gelatin_run", 3)
     _load(controller, folder)
     assert unsaved_review.recording_name(controller._get_state()) == "gelatin_run"
+
+
+def test_closing_asks_about_unsaved_decisions(gui, make_sequence, answers):
+    """The recovery autosave is overwritten by the next recording's: closing asks
+    like loading another recording does (Cancel keeps the window open)."""
+    _window, controller = gui
+    _load(controller, make_sequence("A", 5))
+    _decide(controller)
+    answers.next = CANCEL
+    assert controller._confirm_close() is False
+    assert answers.consequences == [unsaved_review.CLOSING]
+    answers.next = DISCARD
+    assert controller._confirm_close() is True
+
+
+def test_closing_without_decisions_asks_nothing(gui, make_sequence, answers):
+    _window, controller = gui
+    _load(controller, make_sequence("A", 5))
+    controller._get_state().radius[:] = 30.0  # plain fit results
+    assert controller._confirm_close() is True and not answers
