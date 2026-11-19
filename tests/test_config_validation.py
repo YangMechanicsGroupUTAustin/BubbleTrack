@@ -126,13 +126,9 @@ class TestEdgesAndFlags:
     def test_malformed_edges_fall_back(self, config_file, edges):
         assert "bubble_cross_edges" not in _load(config_file, bubble_cross_edges=edges)
 
-    @pytest.mark.parametrize(("raw", "expected"), [(True, True), (0, False), (1, True)])
-    def test_temporal_refine(self, config_file, raw, expected):
-        assert _load(config_file, temporal_refine=raw) == {"temporal_refine": expected}
-
-    @pytest.mark.parametrize("raw", ["yes", 2, None])
-    def test_temporal_refine_invalid(self, config_file, raw):
-        assert "temporal_refine" not in _load(config_file, temporal_refine=raw)
+    def test_the_removed_neighbour_frames_switch_is_ignored(self, config_file):
+        """"Use Neighbor Frames" changed no fit and was removed; old configs still load."""
+        assert _load(config_file, temporal_refine=True) == {}
 
 
 class TestGradientBoundary:

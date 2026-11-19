@@ -41,7 +41,7 @@ METHOD_TIP = (
 # Preset keys that set_filter_params understands (besides threshold etc.).
 _FILTER_KEYS = (
     "gaussian_sigma", "clahe_clip", "closing_radius", "opening_radius", "detection_mode",
-    "edge_polarity", "bubble_non_round", "area_max_regions", "gradient_boundary", "temporal_refine",
+    "edge_polarity", "bubble_non_round", "area_max_regions", "gradient_boundary",
 )
 # Preset keys named differently from the setting they hold (the rest share the name)
 _PRESET_SETTING = {"threshold": "img_thr", "edge_flags": "bubble_cross_edges"}

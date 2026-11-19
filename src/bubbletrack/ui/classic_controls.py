@@ -145,13 +145,6 @@ class ClassicControls(QWidget):
         area_row.addStretch()
         section.add_widget(self._area_widget)
 
-        self._temporal_refine = QCheckBox("Use Neighbor Frames")
-        self._temporal_refine.setToolTip(
-            "Use adjacent frames as references to repair weak gradient fits.\n"
-            "Useful when a frame only shows a partial boundary.")
-        self._temporal_refine.toggled.connect(lambda _on: self.filters_changed.emit())
-        section.add_widget(self._temporal_refine)
-
         presets = QWidget()
         preset_row = QHBoxLayout(presets)
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -220,7 +213,6 @@ class ClassicControls(QWidget):
         values.update(
             area_max_regions=self._area_regions.value(),
             gradient_boundary=(self._gradient_boundary.value() - 1) / 2.0,
-            temporal_refine=self._temporal_refine.isChecked(),
         )
         return values
 
@@ -239,10 +231,6 @@ class ClassicControls(QWidget):
             self._gradient_boundary.blockSignals(True)
             self._gradient_boundary.set_value(value if value > 1 else value * 2 + 1)
             self._gradient_boundary.blockSignals(False)
-        if "temporal_refine" in params:
-            self._temporal_refine.blockSignals(True)
-            self._temporal_refine.setChecked(bool(params["temporal_refine"]))
-            self._temporal_refine.blockSignals(False)
 
     def apply_method(self, mode: str) -> None:
         """Show the options the classic *mode* uses."""

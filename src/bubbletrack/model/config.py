@@ -37,7 +37,6 @@ PERSIST_KEYS: frozenset[str] = frozenset({
     "bubble_non_round",
     "area_max_regions",
     "gradient_boundary",
-    "temporal_refine",
     "um2px",
     "fps",
     "rmax_fit_length",
@@ -171,7 +170,6 @@ _VALIDATORS: dict[str, Callable[[Any], Any]] = {
     "bubble_non_round": _as_flag,                     # Auto > Advanced: Bubble may be non-round
     "area_max_regions": _int_in(1, 20),               # Max regions spin box
     "gradient_boundary": _as_gradient_boundary,       # Gradient Ring 1-3
-    "temporal_refine": _as_flag,
     "um2px": _positive_float_in(0.001, 9999.0),       # um/px spin box
     "fps": _positive_float_in(0.001, 99_999e6),       # FPS spin box (Hz..M)
     "rmax_fit_length": _int_in(3, 999),               # Rmax Fit spin box
