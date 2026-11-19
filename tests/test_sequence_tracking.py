@@ -202,6 +202,35 @@ def test_a_bubble_that_reforms_after_a_cloud_is_tracked_again():
     assert not [i for i, _ in det.calls if 30 <= i <= 31]
 
 
+def _after_a_cloud(late):
+    """One cycle (collapse at 27), a fragment cloud on frames 27..30, then *late* on every
+    later frame (the single-frame result; nothing else is found there)."""
+    truth = truth_track(rayleigh_radii(50, [(-1, 28, 50.0)], floor=0.0))
+    rng = np.random.default_rng(0)
+    raw = list(observe(truth))
+    for i in range(27, 31):
+        raw[i] = Observation(2.0, 125 + rng.uniform(-8, 8), 200 + rng.uniform(-8, 8), 0.6, {"fragmented"})
+    for i in range(31, 50):
+        raw[i] = late(i)
+    return solve_sequence(raw, ScriptedDetector(truth))
+
+
+def test_a_static_dark_object_far_away_is_not_a_new_bubble():
+    """After the cloud only a debris particle 130 px away is found, steady in size: it is not
+    a re-formed bubble (the previous one never came near it, and it does not grow)."""
+    res = _after_a_cloud(lambda i: Observation(9.0, 125.0, 330.0, 0.9))
+    assert res.cycles == ((0, 27),)
+    assert all(res.frames[i].source == "none" for i in range(31, 50))
+
+
+def test_a_new_bubble_re_forms_near_the_old_one_or_grows_elsewhere():
+    near = _after_a_cloud(lambda i: Observation(9.0, 125.0, 230.0, 0.9))    # 30 px from it: R max 50
+    assert near.frames[31].source == "raw" and "reacquired" in near.frames[31].flags
+    grows = _after_a_cloud(lambda i: Observation(3.0 + 2.0 * (i - 31), 125.0, 330.0, 0.9))
+    assert grows.frames[31].source == "raw" and "reacquired" in grows.frames[31].flags
+    assert len(near.cycles) == len(grows.cycles) == 2
+
+
 def test_a_long_lost_small_bubble_is_not_declared_a_cloud():
     """A weak residual bubble (never confident enough to accept) is missed for three frames long after
     the collapse.  After ``max_redetect_coast`` lost frames the track's last radius is stale, so the

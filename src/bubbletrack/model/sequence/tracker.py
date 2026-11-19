@@ -26,7 +26,8 @@ between fragments) and there are fragments: the detector flags the tracked
 radius, while the loss is recent).  An unverified detection elsewhere says nothing
 about the tracked bubble.  A forward pass marks the cloud ``none`` + ``cloud``
 until a bubble re-forms (a rebound or the next pulse: two consecutive confident
-raw detections of one body); tracking restarts there.  A backward pass is never
+raw detections of one body, near where the collapsed bubble was last seen or
+growing); tracking restarts there.  A backward pass is never
 cut short (a wrong stop would erase whole earlier cycles); at either sequence end
 or a "no bubble" anchor, a trailing run of cloud-like frames (after a release) or
 of lost frames where nothing at all was detected is ``none``: no bubble yet / any
@@ -58,6 +59,10 @@ _SAME_PLACE_FRAC = 0.2
 max(2 px, 0.2 R) (radius free: collapses are fast).  On the LIC recordings 95 % of
 consecutive verified frames move by at most 0.1 R (98 % by 0.2 R); the main body of a
 fragment cloud hops by a large fraction of R."""
+_GROW_PX = 1.0
+_GROW_FRAC = 0.1
+"""A body that grows by max(1 px, 10 %) from one frame to the next is a new bubble wherever
+it is; debris and satellite bubbles keep their size."""
 
 
 @dataclass(frozen=True)
@@ -194,6 +199,10 @@ class _Segment:
     """A collapse was seen."""
     cloud: bool
     """The segment ended at a cloud starting at ``run[0]``."""
+    where: TrackPoint
+    """Where the bubble was last measured."""
+    rmax: float
+    """Its largest radius."""
 
 
 def _follow(raw: tuple[Observation, ...], start: TrackPoint, direction: int, stop: int,
@@ -227,18 +236,28 @@ def _follow(raw: tuple[Observation, ...], start: TrackPoint, direction: int, sto
                   and (_fragmented(step) or _small(step, pred, coast, rmax, cfg)))
         run = run + (frame,) if cloudy else ()
         if direction > 0 and len(run) >= cfg.cloud_frames:
-            return _Segment(steps, frame, run, armed, cloud=True)
+            return _Segment(steps, frame, run, armed, cloud=True, where=history[-1], rmax=rmax)
         frame += direction
-    return _Segment(steps, frame - direction, run, armed, cloud=False)
+    return _Segment(steps, frame - direction, run, armed, cloud=False, where=history[-1], rmax=rmax)
 
 
-def _reformed(raw: tuple[Observation, ...], lo: int, hi: int, cfg: SequenceConfig) -> int | None:
+def _new_bubble(a: Observation, b: Observation, where: TrackPoint, rmax: float) -> bool:
+    """Can body ``a`` (``b`` in the next frame) be a bubble after the cloud of the one last
+    seen at ``where``?  Near it (within its Rmax: a rebound, or the next pulse at the same spot),
+    or growing (a bubble nucleating elsewhere); a steady body elsewhere is debris."""
+    near = math.hypot(a.rc - where.rc, a.cc - where.cc) <= max(_SAME_PLACE_PX, rmax)
+    return near or b.radius - a.radius >= max(_GROW_PX, _GROW_FRAC * a.radius)
+
+
+def _reformed(raw: tuple[Observation, ...], lo: int, hi: int, seg: _Segment, cfg: SequenceConfig) -> int | None:
     """First frame in ``lo..hi-1`` where a bubble re-forms after a cloud (a rebound or the next
-    pulse): it and the next frame hold one body with ``reacquire_confidence`` (raw only)."""
+    pulse): it and the next frame hold one body with ``reacquire_confidence`` (raw only) that
+    can be a bubble after this one (``_new_bubble``)."""
     for f in range(lo, hi - 1):
         a, b = raw[f], raw[f + 1]
         if (a.ok and b.ok and confident(a, cfg.reacquire_confidence)
-                and confident(b, cfg.reacquire_confidence) and _same_place(a, b)):
+                and confident(b, cfg.reacquire_confidence) and _same_place(a, b)
+                and _new_bubble(a, b, seg.where, seg.rmax)):
             return f
     return None
 
@@ -253,7 +272,7 @@ def run_pass(raw: tuple[Observation, ...], start: TrackPoint, direction: int, st
     seg = _follow(raw, start, direction, stop, cache, cfg)
     while seg.cloud:                   # forwards only: no bubble until one re-forms
         end = min(len(raw), stop)
-        back = _reformed(raw, seg.last + 1, end, cfg)
+        back = _reformed(raw, seg.last + 1, end, seg, cfg)
         steps.update(seg.steps)
         steps.update(_no_bubble(range(seg.run[0], end if back is None else back), cloud=True))
         if back is None:
