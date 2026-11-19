@@ -523,7 +523,8 @@ class TestSafeLoadmat:
         """Garbage bytes should raise ValueError."""
         bad_path = str(tmp_path / "garbage.mat")
         with open(bad_path, "wb") as fh:
-            fh.write(os.urandom(128))
+            # Fixed bytes: about 1 in 200 random 128-byte files loads as an empty MAT v4 file.
+            fh.write(b"this is not a MAT file " * 6)
 
         with pytest.raises(ValueError, match="Invalid MAT file"):
             safe_loadmat(bad_path, frozenset({"x"}))
