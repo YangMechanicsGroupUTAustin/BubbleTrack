@@ -17,7 +17,8 @@ SOURCE_TRACKED = "tracked"    # re-measured with the track's circle prior (repai
 SOURCE_ANCHOR = "anchor"      # manual / accepted frame, copied unchanged
 SOURCE_LOST = "lost"          # nothing consistent with the track; values are the unverified raw ones
 SOURCE_NONE = "none"          # no bubble: before nucleation, after a cloud, or nothing to track
-SOURCES = (SOURCE_RAW, SOURCE_TRACKED, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE)
+SOURCE_UNMEASURED = "unmeasured"  # never measured (outside a partial Fit): unknown, not "no bubble"
+SOURCES = (SOURCE_RAW, SOURCE_TRACKED, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE, SOURCE_UNMEASURED)
 
 FLAG_DISAGREE = "disagree"            # the solution differs from the single-frame result (or the two passes differ)
 FLAG_REACQUIRED = "reacquired"        # first accepted frame after a loss or a cloud (a re-formed bubble)

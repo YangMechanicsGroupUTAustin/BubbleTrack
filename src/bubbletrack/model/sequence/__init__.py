@@ -23,13 +23,13 @@ from bubbletrack.model.sequence.cycles import detect_cycles
 from bubbletrack.model.sequence.solver import solve_sequence
 from bubbletrack.model.sequence.types import (
     CONTEXT_FLAGS, FLAG_CLOUD, FLAG_COLLAPSE, FLAG_DISAGREE, FLAG_JUMP, FLAG_LOST, FLAG_LOW_CONFIDENCE,
-    FLAG_REACQUIRED, RAW_REVIEW_FLAGS, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE, SOURCE_RAW, SOURCE_TRACKED, SOURCES,
-    Detector, FrameSolution, Observation, SequenceResult,
+    FLAG_REACQUIRED, RAW_REVIEW_FLAGS, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE, SOURCE_RAW, SOURCE_TRACKED,
+    SOURCE_UNMEASURED, SOURCES, Detector, FrameSolution, Observation, SequenceResult,
 )
 
 __all__ = [
     "CONTEXT_FLAGS", "DEFAULT_SEQUENCE_CONFIG", "Detector", "FLAG_CLOUD", "FLAG_COLLAPSE", "FLAG_DISAGREE", "FLAG_JUMP",
     "FLAG_LOST", "FLAG_LOW_CONFIDENCE", "FLAG_REACQUIRED", "FrameSolution", "Observation", "RAW_REVIEW_FLAGS",
-    "SOURCES", "SOURCE_ANCHOR", "SOURCE_LOST", "SOURCE_NONE", "SOURCE_RAW", "SOURCE_TRACKED", "SequenceConfig",
-    "SequenceResult", "detect_cycles", "solve_sequence",
+    "SOURCES", "SOURCE_ANCHOR", "SOURCE_LOST", "SOURCE_NONE", "SOURCE_RAW", "SOURCE_TRACKED", "SOURCE_UNMEASURED",
+    "SequenceConfig", "SequenceResult", "detect_cycles", "solve_sequence",
 ]

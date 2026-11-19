@@ -3,8 +3,8 @@
 Priority of a frame = the weight of its most important reason (plus a small
 bonus per extra reason), multiplied by ``review_collapse_weight`` near a
 collapse, where fast dynamics make flags expected.  Ties: lower confidence
-first, then frame order.  Anchors and ``none`` frames (other than the first
-frame of a cloud) are never listed.
+first, then frame order.  Anchors, unmeasured frames and ``none`` frames (other
+than the first frame of a cloud) are never listed.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from bubbletrack.model.provenance import AREA_RADIUS_FLAG
 from bubbletrack.model.sequence.config import SequenceConfig
 from bubbletrack.model.sequence.types import (
     FLAG_CLOUD, FLAG_COLLAPSE, FLAG_DISAGREE, FLAG_JUMP, FLAG_LOST, FLAG_LOW_CONFIDENCE, FLAG_REACQUIRED,
-    CONTEXT_FLAGS, RAW_REVIEW_FLAGS, SOURCE_ANCHOR, SOURCE_NONE, FrameSolution,
+    CONTEXT_FLAGS, RAW_REVIEW_FLAGS, SOURCE_ANCHOR, SOURCE_NONE, SOURCE_UNMEASURED, FrameSolution,
 )
 
 REASON_WEIGHT = {
@@ -36,7 +36,7 @@ _SOLVER_REASONS = (FLAG_LOST, FLAG_REACQUIRED, FLAG_JUMP, FLAG_LOW_CONFIDENCE, F
 
 
 def _reasons(i: int, frame: FrameSolution, prev: FrameSolution | None, near_collapse: bool) -> list[str]:
-    if frame.source == SOURCE_ANCHOR:
+    if frame.source in (SOURCE_ANCHOR, SOURCE_UNMEASURED):
         return []
     if frame.source == SOURCE_NONE:
         first_cloud = FLAG_CLOUD in frame.flags and (prev is None or FLAG_CLOUD not in prev.flags)

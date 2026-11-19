@@ -5,17 +5,20 @@
    circle (radius <= 0 / NaN: "no bubble here") are barriers; a stretch between
    barriers that no anchor reaches gets its own automatic seed.
 2. From each seed, one pass forwards and one backwards, each stopping at the
-   next anchor (so anchors reset the track state) or the sequence end.
+   next anchor (so anchors reset the track state), at a frame never measured
+   (unknown: treated like the sequence end) or at the sequence end.
 3. A frame covered by two passes takes the nearer seed's accepted result
    (flag ``disagree`` when the two passes found different circles).
 4. Collapses and cycles from the verified radii of each bubble lifetime (runs
-   between "no bubble" frames); flags; the review list.
+   between "no bubble" or never-measured frames); flags; the review list.  Only
+   a "no bubble" frame after a lifetime says the bubble vanished: before a
+   never-measured frame it may still be there.
 """
 
 from __future__ import annotations
 
 import math
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 
 import numpy as np
 
@@ -26,13 +29,13 @@ from bubbletrack.model.sequence.review import build_review
 from bubbletrack.model.sequence.tracker import RedetectCache, Step, run_pass
 from bubbletrack.model.sequence.types import (
     FLAG_COLLAPSE, FLAG_DISAGREE, FLAG_LOW_CONFIDENCE, SOURCE_ANCHOR, SOURCE_LOST, SOURCE_NONE,
-    SOURCE_RAW, SOURCE_TRACKED, Detector, FrameSolution, Observation, SequenceResult,
+    SOURCE_RAW, SOURCE_TRACKED, SOURCE_UNMEASURED, Detector, FrameSolution, Observation, SequenceResult,
 )
 
 _NAN = float("nan")
 
 
-def _validate(raw: Sequence[Observation], anchors) -> tuple[tuple[Observation, ...], dict]:
+def _validate(raw: Sequence[Observation], anchors, unmeasured) -> tuple[tuple[Observation, ...], dict, frozenset]:
     frames = tuple(raw)
     for i, obs in enumerate(frames):
         if not isinstance(obs, Observation):
@@ -52,7 +55,12 @@ def _validate(raw: Sequence[Observation], anchors) -> tuple[tuple[Observation, .
         if math.isfinite(r) and r > 0 and not (math.isfinite(rc) and math.isfinite(cc)):
             raise ValueError(f"anchor {idx} has a radius but no finite centre: {circle!r}")
         out[idx] = (rc, cc, r)
-    return frames, out
+    unknown = set()
+    for key in unmeasured:
+        if not isinstance(key, (int, np.integer)) or not 0 <= key < len(frames):
+            raise ValueError(f"unmeasured frame {key!r} is not an index in 0..{len(frames) - 1}")
+        unknown.add(int(key))
+    return frames, out, frozenset(unknown - set(out))       # an anchor is the user's decision
 
 
 def _has_circle(circle: tuple[float, float, float]) -> bool:
@@ -82,11 +90,13 @@ def choose_seed(raw: tuple[Observation, ...], lo: int, hi: int, cfg: SequenceCon
     return best
 
 
-def _seeds(raw: tuple[Observation, ...], anchors: dict, cfg: SequenceConfig) -> tuple[dict[int, TrackPoint], set[int]]:
+def _seeds(raw: tuple[Observation, ...], anchors: dict, unmeasured: frozenset,
+           cfg: SequenceConfig) -> tuple[dict[int, TrackPoint], set[int]]:
     """Anchor seeds, plus an automatic seed in every stretch no anchor's passes reach
-    (stretches are bounded by anchors; an anchor without a circle stops passes)."""
+    (stretches are bounded by anchors and never-measured frames; an anchor without a
+    circle and a never-measured frame stop passes)."""
     seeds = {i: TrackPoint(i, c[0], c[1], c[2]) for i, c in sorted(anchors.items()) if _has_circle(c)}
-    bounds = [-1, *sorted(anchors), len(raw)]
+    bounds = [-1, *sorted(set(anchors) | unmeasured), len(raw)]
     auto = set()
     for a, b in zip(bounds, bounds[1:]):
         if b - a > 1 and a not in seeds and b not in seeds:
@@ -145,15 +155,23 @@ def _solution(step: Step | None, raw: Observation, split: bool, cfg: SequenceCon
     return FrameSolution(obs.radius, obs.rc, obs.cc, obs.confidence, step.source, flags, -1)
 
 
+_UNMEASURED = FrameSolution(_NAN, _NAN, _NAN, _NAN, SOURCE_UNMEASURED, frozenset(), -1)
+
+
 def _anchor_solution(circle: tuple[float, float, float]) -> FrameSolution:
     if _has_circle(circle):
         return FrameSolution(circle[2], circle[0], circle[1], 1.0, SOURCE_ANCHOR, frozenset(), -1)
     return FrameSolution(_NAN, _NAN, _NAN, 1.0, SOURCE_ANCHOR, frozenset(), -1)
 
 
+def _gone(f: FrameSolution) -> bool:
+    """No bubble here: ``none`` or an empty anchor."""
+    return f.source == SOURCE_NONE or (f.source == SOURCE_ANCHOR and not f.ok)
+
+
 def _lifetimes(frames: list[FrameSolution]) -> list[tuple[int, int]]:
-    """Inclusive runs of frames between "no bubble" frames (``none`` or an empty anchor)."""
-    gone = [f.source == SOURCE_NONE or (f.source == SOURCE_ANCHOR and not f.ok) for f in frames]
+    """Inclusive runs of frames between "no bubble" or never-measured frames."""
+    gone = [_gone(f) or f.source == SOURCE_UNMEASURED for f in frames]
     runs, start = [], None
     for i, g in enumerate(gone + [True]):
         if not g and start is None:
@@ -166,12 +184,14 @@ def _lifetimes(frames: list[FrameSolution]) -> list[tuple[int, int]]:
 
 def _cycles_by_lifetime(frames: list[FrameSolution], cfg: SequenceConfig):
     """Collapses and cycles per bubble lifetime, so a gap without a bubble is never bridged:
-    the last collapse before a gap is found, and re-nucleation after it is a new cycle."""
+    the last collapse before a gap is found, and re-nucleation after it is a new cycle.
+    A lifetime that ends at a never-measured frame is treated like one at the sequence end."""
     verified = np.array([f.radius if f.source in (SOURCE_RAW, SOURCE_TRACKED, SOURCE_ANCHOR) else _NAN
                          for f in frames])
     collapses, cycles = [], []
     for a, b in _lifetimes(frames):
-        seg = verified[a:min(b + 2, len(frames))]          # one gone frame after: the bubble vanished
+        vanished = b + 1 < len(frames) and _gone(frames[b + 1])
+        seg = verified[a:b + 2 if vanished else b + 1]     # one gone frame after: the bubble vanished
         c, cy = detect_cycles(seg, config=cfg)
         collapses += [a + k for k in c if a + k <= b]
         cycles += [(a + s, a + e) for s, e in cy]
@@ -192,6 +212,7 @@ def _with_cycles(frames: list[FrameSolution], cfg: SequenceConfig):
 
 def solve_sequence(raw: Sequence[Observation], redetect: Detector, *,
                    anchors: Mapping[int, tuple[float, float, float]] | None = None,
+                   unmeasured: Collection[int] = (),
                    config: SequenceConfig = DEFAULT_SEQUENCE_CONFIG) -> SequenceResult:
     """Track the bubble through a sequence of single-frame results.
 
@@ -205,21 +226,29 @@ def solve_sequence(raw: Sequence[Observation], redetect: Detector, *,
     anchors : {frame: (rc, cc, R)}, optional
         Manual or accepted frames: copied unchanged and used as hard seeds.  An
         anchor with R <= 0 or NaN means "no bubble in this frame" and stops passes.
+    unmeasured : frame indices, optional
+        Frames never measured (outside a partial Fit): their missing result says
+        nothing about the bubble.  Passes stop there as at the sequence end (no
+        re-detection), they are ``unmeasured`` and never reviewed, and a bubble seen
+        just before them has not vanished.  An anchor is never unmeasured.
     config : SequenceConfig
 
     Returns
     -------
     SequenceResult
     """
-    frames_in, anchor_map = _validate(raw, anchors)
+    frames_in, anchor_map, unknown = _validate(raw, anchors, unmeasured)
     n = len(frames_in)
     cache = RedetectCache(redetect)
-    seeds, auto = _seeds(frames_in, anchor_map, config)
-    cover = _coverage(n, _passes(frames_in, seeds, sorted(anchor_map), cache, config))
+    seeds, auto = _seeds(frames_in, anchor_map, unknown, config)
+    barriers = sorted(set(anchor_map) | unknown)
+    cover = _coverage(n, _passes(frames_in, seeds, barriers, cache, config))
     frames: list[FrameSolution] = []
     for i in range(n):
         if i in anchor_map:
             frames.append(_anchor_solution(anchor_map[i]))
+        elif i in unknown:
+            frames.append(_UNMEASURED)
         elif i in auto:
             frames.append(_solution(Step(frames_in[i], SOURCE_RAW), frames_in[i], False, config))
         else:

@@ -18,7 +18,7 @@ from collections.abc import Callable, Iterable
 import numpy as np
 
 from bubbletrack.model.edge_pipeline import EdgeFrameFit, EdgeJob, fit_edge
-from bubbletrack.model.provenance import user_confirmed_mask
+from bubbletrack.model.provenance import FitSource, user_confirmed_mask
 from bubbletrack.model.sequence import FrameSolution, Observation
 
 Circle = tuple[float, float, float]  # (rc, cc, R), 1-based full-image
@@ -36,6 +36,22 @@ def observations(state) -> list[Observation]:
         rc, cc = state.circle_fit_par[i]
         out.append(Observation(radius if radius > 0 else _NAN, rc, cc, conf[i], flags[i]))
     return out
+
+
+def unmeasured(state) -> frozenset[int]:
+    """Frames never measured: no result, no Auto score, not decided by the user.
+
+    Frames outside a partial Fit (or erased) are unknown to the solver, not
+    "no bubble": a frame Auto measured and rejected keeps its confidence.
+    """
+    n = len(state.radius)
+    radius = np.asarray(state.radius, dtype=float)
+    conf = state.fit_confidence if state.fit_confidence is not None else np.full(n, np.nan)
+    source = state.fit_source if state.fit_source is not None else np.zeros(n, np.int8)
+    locked = state.fit_locked if state.fit_locked is not None else np.zeros(n, bool)
+    empty = ~(np.isfinite(radius) & (radius > 0)) & np.isnan(np.asarray(conf, dtype=float))
+    never = empty & (np.asarray(source) == int(FitSource.NONE)) & ~np.asarray(locked, bool)
+    return frozenset(int(i) for i in np.flatnonzero(never))
 
 
 def anchors(state) -> dict[int, Circle]:

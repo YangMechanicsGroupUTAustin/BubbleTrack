@@ -262,3 +262,47 @@ def test_a_gap_without_bubble_ends_a_lifetime_and_is_not_reviewed():
     assert res.collapse_frames == (25, 57)            # both bubbles vanish after collapsing
     assert res.cycles == ((0, 25), (35, 57))
     assert all_correct(res, truth)
+
+
+def test_frames_never_measured_are_unknown_not_the_end_of_the_bubble():
+    """Fit ran on frames 0..39 of 80 only: at frame 39 the bubble is still shrinking (about
+    60 % of Rmax) and the tail was never measured.  The tail says nothing about the bubble:
+    no collapse is put at the end of the run, and the tail is neither re-measured nor reviewed."""
+    truth = truth_track(rayleigh_radii(80, [(-1, 44, 50.0)], floor=2.0))
+    nothing = ScriptedDetector.nothing()
+    raw = observe(truth)[:40] + (Observation(NAN, NAN, NAN, NAN),) * 40
+    det = ScriptedDetector(truth)
+    res = solve_sequence(raw, det, unmeasured=range(40, 80))
+    assert res.collapse_frames == ()
+    assert all(res.frames[i].source == "unmeasured" for i in range(40, 80))
+    assert not [i for i in det.frames_called if i >= 40]
+    assert not {i for i, _ in res.review}
+    assert all_correct(res, truth[:40])
+    # A measured "no bubble" after the run still ends the bubble's life as before.
+    gone = observe(truth)[:40] + (nothing,) * 40
+    assert solve_sequence(gone, lambda i, prior: nothing).collapse_frames == (39,)
+
+
+def test_a_never_measured_gap_is_not_bridged_and_each_side_is_tracked():
+    """Frames 20..29 were never measured: both sides are tracked (their own seeds), nothing in
+    the gap is re-measured, and the gap neither ends a bubble nor counts as a collapse."""
+    truth = truth_track(rayleigh_radii(60, [(-1, 62, 50.0)], floor=2.0))
+    gap = range(20, 30)
+    raw = tuple(Observation(NAN, NAN, NAN, NAN) if i in gap else o for i, o in enumerate(observe(truth)))
+    det = ScriptedDetector(truth)
+    res = solve_sequence(raw, det, unmeasured=gap)
+    assert all(res.frames[i].source == "unmeasured" for i in gap)
+    assert not set(gap) & set(det.frames_called)
+    assert res.collapse_frames == ()
+    assert all_correct(res, truth, skip=set(gap))
+
+
+def test_unmeasured_frames_are_checked():
+    raw = observe(truth_track(rayleigh_radii(10, [(-1, 12, 20.0)])))
+    with pytest.raises(ValueError):
+        solve_sequence(raw, ScriptedDetector(()), unmeasured=[10])
+    with pytest.raises(ValueError):
+        solve_sequence(raw, ScriptedDetector(()), unmeasured=[1.5])
+    # An anchor is the user's decision, never unknown.
+    res = solve_sequence(raw, ScriptedDetector(()), anchors={3: (125.0, 200.0, 9.0)}, unmeasured=[3])
+    assert res.frames[3].source == "anchor"

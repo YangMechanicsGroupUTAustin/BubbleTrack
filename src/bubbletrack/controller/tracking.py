@@ -21,7 +21,7 @@ from bubbletrack.model.provenance import FitSource, is_user_confirmed
 from bubbletrack.model.sequence import SOURCE_TRACKED, SequenceResult, solve_sequence
 from bubbletrack.model.sequence.types import FLAG_DISAGREE
 from bubbletrack.model.sequence_pipeline import (
-    Redetector, TrackingStopped, anchors, observations,
+    Redetector, TrackingStopped, anchors, observations, unmeasured,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,7 @@ class TrackingWorker(QThread):
         super().__init__()
         self._raw = observations(state)
         self._anchors = anchors(state)
+        self._unmeasured = unmeasured(state)  # outside a partial run: unknown, not "no bubble"
         self._images = tuple(state.images)
         self._video_path = state.video_path if state.video_reader is not None else None
         self._gridx, self._gridy = state.gridx, state.gridy
@@ -65,7 +66,8 @@ class TrackingWorker(QThread):
                 read = lambda i: read_raw(self._images[i])  # noqa: E731
             redetector = Redetector(read, self._gridx, self._gridy, self._job,
                                     stop_requested=lambda: self._stop)
-            result = solve_sequence(self._raw, redetector, anchors=self._anchors)
+            result = solve_sequence(self._raw, redetector, anchors=self._anchors,
+                                    unmeasured=self._unmeasured)
         except TrackingStopped:
             self.stopped.emit()
             return

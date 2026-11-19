@@ -16,7 +16,7 @@ from bubbletrack.event_bus import RESULTS_CHANGED
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.model.sequence import FrameSolution, SequenceResult
 from bubbletrack.model.sequence_pipeline import (
-    Redetector, TrackingStopped, anchors, observations,
+    Redetector, TrackingStopped, anchors, observations, unmeasured,
 )
 from bubbletrack.model.state import AppState, update_state
 
@@ -50,6 +50,46 @@ def test_manual_and_locked_frames_are_anchors():
     assert set(found) == {1, 2, 4}
     assert found[1] == (100.0, 150.0, 21.0)
     assert all(np.isnan(v) for v in found[2])
+
+
+def test_unmeasured_frames_have_no_result_and_no_score():
+    state = _state(5)
+    state.radius[3:] = -1.0               # 3: Auto measured and rejected it; 4: never measured
+    state.fit_confidence[3:] = [0.1, np.nan]
+    assert unmeasured(state) == {4}       # frame 2 was scored (0.2): measured too
+    state.fit_locked[4] = True             # an accepted "no bubble here" is the user's decision
+    assert unmeasured(state) == frozenset()
+
+
+def _partial_run_state(n_fitted=40, n=80):
+    """Fit on frames 0..n_fitted-1 only; the bubble is at 60 % of Rmax at the last of them."""
+    state = update_state(AppState().with_results_initialized(n), images=[f"f{i}.tif" for i in range(n)])
+    k = np.arange(n_fitted)
+    state.radius[:n_fitted] = 5 + 45 * np.sin(np.pi * k / 50)
+    state.circle_fit_par[:n_fitted] = [100.0, 150.0]
+    state.fit_confidence[:n_fitted] = 0.9
+    state.fit_source[:n_fitted] = FitSource.AUTO
+    return state
+
+
+def test_tracking_after_a_partial_run_puts_no_collapse_at_its_end(monkeypatch):
+    """The never-measured frames after a partial run are unknown, not "no bubble": the
+    shrinking bubble at the end of the run did not collapse there, and tracking does not
+    re-measure frames the run never measured."""
+    from bubbletrack.controller import tracking
+    from bubbletrack.model.edge_pipeline import EdgeJob, make_params
+
+    reads = []
+    monkeypatch.setattr(tracking, "read_raw", lambda path: reads.append(path) or np.zeros((4, 4)))
+    worker = tracking.TrackingWorker(_partial_run_state(), EdgeJob(make_params(), None, 500.0))
+    solved = []
+    worker.solved.connect(solved.append)
+    worker.run()  # in this thread
+    result = solved[0].result
+    assert result.collapse_frames == ()
+    assert not [f for f, reasons in result.review if "collapse" in reasons]
+    assert {f.source for f in result.frames[40:]} == {"unmeasured"}
+    assert reads == []
 
 
 # --------------------------------------------------------------------------- #
