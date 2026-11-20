@@ -45,8 +45,9 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.5.1"
-"""1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
+ENGINE_VERSION = "edge-1.6.0"
+"""1.6.0: bright-side gain and surface anchor when the median is in shadow (``normalize.background_level``).
+1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
 31M points, 1.5 GB, on lic_hard/03 frame 77); accepted results unchanged (2026-11-18).
 1.5.0: the background surface never uses pixels darker than 0.3 x the median (owner
 decision 2026-11-15).  Up to 1.4.0 they were left out of the first fit only; in dense speckle

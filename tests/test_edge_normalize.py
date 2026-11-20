@@ -2,11 +2,18 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
+import cv2
 import numpy as np
 import pytest
 
-from bubbletrack.model.edge.config import NormalizeConfig
+from bubbletrack.model.edge import EdgeParams, detect_edge
+from bubbletrack.model.edge.config import DEFAULT_CONFIG, NormalizeConfig
+from bubbletrack.model.edge.engine import detect_edge_with_config
 from bubbletrack.model.edge.normalize import (
+    background_level,
+    bright_level,
     estimate_background,
     full_scale,
     noise_sigma,
@@ -158,6 +165,74 @@ def test_reference_normalisation_corrects_gain_and_keeps_a_dark_wall():
     assert abs(np.median(out.image[bg]) - 1.0) < 0.01
     assert np.median(out.image[_disk((h, w), 50, 90, 15)]) < 0.2
     assert out.method.startswith("reference")
+
+
+# ------------------------------------------------------------------ background level (edge-1.6.0)
+
+def test_bright_level_ignores_a_dark_majority():
+    rng = np.random.default_rng(3)
+    y = np.concatenate([0.10 + 0.01 * rng.standard_normal(8000),     # a uniform dark bubble, 80 %
+                        1.00 + 0.05 * rng.standard_normal(2000)])    # the background, 20 %
+    assert np.median(y) < 0.2                                       # the median is inside the bubble
+    assert bright_level(y, CFG) == pytest.approx(1.0, abs=0.02)
+    level, shadowed = background_level(y, CFG)
+    assert shadowed and level == pytest.approx(1.0, abs=0.02)
+
+
+def test_background_level_is_exactly_the_median_without_a_shadow():
+    rng = np.random.default_rng(4)
+    y = np.concatenate([0.10 + 0.01 * rng.standard_normal(3000),     # a bubble, 30 %
+                        1.00 + 0.05 * rng.standard_normal(7000)])
+    assert background_level(y, CFG) == (float(np.median(y)), False)
+
+
+def test_gain_is_exactly_the_median_ratio_when_the_bubble_is_small():
+    h, w = 100, 160
+    rng = np.random.default_rng(5)
+    ref = (20000 * _speckle((h, w), 1.2, rng)).astype(np.float32)
+    frame = np.where(_disk((h, w), 50, 80, 25), 0.05, 0.8) * ref
+    out = normalize_roi(frame.astype(np.float32), np.zeros((h, w), bool), CFG, reference=ref)
+    ratio = frame.astype(np.float32) / np.maximum(cv2.GaussianBlur(ref, (0, 0), CFG.ref_blur_sigma), 1e-6)
+    assert out.gain == float(np.median(ratio))                       # unchanged since edge-1.4.0
+    assert "bright-side" not in out.method
+
+
+def _big_bubble_frame(seed: int, *, moved: float):
+    """Dense speckle seen through a dark bubble (transmission 0.08) covering ~61 % of a 120 x 160
+    ROI and cut by its bottom border; the frame is 0.8 x as bright as the reference and *moved*
+    of its speckle is decorrelated from the reference's."""
+    h, w = 120, 160
+    rng = np.random.default_rng(seed)
+    ref_tex = _speckle((h, w), 1.2, rng)
+    tex = (1 - moved) * ref_tex + moved * _speckle((h, w), 1.2, rng)
+    disk = _disk((h, w), 66, 80, 62)
+    frame = 0.8 * 20000 * tex * np.where(disk, 0.08, 1.0)
+    return frame.astype(np.float32), (20000 * ref_tex).astype(np.float32), disk
+
+
+def test_reference_normalisation_stays_out_of_a_bubble_filling_most_of_the_roi():
+    # edge-1.6.0: the median ratio lay inside the bubble (gain ~0.09 instead of ~0.8), so the
+    # residual surface took the bubble in and lifted its inside towards the background
+    frame, ref, disk = _big_bubble_frame(0, moved=0.0)
+    assert disk.mean() > 0.6
+    out = normalize_roi(frame, np.zeros(frame.shape, bool), CFG, reference=ref)
+    assert "bright-side" in out.method and out.gain > 0.6
+    assert np.median(out.image[_disk(frame.shape, 66, 80, 55)]) < 0.15
+    assert np.median(out.image[~_disk(frame.shape, 66, 80, 68)]) == pytest.approx(1.0, abs=0.1)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_a_bubble_filling_most_of_the_roi_is_measured(seed):
+    # lic_hard/02 files 12-35 (a bubble of R ~ 110-124 px filling most of a 250 x 400 frame, cut
+    # by its border, in moving dense speckle) gave no result up to edge-1.5.1
+    frame, ref, _ = _big_bubble_frame(seed, moved=0.3)
+    res = detect_edge(frame, (1, 120), (1, 160), reference=ref, params=EdgeParams())
+    assert res.accepted, (res.confidence, res.provenance.get("failure"))
+    assert res.radius == pytest.approx(62.0, abs=1.5)
+    assert np.hypot(res.rc - 67.0, res.cc - 81.0) < 1.5             # 1-based centre
+    old = replace(DEFAULT_CONFIG, normalize=replace(CFG, level_shadow_median=0.0))  # the median, always
+    before = detect_edge_with_config(frame, (1, 120), (1, 160), reference=ref, params=EdgeParams(), config=old)
+    assert not before.accepted
 
 
 def test_only_non_finite_pixels_are_invalid():

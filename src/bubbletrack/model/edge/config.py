@@ -46,6 +46,21 @@ class NormalizeConfig:
     """Gaussian scale (px) of the reference before the division (no reference pixel is excluded)."""
     gain_min_pixels: int = 100
     """Minimum valid pixels to estimate the frame-to-reference gain (flicker)."""
+    level_bright_frac: float = 0.5
+    """The bright-side background level of a ratio image is the median of its shrunk pixels
+    brighter than this fraction of that level (a fixed point): a shadow can only darken, so the
+    background is the bright part of the ROI however much of it a bubble covers."""
+    level_start_quantile: float = 0.9
+    """The fixed point is searched from this quantile of the shrunk pixels, so a uniform dark
+    bubble covering up to ~90 % of the ROI is not taken for the background."""
+    level_shadow_median: float = 0.5
+    """With a reference, the median stands as the background level (the gain, and the anchor of
+    the residual surface's dark thresholds) unless it is darker than this fraction of the
+    bright-side level, i.e. darker than the background fit's own first dark threshold
+    (``bg_dark_start``): then most of the ROI is shadow and the bright-side level is used
+    (edge-1.6.0; lic_hard/02 files 12-35: median 0.21-0.50 of the bright-side level, the
+    bubble was taken into the surface and no result came out).  Clean recordings sit at
+    0.93-1.0 and are unchanged bit for bit."""
 
     noise_bright_level: float = 0.7
     noise_min_pixels: int = 100

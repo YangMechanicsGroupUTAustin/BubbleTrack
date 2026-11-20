@@ -6,6 +6,11 @@ by a smooth residual surface; without one, ``N = I / B_hat`` with ``B_hat`` a
 robust polynomial surface plus a masked local correction.  All work is done in
 float32 on the full-bit-depth data.
 
+The background level of the ratio ``I / B_ref`` (the gain, and the anchor of the
+residual surface's dark thresholds) is its median, unless the median is in shadow
+(:func:`background_level`): a bubble filling most of the ROI puts the median inside
+the bubble, so the bright-side level is used instead (edge-1.6.0).
+
 No pixel is excluded for being dark or saturated in the reference frame (owner
 decision 2026-11-14): ``N`` holds the real ratio everywhere.  The only pixels
 without a value are the non-finite (NaN / inf) ones of the frame or the reference.
@@ -24,6 +29,7 @@ from bubbletrack.model.image_io import ImageLoadError, to_grayscale
 
 _EPS = 1e-6
 _SURFACE_SCALE = 1000.0  # brings a normalised image (~1.0) to camera-count magnitude
+_LEVEL_MAX_STEPS = 100   # bright_level stops exactly long before (monotone over a finite set)
 
 
 @dataclass(frozen=True)
@@ -140,15 +146,65 @@ def _poly_terms(h: int, w: int, degree: int) -> np.ndarray:
     return np.stack([c.ravel() for c in cols], axis=1)
 
 
-def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig) -> np.ndarray:
+def _shrink(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig) -> tuple[np.ndarray, np.ndarray]:
+    """*values* shrunk by ``bg_downsample`` (area mean) and the shrunk pixels touching *exclude*."""
+    f = cfg.bg_downsample
+    h, w = values.shape
+    hs, ws = max(h // f, 4), max(w // f, 4)
+    small = cv2.resize(values.astype(np.float32), (ws, hs), interpolation=cv2.INTER_AREA)
+    ex_s = cv2.resize(exclude.astype(np.float32), (ws, hs), interpolation=cv2.INTER_AREA) > 0
+    return small, ex_s
+
+
+def bright_level(y: np.ndarray, cfg: NormalizeConfig) -> float:
+    """Level of the bright part of *y*: the fixed point of ``L = median(y[y > frac * L])``.
+
+    ``frac`` is ``level_bright_frac``.  The search starts at the ``level_start_quantile`` of *y*;
+    the map is non-decreasing in ``L``, so the iterates move monotonically over a finite set
+    of values and stop exactly.  Values below ``frac * L`` (a shadow, a dark bubble) do not
+    move the result, however many there are, as long as the bright part reaches the start
+    quantile.  NaN for an empty *y*.
+    """
+    y = y[np.isfinite(y)]
+    if y.size == 0:
+        return float("nan")
+    level = float(np.quantile(y, cfg.level_start_quantile))
+    for _ in range(_LEVEL_MAX_STEPS):
+        bright = y[y > cfg.level_bright_frac * level]
+        new = float(np.median(bright)) if bright.size else level
+        if new == level:
+            break
+        level = new
+    return level
+
+
+def background_level(y: np.ndarray, cfg: NormalizeConfig) -> tuple[float, bool]:
+    """Background level of the ratio values *y* and whether the median was in shadow.
+
+    The median, unless it is darker than ``level_shadow_median`` x :func:`bright_level`:
+    then most of *y* is a shadow (a bubble filling most of the ROI, a dark band) and the
+    median lies inside it, so the bright-side level is returned instead.  While less than
+    about half of *y* is dark the median stands exactly, so such frames are unchanged.
+    """
+    med = float(np.median(y))
+    bright = bright_level(y, cfg)
+    if np.isfinite(bright) and med < cfg.level_shadow_median * bright:
+        return bright, True
+    return med, False
+
+
+def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig, *,
+                        shadow_aware: bool = False) -> np.ndarray:
     """Smooth background surface of *values* (bubble, debris and glare excluded).
 
     A cubic polynomial is fitted on a shrunk image with iterative rejection of
     dark and bright outliers, then multiplied by a masked normalised-convolution
     correction that captures medium-scale illumination the cubic misses.  Pixels
-    below ``bg_dark_hold`` x the median are never used: in dense speckle the
-    rejection band is so wide that a big dark bubble would otherwise be re-admitted
-    and lifted to the background level.
+    below ``bg_dark_hold`` x the median (the anchor) are never used: in dense speckle
+    the rejection band is so wide that a big dark bubble would otherwise be re-admitted
+    and lifted to the background level.  The anchor must be a background value: with
+    *shadow_aware* it is :func:`background_level`, which stays out of a bubble that
+    covers most of the image.
 
     Parameters
     ----------
@@ -157,23 +213,25 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
     exclude : ndarray of bool
         Pixels never used for the fit (saturated or invalid).
     cfg : NormalizeConfig
+    shadow_aware : bool
+        The dark thresholds are anchored on :func:`background_level` instead of the plain
+        median (for a frame / reference ratio, whose background is its bright part).
 
     Returns
     -------
     ndarray
         float32 surface of the same shape.
     """
-    f = cfg.bg_downsample
+    small, ex_s = _shrink(values, exclude, cfg)
+    hs, ws = small.shape
     h, w = values.shape
-    hs, ws = max(h // f, 4), max(w // f, 4)
-    small = cv2.resize(values.astype(np.float32), (ws, hs), interpolation=cv2.INTER_AREA)
-    ex_s = cv2.resize(exclude.astype(np.float32), (ws, hs), interpolation=cv2.INTER_AREA) > 0
+    f = cfg.bg_downsample
     terms = _poly_terms(hs, ws, cfg.bg_poly_degree)
     y = small.ravel()
     keep = ~ex_s.ravel()
     if not keep.any():
         keep = np.ones_like(keep)
-    med = float(np.median(y[keep]))
+    med = background_level(y[keep], cfg)[0] if shadow_aware else float(np.median(y[keep]))
     keep &= y > cfg.bg_dark_start * med
     clearly_dark = y <= cfg.bg_dark_hold * med
     surface = np.full(small.shape, med, np.float32)
@@ -209,9 +267,9 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
     With a *reference*, every pixel gets the ratio frame / blurred reference, however
     dark or saturated the reference is there; the divisor is floored at ``_EPS`` so the
     ratio stays finite (0 where neither frame has light).  Where the reference has almost
-    no light but the frame has some, the ratio can be huge: the gain (a median) ignores
-    it, but the residual surface is a least-squares fit and is dragged by a large area of
-    such pixels.
+    no light but the frame has some, the ratio can be huge: the gain (a median, or the
+    bright-side level when the median is in shadow: :func:`_gain`) ignores it, but the
+    residual surface is a least-squares fit and is dragged by a large area of such pixels.
 
     Parameters
     ----------
@@ -239,14 +297,32 @@ def normalize_roi(values: np.ndarray, saturated: np.ndarray, cfg: NormalizeConfi
         return Normalized(image, saturated, invalid, method, 1.0)
     blurred = cv2.GaussianBlur(reference, (0, 0), cfg.ref_blur_sigma)
     ratio = values / np.maximum(blurred, _EPS)
-    ok = ~invalid & ~saturated
-    gain = float(np.median(ratio[ok])) if ok.sum() > cfg.gain_min_pixels else 1.0
-    gain = gain if np.isfinite(gain) and gain > _EPS else 1.0
+    gain, shadowed = _gain(ratio, saturated | invalid, cfg)
     image = np.where(invalid, 1.0, ratio / gain).astype(np.float32)
-    residual = estimate_background(image * _SURFACE_SCALE, saturated | invalid, cfg) / _SURFACE_SCALE
+    residual = estimate_background(image * _SURFACE_SCALE, saturated | invalid, cfg,
+                                   shadow_aware=True) / _SURFACE_SCALE
     image = np.where(invalid, 1.0, image / np.maximum(residual, _EPS)).astype(np.float32)
-    method = f"reference(gain={gain:.3f})+surface" + _no_background_note(saturated | invalid)
+    method = (f"reference(gain={gain:.3f}{', bright-side' if shadowed else ''})+surface"
+              + _no_background_note(saturated | invalid))
     return Normalized(image, saturated, invalid, method, gain)
+
+
+def _gain(ratio: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig) -> tuple[float, bool]:
+    """Frame-to-reference brightness (flash flicker) and whether the median was in shadow.
+
+    The median ratio of the usable pixels, unless :func:`background_level` of the shrunk
+    ratio finds that median inside a shadow covering most of the ROI: then the bright-side
+    level (the median gain fell to 0.16-0.33 instead of ~0.8 on lic_hard/02 files 12-36).
+    The residual surface is anchored the same way, which is what keeps the bubble out of it.
+    """
+    ok = ~exclude
+    if ok.sum() <= cfg.gain_min_pixels:
+        return 1.0, False
+    gain = float(np.median(ratio[ok]))
+    small, ex_s = _shrink(ratio, exclude, cfg)
+    level, shadowed = background_level(small[~ex_s], cfg) if (~ex_s).any() else (gain, False)
+    gain = level if shadowed else gain
+    return (gain, shadowed) if np.isfinite(gain) and gain > _EPS else (1.0, False)
 
 
 def normalize_frame_roi(frame: GrayFrame, ref: GrayFrame | None, roi: tuple[slice, slice], *, dark: bool,
