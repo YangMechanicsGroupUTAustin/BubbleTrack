@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from bubbletrack.controller.review_queue import ReviewItem
-from bubbletrack.controller.review_segments import CATEGORIES, OTHER, ReviewSegment
+from bubbletrack.controller.review_segments import (
+    CATEGORIES, KINDS, NOT_FOUND, NOT_SURE, OTHER, ReviewSegment, kind_of,
+)
 from bubbletrack.ui.review_text import (
     accept_all_question,
     detail_text,
@@ -84,33 +86,40 @@ class TestRows:
 
     def test_row_text_names_the_problem_and_the_count(self):
         assert segment_text(_segment("lost", 43), IMAGES) == \
-            "Frame 44 \u00b7 _054 \u00b7 Auto lost the bubble"
-        assert segment_text(_segment("jump", 9, 10), IMAGES) == \
-            "Frames 10\u201311 \u00b7 Radius jumps \u00b7 2 frames"
+            "Frame 44 \u00b7 _054 \u00b7 No bubble found"
+        assert segment_text(_segment("jump", 9, 10, reasons=("jump",)), IMAGES) == \
+            "Frames 10\u201311 \u00b7 Size looks off \u00b7 2 frames"
 
-    def test_a_no_result_row_says_when_auto_has_a_guess(self):
-        plain = _segment("no_result", 3, 4, reasons=("rejected",))
+    def test_a_row_of_guesses_is_named_by_its_kind_only(self):
         guessed = ReviewSegment("no_result", (ReviewItem(3, ("rejected",), 90),
                                               ReviewItem(4, ("rejected", "guess"), 89)))
-        assert problem_text(plain) == "No result"
-        assert problem_text(guessed) == "No result \u2014 Auto has a guess"
+        assert problem_text(guessed) == "No bubble found"  # the tooltip tells about guesses
 
-    def test_progress_counts_checks_and_information_apart(self):
-        assert summary_text(48, 48, 0) == "48 frames to check"
-        assert summary_text(1, 1, 0) == "1 frame to check"
-        assert summary_text(4, 4, 11) == "4 frames to check · 11 for information"
-        assert summary_text(12, 48, 0) == "12 of 48 frames to check"
-        assert summary_text(0, 0, 11) == "Nothing to check · 11 for information"
-        assert summary_text(0, 0, 0) == "Nothing to check"
+    def test_a_mixed_row_is_named_by_its_most_common_kind(self):
+        """A3: not by its worst frame (11 lost frames in a row of 131)."""
+        items = [ReviewItem(f, ("lost", "rejected"), 100) for f in range(11)] + \
+            [ReviewItem(f, ("low_confidence",), 70, 0.4) for f in range(11, 131)]
+        segment = ReviewSegment("lost", tuple(items))
+        assert segment.label == "Mostly not sure (11 not found)"
+        assert segment_text(segment, IMAGES) == \
+            "Frames 1\u2013131 \u00b7 Mostly not sure (11 not found) \u00b7 131 frames"
+        assert segment.entry == 0  # it still opens on its worst frame
+
+    def test_progress_is_one_number_of_frames_to_check(self):
+        assert summary_text(48, 48) == "48 frames to check"
+        assert summary_text(1, 1) == "1 frame to check"
+        assert summary_text(12, 48) == "12 of 48 frames to check"
+        assert summary_text(0, 0) == "Nothing to check"
 
     def test_progress_never_counts_skipped_frames_as_checked(self):
-        assert summary_text(0, 48, 0) == "All 48 checked"
-        assert summary_text(0, 15, 0, skipped=2) == "13 checked · 2 skipped"
-        assert summary_text(0, 15, 3, skipped=15) == "0 checked · 15 skipped · 3 for information"
+        assert summary_text(0, 48) == "All 48 checked"
+        assert summary_text(0, 15, skipped=2) == "13 checked · 2 skipped"
+        assert summary_text(0, 15, skipped=15) == "0 checked · 15 skipped"
 
-    def test_done_page_uses_the_queue_words(self):
-        assert done_text(0) == "All frames to check are done.\nNext: export R(t)."
-        assert done_text(2) == "All frames to check are done (2 skipped).\nNext: export R(t)."
+    def test_done_page_is_one_summary_with_a_way_to_the_skipped_frames(self):
+        assert done_text(229) == "All done — 229 checked"
+        assert done_text(229, 1, 3) == "All done — 229 checked, 1 skipped (Frame 4: show)"
+        assert done_text(240, 5, 11) == "All done — 240 checked, 5 skipped (from Frame 12: show)"
 
     def test_position_and_span(self):
         segment = _segment("lost", 10, 12, 13)
@@ -127,21 +136,26 @@ class TestRows:
 
 
 class TestProblemSentences:
-    """The card's first sentence says the row's problem in the row's words."""
+    """The card's first sentence says the frame's kind of problem in plain words."""
 
-    def test_every_category_repeats_its_row_label(self):
+    def test_four_kinds_four_sentences_without_numbers(self):
+        sentences = {problem_sentence(kind.key) for kind in KINDS}
+        assert len(sentences) == 4
+        assert not any(ch.isdigit() for s in sentences for ch in s)
+
+    def test_every_category_belongs_to_one_of_four_kinds(self):
+        """B2: 11 categories, 4 kinds the user sees."""
+        keys = {kind.key for kind in KINDS}
         for category in (*CATEGORIES, OTHER):
-            sentence = problem_sentence(category.key)
-            words = category.label.replace(":", "").split()
-            assert all(w in sentence for w in words), (category.key, sentence)
+            item = ReviewItem(0, (next(iter(category.reasons), "brand_new_flag"),), 80)
+            assert kind_of(item) in keys, category.key
+        assert [kind.label for kind in KINDS] == [
+            "No bubble found", "Size looks off", "Not sure", "Before / after the bubble"]
 
     def test_examples(self):
-        assert problem_sentence("lost") == "Auto lost the bubble here."
-        assert problem_sentence("no_result") == "No result here."
-        assert problem_sentence("tracking") == "Tracking changed it here."
-        assert problem_sentence("low_confidence", 0.454) == \
-            "Not sure here: low confidence (0.45)."
-        assert problem_sentence("before") == "Before the bubble."
+        assert problem_sentence(NOT_FOUND) == "Auto found no bubble here."
+        assert problem_sentence(NOT_SURE) == "Auto is not sure here."
+        assert problem_sentence("before") == "Before the bubble: the frame looks empty."
 
 
 class TestDetails:
@@ -153,7 +167,7 @@ class TestDetails:
         ))
         lines = tooltip_lines(segment, IMAGES)
         assert lines[0] == "Frames 11\u201314 \u00b7 files _021\u2013_024"
-        assert lines[1] == "Auto lost the bubble \u00b7 3 flagged frames"
+        assert lines[1] == "No bubble found \u00b7 3 flagged frames"
         assert lines[2] == ("Why: Auto lost the bubble \u00d73, low confidence \u00d72, "
                             "outline not round \u00d71")
         assert lines[3] == "Confidence 0.05\u20130.40"
@@ -163,8 +177,8 @@ class TestDetails:
         segment = _segment("low_confidence", 43, reasons=("low_confidence", "non_circular"),
                            confidence=0.3)
         assert tooltip_lines(segment, IMAGES) == [
-            "Frame 44 \u00b7 _054", "Not sure: low confidence",
-            "Why: low confidence 0.30, outline not round"]
+            "Frame 44 \u00b7 _054", "Not sure",
+            "Why: low confidence 0.30, outline not round"]  # the number: tooltip only
 
     def test_detail_of_the_shown_frame(self):
         item = ReviewItem(12, ("lost",), 100)

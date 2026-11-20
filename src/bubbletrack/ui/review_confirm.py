@@ -10,11 +10,13 @@ DETAIL = ("Each guess becomes a locked result, like Accept on that frame. "
 
 
 def accept_all_detail(empty: int) -> str:
-    """The question's small print; *empty*: frames with no result and no guess."""
+    """The question's small print; *empty*: the row's frames it leaves listed
+    (no result and no guess, or recommended for a fix)."""
     if not empty:
         return DETAIL
-    frames = "1 empty frame stays" if empty == 1 else f"{empty} empty frames stay"
-    return f"{DETAIL} {frames} for you to fix or mark."
+    frames = ("1 frame that needs a fix stays" if empty == 1
+              else f"{empty} frames that need a fix stay")
+    return f"{DETAIL} {frames} listed."
 
 
 def accept_all_box(parent: QWidget | None, question: str, empty: int = 0) -> QMessageBox:

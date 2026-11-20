@@ -2,16 +2,19 @@
 
 A hard recording can flag almost every frame; listing them one by one
 buries the few decisions the user has to make.  Each flagged frame gets one
-user-facing *category* (its most severe reason).  Flagged frames that follow
-each other (a gap of at most ``MAX_GAP`` frames) form one ``ReviewSegment``,
-whatever their categories: one row, one action for all of it, named and
-coloured by its worst frame, so rows do not overlap.  ML assist's results
-keep runs of their own (amber, never repainted red by a neighbour), and the
-frames before the bubble (``BEFORE``) form one row, for information.
+*category* (its most severe reason), and each category belongs to one of
+four *kinds* the user sees ("No bubble found", "Size looks off", "Not sure",
+"Before / after the bubble"; the reasons behind them are in the tooltips).
+Flagged frames that follow each other (a gap of at most ``MAX_GAP`` frames)
+form one ``ReviewSegment``, whatever their categories: one row, coloured by
+its worst frame and named by its most common kind, so rows do not overlap.
+ML assist's results keep runs of their own (amber, never repainted red by a
+neighbour), and the frames before the bubble (``BEFORE``) form one row.
 """
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Collection, Iterable, Sequence
 from dataclasses import dataclass
 from typing import Literal
@@ -20,7 +23,7 @@ from bubbletrack.controller.review_queue import BEFORE, CONTEXT_REASONS, ReviewI
 
 MAX_GAP = 1  # frames that may be missing inside a segment
 SEVERITY_HIGH = 80  # likely wrong (red)
-SEVERITY_MEDIUM = 55  # worth a check (amber); below: for information (grey)
+SEVERITY_MEDIUM = 55  # worth a check (amber); below: a quick look (grey)
 
 Tier = Literal["high", "medium", "low"]
 
@@ -32,8 +35,8 @@ class Category:
     reasons: frozenset[str]
 
 
-# Shown in this order in the filter menu; the labels say what is wrong in
-# plain words (the reasons behind them are in the tooltips).
+# The categories behind the four kinds the user sees (``KINDS``); the
+# reasons behind them are in the tooltips.
 CATEGORIES: tuple[Category, ...] = (
     Category("lost", "Auto lost the bubble", frozenset({"lost", "cloud"})),
     Category("no_result", "No result", frozenset({"rejected"})),
@@ -63,10 +66,35 @@ _CAPPED = {"ml": SEVERITY_HIGH - 1}  # category -> the highest severity it shows
 
 
 @dataclass(frozen=True)
+class Kind:
+    """What the user sees of a category: one of four kinds of problem."""
+
+    key: str
+    label: str  # the filter's and the row's name
+    short: str  # inside a mixed row's name: "Mostly not sure (11 not found)"
+    categories: frozenset[str]
+
+
+NOT_FOUND, SIZE_OFF, NOT_SURE = "not_found", "size_off", "not_sure"
+# Shown in this order in the filter menu.
+KINDS: tuple[Kind, ...] = (
+    Kind(NOT_FOUND, "No bubble found", "not found",
+         frozenset({"lost", "no_result", "clipped"})),
+    Kind(SIZE_OFF, "Size looks off", "size off", frozenset({"jump", "tracking"})),
+    Kind(NOT_SURE, "Not sure", "not sure",
+         frozenset({"low_confidence", "shape", "ml", "collapse", OTHER.key})),
+    Kind(BEFORE, "Before / after the bubble", "before / after", frozenset({BEFORE})),
+)
+_KIND_OF = {category: k.key for k in KINDS for category in k.categories}
+_KINDS = {k.key: k for k in KINDS}
+_KIND_RANK = {k.key: n for n, k in enumerate(KINDS)}
+
+
+@dataclass(frozen=True)
 class ReviewSegment:
     """Flagged frames of one span, in frame order (gaps allowed)."""
 
-    category: str  # the Category key of its worst frame (names the row)
+    category: str  # the Category key of its worst frame (the row opens on it)
     items: tuple[ReviewItem, ...]
 
     @property
@@ -105,12 +133,36 @@ class ReviewSegment:
 
     @property
     def to_check(self) -> bool:
-        """A red or amber row; grey rows are for information only."""
+        """A red or amber row (the filmstrip's key frames); Review counts the
+        grey rows' frames to check as well."""
         return self.tier != "low"
 
     @property
+    def kind_counts(self) -> tuple[tuple[str, int], ...]:
+        """(kind, frames) of every kind in the row, the most common first
+        (a tie: the kind of the worse frame first)."""
+        counts = Counter(kind_of(item) for item in self.items)
+        worst: dict[str, int] = {}
+        for item in self.items:
+            key = kind_of(item)
+            worst[key] = max(worst.get(key, 0), item_severity(item))
+        return tuple(sorted(counts.items(),
+                            key=lambda kv: (-kv[1], -worst[kv[0]], _KIND_RANK[kv[0]])))
+
+    @property
+    def kind(self) -> str:
+        """The row's most common kind (it names the row)."""
+        return self.kind_counts[0][0]
+
+    @property
     def label(self) -> str:
-        return category_label(self.category)
+        """The row's name: its kind ('Not sure'), or for a mix the most
+        common kind and the others ('Mostly not sure (11 not found)')."""
+        (main, _), *others = self.kind_counts
+        if not others:
+            return kind_label(main)
+        rest = ", ".join(f"{n} {_KINDS[key].short}" for key, n in others)
+        return f"Mostly {kind_label(main).lower()} ({rest})"
 
     @property
     def categories(self) -> tuple[str, ...]:
@@ -132,6 +184,21 @@ def category_of(item: ReviewItem) -> str:
     deciding = next((r for r in item.reasons if r not in CONTEXT_REASONS),
                     item.reasons[0] if item.reasons else "")
     return _BY_REASON.get(deciding, OTHER.key)
+
+
+def kind_of(item: ReviewItem) -> str:
+    """The kind the user sees for *item*.  A frame cut by the image edge that
+    has a result (its visible wall is not round) is "Not sure", not "No
+    bubble found"."""
+    category = category_of(item)
+    if category == "clipped" and "rejected" not in item.reasons:
+        return NOT_SURE
+    return _KIND_OF.get(category, NOT_SURE)
+
+
+def kind_label(key: str) -> str:
+    kind = _KINDS.get(key)
+    return kind.label if kind is not None else _KINDS[NOT_SURE].label
 
 
 def item_severity(item: ReviewItem) -> int:

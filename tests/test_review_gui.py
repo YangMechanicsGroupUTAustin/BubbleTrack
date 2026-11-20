@@ -16,6 +16,7 @@ from bubbletrack.controller.review_controller import (
 )
 from bubbletrack.controller.review_segments import build_segments, queue_frames
 from bubbletrack.model.provenance import FitSource
+from bubbletrack.ui.review_panel import EMPTY_FILTERED
 from bubbletrack.model.state import update_state
 from bubbletrack.ui.shortcuts import FIX_BINDINGS, REVIEW_BINDINGS
 
@@ -100,8 +101,7 @@ class TestInstall:
         state.fit_flags[5] = frozenset({"non_circular"})
         rc.refresh()
         assert rc.panel.frames() == [2, 5]
-        assert rc.panel.texts() == ["Frame 3 · Not sure: low confidence",
-                                    "Frame 6 · Outline not round"]
+        assert rc.panel.texts() == ["Frame 3 · Not sure", "Frame 6 · Not sure"]
         assert counts == [2]
 
     def test_locked_frames_are_excluded(self, review):
@@ -117,7 +117,7 @@ class TestInstall:
         state = _fitted(controller, conf=np.nan)
         state.radius[3] = 60.0
         rc.refresh()
-        assert rc.panel.texts() == ["Frame 4 · Radius jumps"]
+        assert rc.panel.texts() == ["Frame 4 · Size looks off"]
 
     def test_set_extra_merges_and_new_source_resets(self, review, make_sequence):
         from bubbletrack.controller.review_controller import ReviewItem
@@ -200,7 +200,7 @@ class TestActions:
         controller.file_ctrl.on_frame_changed(7)  # not flagged, in no row
         assert rc.panel.card.isVisibleTo(rc.panel)
         assert rc.panel.card.title.text() == "Frame 8"  # its file _008 adds nothing
-        assert rc.panel.card.advice.text() == "Not flagged — nothing to do here."
+        assert rc.panel.card.advice.text() == "Not flagged: nothing to do here."
         assert rc.panel.card.recommended() is None  # nothing filled
         assert rc.panel.card.buttons["accept_all"].isHidden()
         rc.perform("no_bubble")
@@ -244,8 +244,9 @@ class TestCardAndFeedback:
         assert [b.text() for b in (card.buttons["accept"], card.buttons["fix"],
                                    card.buttons["no_bubble"])] == [
             "Accept this frame", "Fix with a circle", "No bubble here"]
-        assert card.advice.text() == ("Not sure here: low confidence (0.20). "
+        assert card.advice.text() == ("Auto is not sure here. "
                                       "Accept it if the outline sits on the bubble wall.")
+        assert "low confidence 0.20" in card.advice.toolTip()  # A1: the number on demand
         controller.file_ctrl.on_frame_changed(5)
         assert card.recommended() == "fix"
 
@@ -281,8 +282,9 @@ class TestCardAndFeedback:
         rc.perform("accept")
         assert rc.panel._summary.text() == "All 2 checked"
         page = rc.panel.done_page
-        assert page.text().startswith("All frames to check are done.") and page.offers_export()
-        assert rc.panel.feedback.text().endswith("All done.")
+        assert page.text() == "All done — 2 checked" and page.offers_export()
+        assert rc.panel.feedback.text() == "✓ Frame 6 accepted and locked."  # Undo stays
+        assert rc.panel.card.isHidden()  # A5: no frame card under "All done"
         exported = []
         window.export_requested.disconnect()  # not the real (modal) Export Results dialog
         window.export_requested.connect(lambda: exported.append(1))
@@ -356,18 +358,19 @@ class TestReviewFindings:
         rc.perform("accept")
         controller.file_ctrl.on_frame_changed(2)  # back to the accepted frame
         assert rc.panel.card.recommended() is None
-        assert rc.panel.card.advice.text() == "Accepted (locked): nothing to do here."
+        assert rc.panel.card.advice.text() == "Accepted: nothing to do here."
         assert rc.panel.card.buttons["accept"].isHidden()  # polish 3: nothing to accept
 
     def test_all_done_is_only_said_when_nothing_is_hidden(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, f2=0.1)
-        state.fit_flags[6] = frozenset({"non_circular"})
+        state.fit_flags[6] = frozenset({"jump"})
         rc.refresh()
-        rc.panel.set_hidden_categories({"shape"})
+        rc.panel.set_hidden_kinds({"size_off"})
         rc.panel.step(1)
         rc.perform("accept")
-        assert not rc.panel.feedback.text().endswith("All done.")
+        assert rc.panel.done_page.text() == EMPTY_FILTERED
+        assert not rc.panel.done_page.offers_export()
 
 
 class TestRunLock:

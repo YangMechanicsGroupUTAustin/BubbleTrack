@@ -44,8 +44,8 @@ class WelcomeDialog(QDialog):
             ),
             (
                 "3. Review & Export",
-                "Check the frames the Review panel lists, fix the few that need "
-                "it, then Export R(t) to MAT, CSV or Excel.",
+                "Check the frames the Review panel lists; on hard recordings, "
+                "teach ML assist first. Then Export R(t) to MAT, CSV or Excel.",
             ),
         ]
         for step_title, desc in steps:

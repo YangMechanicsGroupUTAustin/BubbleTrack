@@ -49,7 +49,7 @@ REASON_WEIGHTS: dict[str, int] = {
 UNKNOWN_REASON_WEIGHT = 50  # reasons that only arrive through ``extra``
 BEFORE = "before"
 """A frame before the bubble's first result that looks like the reference
-frame (``review_background``): listed for information only, with "No bubble"
+frame (``review_background``): listed in a grey row, with "No bubble"
 as its action.  It replaces every other reason of the frame."""
 REVIEW_FLAGS = frozenset(REASON_WEIGHTS) - {"rejected", BEFORE}
 # Routine engine flags: they describe a listed frame and add to its rank, but

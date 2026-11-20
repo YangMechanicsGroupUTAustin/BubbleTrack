@@ -5,8 +5,9 @@ fix).  Row actions touch exactly the row's frames, never other rows'
 frames inside its span.  Accept stores results and Auto's guesses only: an
 empty frame (no result, no guess) may be a bubble Auto missed, so it stays
 for Fix or No bubble; "No bubble" is the only way to say a frame is empty,
-and nothing here deletes a result.  Each function returns the status text,
-or None if nothing changed.
+and nothing here deletes a result.  Accept all stores the frames it is
+given (``review_advice.accept_all_frames``: never one Review recommends
+fixing).  Each function returns the status text, or None if nothing changed.
 """
 
 from __future__ import annotations
@@ -56,18 +57,20 @@ def accept_frame(app, frame: int) -> str | None:
     return f"Frame {frame + 1} accepted and locked{UNDO_HINT}"
 
 
-def accept_segment(app, segment: ReviewSegment) -> str | None:
-    """Accept *segment*'s frames that have a result or a guess: each guess
-    becomes the frame's result, and they are locked.  Empty frames stay as
-    they are (listed, for Fix or No bubble).  None if nothing changed."""
+def accept_segment(app, segment: ReviewSegment, frames: Iterable[int]) -> str | None:
+    """Accept *frames* of *segment* (those with a result or a guess): each
+    guess becomes the frame's result, and they are locked, as one edit.  The
+    row's other frames stay as they are (listed, for Fix or No bubble).
+    None if nothing changed."""
     state = app._get_state()
     locked = state.fit_locked
-    frames = acceptable(state, segment.frames) if locked is not None else []
+    chosen = set(frames) & set(segment.frames)
+    frames = acceptable(state, sorted(chosen)) if locked is not None else []
     if not frames:
         return None
     before = snapshot(state, frames)
     stored = [f for f in suggestion_actions.guessed_frames(state, segment)
-              if edge_support.accept_suggestion(state, f)]
+              if f in chosen and edge_support.accept_suggestion(state, f)]
     locked[frames] = True  # fit_source kept
     edit = record_edit(state, f"accept of {span_text(segment).lower()}", before)
     if edit is None:
@@ -75,11 +78,10 @@ def accept_segment(app, segment: ReviewSegment) -> str | None:
     app.history.push(edit)
     _changed(app, state, stored)
     left = segment.count - len(frames)
-    text = (f"{span_text(segment)} accepted and locked" if not left
-            else f"{len(frames)} of {span_text(segment).lower()} accepted and locked")
-    notes = ([f"{len(stored)} of Auto's guesses stored"] if stored else []) + \
-        ([f"{left} empty frame{'s' if left != 1 else ''} left to fix or mark"] if left else [])
-    return text + (f" ({'; '.join(notes)})" if notes else "") + UNDO_HINT
+    if not left:
+        return f"{span_text(segment)} accepted and locked{UNDO_HINT}"
+    still = "frame still needs" if left == 1 else "frames still need"
+    return f"Accepted {len(frames)} · {left} {still} a fix{UNDO_HINT}"
 
 
 def mark_no_bubble(app, frames: Iterable[int], what: str) -> str | None:

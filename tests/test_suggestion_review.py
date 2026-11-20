@@ -1,8 +1,9 @@
 """Accept in Review on frames with Auto's guess, offscreen.
 
 A (Accept) stores the guess on screen only (one Ctrl+Z) and moves to the
-row's next frame.  Shift+A (Accept all) stores every result and guess of the
-row, and asks once when some guesses were never on screen.  Accept never
+row's next frame.  Shift+A (Accept all) stores the row's results and the
+guesses it recommends accepting (sure enough, the size of the frames around),
+and asks once when some of those guesses were never on screen.  Accept never
 means "no bubble": empty frames stay for Fix or No bubble."""
 
 from __future__ import annotations
@@ -175,7 +176,7 @@ def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
     asked, _, _ = answers
     state = _state(controller)
     _empty(state, [2, 4])
-    _guess(state, [3, 5])
+    _guess(state, [3, 5], conf=0.45)
     for f in (3, 5):
         controller.file_ctrl.on_frame_changed(f)  # the user looked at both guesses
     _show(controller, 2)
@@ -183,8 +184,7 @@ def test_accept_all_stores_every_guess_once_all_were_seen(app, answers):
     assert asked == []  # nothing unseen: no question
     assert _promoted(state) == [3, 5] and state.fit_locked[[3, 5]].all()
     assert not state.fit_locked[[2, 4]].any()  # empty: left for Fix or No bubble
-    assert ("2 of frames 3–6 accepted and locked (2 of Auto's guesses stored; "
-            "2 empty frames left to fix or mark)") in _status(window)
+    assert "Accepted 2 · 2 frames still need a fix" in _status(window)
     assert controller.review.panel.frames() == [2, 4]
     assert _state(controller).image_no == 2  # the row's frames left to settle
     controller._on_undo()  # one Ctrl+Z undoes it all
@@ -197,7 +197,7 @@ def test_accept_all_asks_about_unseen_guesses_and_cancel_stores_nothing(app, ans
     asked, replies, small_print = answers
     state = _state(controller)
     _empty(state, [2, 4, 6, 7, 9])
-    _guess(state, [3, 5, 8])
+    _guess(state, [3, 5, 8], conf=0.45)
     _show(controller, 3)
     replies.append(False)
     controller.review.perform("accept_all")
@@ -227,7 +227,7 @@ def test_the_real_question_box(app, qapp):
     """The dialog says what it will do; Cancel is one click away."""
     window, controller = app
     state = _state(controller)
-    _guess(state, [3, 4, 5])
+    _guess(state, [3, 4, 5], conf=0.45)
     _show(controller, 3)
     seen = {}
 
@@ -260,18 +260,20 @@ def test_row_tooltip_and_card_say_what_accept_does(app):
     panel = controller.review.panel
     tip = tooltip_html(panel.current_segment(), state.images)
     assert ("Auto&#x27;s guess on 2 of 3 frames (dashed): Accept (A) stores the one on screen, "
-            "Accept all (Shift+A) every one") in tip
+            "Accept all (Shift+A) the ones that fit the frames around them") in tip
     assert "Not a bubble? No bubble (N); Shift+N for the whole row" in tip
-    assert panel.texts()[0].endswith("No result — Auto has a guess · 3 frames")
-    # M3: an uncertain guess (0.20) is not the filled button; the card says why
-    assert panel.card.advice.text() == ("No result here. Auto's guess (dashed) is uncertain "
-                                        "(0.20). Accept it only if it sits on the wall.")
+    assert panel.texts()[0].endswith("No bubble found · 3 frames")
+    # M3/A2: an uncertain guess is not the filled button; the card says the same as Fix
+    assert panel.card.advice.text() == ("Auto found no bubble here. Its guess (dashed outline) "
+                                        "is too unsure to use: fix it.")
+    assert "confidence 0.20" in panel.card.advice.toolTip()  # A1: the number on demand
     assert panel.card.recommended() == "fix"
     assert panel.card.buttons["accept"].text() == "Accept the guess"
     state.fit_suggestion[3] = make_suggestion(R, *CENTRE, circle_outline(*CENTRE, R), 0.45)
     controller.review.refresh()
-    assert panel.card.advice.text() == ("No result here. Auto's guess is dashed: "
-                                        "accept it if it sits on the wall.")
+    assert panel.card.advice.text() == ("Auto found no bubble here. Its guess (dashed outline) "
+                                        "fits the frames around it: accept it if it sits on "
+                                        "the wall.")
     assert panel.card.recommended() == "accept"
 
 
@@ -282,7 +284,7 @@ def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path, 
     asked, replies, _ = answers
     state = _state(controller)
     bare = list(range(16, 231, 14))  # 16 of the row's frames have no guess, as on lic_hard 05
-    _guess(state, [f for f in range(2, 231) if f not in bare])
+    _guess(state, [f for f in range(2, 231) if f not in bare], conf=0.45)
     _empty(state, bare)
     _show(controller, 5)
     segment = controller.review.panel.current_segment()
@@ -292,7 +294,7 @@ def test_one_press_on_a_229_frame_row_promotes_exactly_one_frame(gui, tmp_path, 
     assert _promoted(state) == [5] and int(state.fit_locked.sum()) == 1
     assert _state(controller).image_no == 6
     assert controller.review.panel.current_segment().count == 228
-    assert controller.review.panel.card.buttons["accept_all"].text() == "Accept 212 of 228"
+    assert controller.review.panel.card.buttons["accept_all"].text() == "Accept 212"
     # Accept all on the rest: one question, then 212 guesses stored at once
     replies.append(True)
     controller.review.perform("accept_all")
@@ -311,7 +313,7 @@ def test_lost_track_rows_follow_the_same_rule(app):
     _guess(state, [3, 5])
     controller.review.set_extra([ReviewItem(f, ("lost",), 100) for f in range(2, 7)])
     _show(controller, 3)
-    assert controller.review.panel.current_segment().label == "Auto lost the bubble"
+    assert controller.review.panel.current_segment().label == "No bubble found"
     _accept(controller)
     assert _promoted(state) == [3] and _state(controller).image_no == 4
     _show(controller, 5)

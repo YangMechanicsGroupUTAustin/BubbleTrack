@@ -3,10 +3,10 @@
 ::
 
     ●  Frames 120–180            [61]
-       Lost track
+       Mostly not sure (11 not found)
 
 The colours follow the dark theme (style.qss); everything else about a row
-(reasons, confidence) lives in its tooltip.
+(what its dot means, the reasons, the confidence) lives in its tooltip.
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ from bubbletrack.ui.review_text import SEP, file_tag, problem_text, segment_titl
 ROW_ROLE = Qt.ItemDataRole.UserRole + 1  # RowData of a list item
 
 TIER_COLOURS = {"high": "#ef4444", "medium": "#f59e0b", "low": "#a1a1aa"}
-TIER_NAMES = {"high": "likely wrong", "medium": "worth a check", "low": "for information"}
+TIER_NAMES = {"high": "likely wrong", "medium": "worth a check", "low": "a quick look"}
 _TEXT, _DIM, _FAINT = "#e4e4e7", "#a1a1aa", "#71717a"
 _SELECTED_FILL, _SELECTED_EDGE = QColor(99, 102, 241, 46), QColor(129, 140, 248, 110)
 _HOVER_FILL, _BADGE_FILL = QColor(255, 255, 255, 10), QColor(255, 255, 255, 20)
@@ -52,11 +52,13 @@ def row_data(segment: ReviewSegment, images: Sequence[str]) -> RowData:
 
 
 def tooltip_html(segment: ReviewSegment, images: Sequence[str]) -> str:
-    """Rich text (Qt wraps it) with the first line in bold."""
+    """Rich text (Qt wraps it) with the first line in bold; it explains the
+    row's dot, and the last line what every dot colour means."""
     lines = [html.escape(line) for line in tooltip_lines(segment, images)]
     lines[0] = f"<b>{lines[0]}</b>"
     lines.insert(1, f"<span style='color:{TIER_COLOURS[segment.tier]}'>●</span> "
                     f"{TIER_NAMES[segment.tier]}")
+    lines.append(tier_key_html())
     return "<br>".join(lines)
 
 
@@ -72,10 +74,10 @@ def row_menu(parent: QWidget, export_case: Callable[[], None]) -> QMenu:
 
 
 def tier_key_html() -> str:
-    """One line under the list: what the row dots mean."""
+    """The tooltip's last line: what the row dots mean."""
     parts = [f"<span style='color:{TIER_COLOURS[t]}'>●</span>&nbsp;{TIER_NAMES[t]}"
              for t in ("high", "medium", "low")]
-    return f"<span style='color:{_FAINT}'>" + "&nbsp;&nbsp; ".join(parts) + "</span>"
+    return f"<span style='color:{_FAINT}'>Dots: " + "&nbsp;&nbsp; ".join(parts) + "</span>"
 
 
 def _font(base: QFont, px: int, weight: QFont.Weight) -> QFont:

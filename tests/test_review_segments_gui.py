@@ -10,7 +10,7 @@ from PyQt6.QtTest import QTest
 from bubbletrack.controller.review_controller import ReviewItem, install_review
 from bubbletrack.model.provenance import FitSource
 from bubbletrack.ui.review_panel import (
-    EMPTY_ALL_CLEAR, EMPTY_ALL_DONE, EMPTY_BEFORE_FIT, EMPTY_FILTERED,
+    EMPTY_ALL_CLEAR, EMPTY_BEFORE_FIT, EMPTY_FILTERED,
 )
 from bubbletrack.ui.review_rows import ROW_ROLE
 
@@ -55,7 +55,7 @@ class TestRows:
         _flag(controller, rc, low=(2, 3, 5))
         (segment,) = rc.panel.segments()
         assert (segment.start, segment.end, segment.frames) == (2, 5, (2, 3, 5))
-        assert rc.panel.texts() == ["Frames 3–6 · Not sure: low confidence · 3 frames"]
+        assert rc.panel.texts() == ["Frames 3–6 · Not sure · 3 frames"]
         assert rc.panel.frames() == [2, 3, 5] and rc.count == 3
 
     def test_header_tooltip_and_badge(self, review):
@@ -122,25 +122,27 @@ class TestSelection:
         segment = rc.panel.current_segment()
         controller.file_ctrl.on_frame_changed(4)  # the unflagged frame inside
         assert rc.panel.current_segment() == segment and rc.panel.current_frame() == 4
-        assert rc.panel.card.advice.text() == "Not flagged — nothing to do here."
+        assert rc.panel.card.advice.text() == "Not flagged: nothing to do here."
         assert rc.panel.card.recommended() is None
         assert rc.panel.card.position.text() == "3 left in this row"
         controller.file_ctrl.on_frame_changed(6)  # past the end
         assert rc.panel.current_segment() is None
 
     def test_a_frame_of_another_kind_joins_the_row_and_says_its_own_problem(self, review):
-        """M4: one row per span (no 'Frame 5' inside 'Frames 4-6'); the card
-        names the frame's problem in the rows' words."""
+        """M4: one row per span (no 'Frame 5' inside 'Frames 4-6'); A3: it is
+        named by its most common kind; the card names the frame's own kind."""
         _, controller, rc = review
         state = _flag(controller, rc, low=(4,), conf=0.3)
         rc.set_extra([ReviewItem(f, ("lost",), 0) for f in (3, 5)])
-        assert rc.panel.texts() == ["Frames 4–6 · Auto lost the bubble · 3 frames"]
+        assert rc.panel.texts() == [
+            "Frames 4–6 · Mostly no bubble found (1 not sure) · 3 frames"]
         rc.panel.step(1)
-        assert _shown(controller) == 3  # the row's first frame is one of its kind
-        assert rc.panel.card.advice.text().startswith("Auto lost the bubble here.")
+        assert _shown(controller) == 3  # the row opens on its worst frame
+        assert rc.panel.card.advice.text().startswith("Auto lost track of the bubble here.")
         controller.file_ctrl.on_frame_changed(4)
         assert rc.panel.current_segment().frames == (3, 4, 5)  # the row is kept
-        assert rc.panel.card.advice.text().startswith("Not sure here: low confidence (0.30).")
+        assert rc.panel.card.advice.text().startswith("Auto is not sure here.")
+        assert "0.30" in rc.panel.card.advice.toolTip()  # the number: tooltip only
         assert state.fit_confidence[4] == pytest.approx(0.3)
 
     def test_scrubbing_onto_a_flagged_frame_selects_its_row(self, review):
@@ -156,7 +158,7 @@ class TestSelection:
         rc.set_extra([ReviewItem(f, ("lost",), 0) for f in (3, 5)])
         rc.panel.step(1)  # lost track 3-5
         controller.file_ctrl.on_frame_changed(4)  # a low-confidence frame inside
-        rc.panel.set_hidden_categories({"shape"})  # an unrelated change rebuilds the list
+        rc.panel.set_hidden_kinds({"before"})  # an unrelated change rebuilds the list
         assert rc.panel.current_segment().frames == (3, 4, 5)
 
     def test_after_a_row_is_skipped_the_next_row_is_selected(self, review):
@@ -245,15 +247,15 @@ class TestRowActions:
         """They may be bubbles Auto missed: Fix or No bubble decides."""
         _, controller, rc = review
         state = _flag(controller, rc)
-        state.radius[[3, 4]] = -1.0  # no result on two of the lost frames
-        rc.set_extra([ReviewItem(f, ("lost",), 100) for f in (2, 3, 4, 5)])
+        state.radius[[3, 4]] = -1.0  # no result on two of the frames tracking changed
+        rc.set_extra([ReviewItem(f, ("disagree",), 100) for f in (2, 3, 4, 5)])
         controller.file_ctrl.on_frame_changed(2)
         assert rc.panel.current_segment().frames == (2, 3, 4, 5)
-        assert rc.panel.card.buttons["accept_all"].text() == "Accept 2 of 4"
+        assert rc.panel.card.buttons["accept_all"].text() == "Accept 2"  # the real number
         rc.perform("accept_all")
         assert state.fit_locked[[2, 5]].all() and not state.fit_locked[[3, 4]].any()
         assert rc.panel.frames() == [3, 4] and _shown(controller) == 3  # left to settle
-        assert rc.panel.feedback.text().endswith("2 empty frames left to fix or mark).")
+        assert rc.panel.feedback.text() == "✓ Accepted 2 · 2 frames still need a fix."
 
     def test_no_bubble_on_all_marks_the_rows_frames_only(self, review):
         _, controller, rc = review
@@ -266,22 +268,39 @@ class TestRowActions:
         controller._on_undo()
         assert (state.radius[2:6] > 0).all() and not state.fit_locked.any()
 
-    def test_the_worst_frame_names_and_colours_a_mixed_row(self, review):
+    def test_a_mixed_row_is_coloured_by_its_worst_frame_and_named_by_most(self, review):
         _, controller, rc = review
         state = _flag(controller, rc, low=(2, 4), conf=0.4)  # amber frames 2 and 4 ...
-        state.fit_flags[3] = frozenset({"jump"})  # ... around a red "Radius jumps" frame
+        state.fit_flags[3] = frozenset({"jump"})  # ... around a red jump frame
         rc.refresh()
         (segment,) = rc.panel.segments()
-        assert (segment.frames, segment.label, segment.tier) == ((2, 3, 4), "Radius jumps",
-                                                                  "high")
-        rc.panel.step(1)  # M2: the row opens on its jump, so the card says the row's words
+        assert (segment.frames, segment.tier) == ((2, 3, 4), "high")
+        assert segment.label == "Mostly not sure (1 size off)"  # A3, not "Radius jumps"
+        rc.panel.step(1)  # the row opens on its jump, the worst frame
         assert _shown(controller) == 3
-        assert rc.panel.card.advice.text().startswith("Radius jumps here.")
+        assert rc.panel.card.advice.text().startswith("The size may be off here.")
         rc.panel._list.clicked.emit(rc.panel._list.model().index(0, 0))
         assert _shown(controller) == 3
-        controller.file_ctrl.on_frame_changed(2)
+
+    def test_accept_all_never_locks_a_frame_review_recommends_fixing(self, review):
+        """B5: Accept all stores the frames recommended for Accept; the jump
+        Review recommends fixing stays listed and unlocked.  One Ctrl+Z undoes."""
+        _, controller, rc = review
+        state = _flag(controller, rc, low=(2, 4), conf=0.4)
+        state.fit_flags[3] = frozenset({"jump"})
+        rc.refresh()
+        controller.file_ctrl.on_frame_changed(3)
+        card = rc.panel.card
+        assert card.recommended() == "fix"
+        assert card.buttons["accept_all"].text() == "Accept 2"
         rc.perform("accept_all")
-        assert state.fit_locked[[2, 3, 4]].all() and rc.count == 0
+        assert state.fit_locked[[2, 4]].all() and not state.fit_locked[3]
+        assert rc.panel.frames() == [3] and _shown(controller) == 3
+        assert rc.panel.feedback.text() == "✓ Accepted 2 · 1 frame still needs a fix."
+        rc.perform("accept_all")  # Shift+A again: says why nothing happens
+        assert not state.fit_locked[3] and "need a fix" in rc.panel.feedback.text()
+        controller._on_undo()
+        assert not state.fit_locked.any() and rc.panel.frames() == [2, 3, 4]
 
     def test_skip_drops_the_row_until_a_result_changes(self, review):
         _, controller, rc = review
@@ -307,7 +326,7 @@ class TestRowActions:
         _, controller, rc = review
         state = _flag(controller, rc)
         rc.set_extra([ReviewItem(f, ("lost",), 0) for f in (3, 4, 5)])
-        assert rc.panel.texts() == ["Frames 4–6 · Auto lost the bubble · 3 frames"]
+        assert rc.panel.texts() == ["Frames 4–6 · No bubble found · 3 frames"]
         state.radius[4] = 33.0  # frame 4 got a new result
         rc.refresh()
         assert rc.panel.segments()[0].frames == (3, 5)
@@ -330,22 +349,25 @@ class TestKeysAndFilter:
         QTest.keyClick(rc.panel._list, Qt.Key.Key_K)
         assert _shown(controller) == 2
 
-    def test_type_filter_hides_rows(self, review):
+    def test_kind_filter_hides_rows(self, review):
+        """B2: the filter offers the four kinds, not the engine's categories."""
         _, controller, rc = review
-        _flag(controller, rc, low=(2,), shape=(6,))
+        state = _flag(controller, rc, low=(2,), shape=(8,))
+        state.fit_flags[6] = frozenset({"jump"})
+        rc.refresh()
         panel = rc.panel
         assert panel.kind_filter.text() == "All kinds ▾"
         panel.kind_filter.fill_menu()
         labels = [a.text() for a in panel.kind_filter.menu_.actions() if a.isCheckable()]
-        assert labels == ["Not sure: low confidence  (1)", "Outline not round  (1)"]
+        assert labels == ["Size looks off  (1)", "Not sure  (2)"]  # low confidence + shape
         next(a for a in panel.kind_filter.menu_.actions()
-             if a.text().startswith("Outline")).toggle()
-        assert panel.frames() == [2] and rc.count == 2  # hidden, still waiting
+             if a.text().startswith("Size")).toggle()
+        assert panel.frames() == [2, 8] and rc.count == 3  # hidden, still waiting
         assert panel.kind_filter.text() == "1 of 2 kinds ▾"
-        panel.set_hidden_categories({"low_confidence", "shape"})
+        panel.set_hidden_kinds({"not_sure", "size_off"})
         assert panel.done_page.text() == EMPTY_FILTERED and not panel.done_page.offers_export()
-        panel.set_hidden_categories(())
-        assert panel.frames() == [2, 6]
+        panel.set_hidden_kinds(())
+        assert panel.frames() == [6, 8, 2]  # 6 and 8: one row (a one-frame gap)
 
     def test_empty_messages(self, review):
         _, controller, rc = review
@@ -357,7 +379,8 @@ class TestKeysAndFilter:
         _flag(controller, rc, low=(3,))
         rc.panel.step(1)
         rc.perform("accept")
-        assert page.text() == EMPTY_ALL_DONE and page.offers_export()
+        assert page.text() == "All done — 1 checked" and page.offers_export()
+        assert rc.panel.card.isHidden() and rc.panel._summary.isHidden()  # A5: one summary
 
     def test_clicking_the_selected_row_goes_back_to_its_first_frame(self, review):
         _, controller, rc = review

@@ -118,7 +118,7 @@ class TestGrouping:
         segments = build_segments(items)
         before = [s for s in segments if s.category == "before"]
         assert [s.frames for s in before] == [(0, 2, 5)]
-        assert before[0].label == "Before the bubble" and before[0].tier == "low"
+        assert before[0].label == "Before / after the bubble" and before[0].tier == "low"
         assert [s.frames for s in segments if s.category != "before"] == [(1,), (6,)]
 
     def test_ml_assist_rows_are_worth_a_check_not_likely_wrong(self):
@@ -143,7 +143,7 @@ class TestGrouping:
         (segment,) = build_segments([_item(44, "jump", severity=80)])
         assert (segment.start, segment.end, segment.count) == (44, 44, 1)
         assert segment.is_single and segment.severity == 80
-        assert segment.label == "Radius jumps"
+        assert segment.label == "Size looks off"
 
 
 class TestRanking:

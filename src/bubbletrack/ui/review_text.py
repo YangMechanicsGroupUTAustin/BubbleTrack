@@ -1,7 +1,8 @@
 """Words of the Review dock (pure): row titles, tooltips, the detail line.
 
-Rows stay short ("Frames 120–180", "Lost track"); the reasons behind them
-and the confidence only appear on demand (tooltip, selected row).
+Rows and the card stay short and plain ("Frames 120–180", "Not sure");
+the engine's reasons behind them and the confidence numbers only appear on
+demand (tooltips).
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from collections.abc import Sequence
 import numpy as np
 
 from bubbletrack.controller.review_queue import BEFORE, GUESS, ReviewItem
-from bubbletrack.controller.review_segments import ReviewSegment
+from bubbletrack.controller.review_segments import NOT_FOUND, NOT_SURE, SIZE_OFF, ReviewSegment
 
 _TRAILING_DIGITS = re.compile(r"(\d+)$")
 _VIDEO_PREFIX = "video:"
@@ -49,23 +50,16 @@ REASON_LABELS: dict[str, str] = {  # plain words; the flag names stay internal
     "ml_unfamiliar": "unlike the frames ML was taught",
     BEFORE: "before the bubble",
 }
-GUESS_SUFFIX = " — Auto has a guess"
-# The card's first sentence: the row's problem in the row's words (category labels).
+# The card's first sentence: the frame's kind of problem in plain words.
 PROBLEM_SENTENCES: dict[str, str] = {
-    "lost": "Auto lost the bubble here.",
-    "no_result": "No result here.",
-    "tracking": "Tracking changed it here.",
-    "jump": "Radius jumps here.",
-    "low_confidence": "Not sure here: low confidence{score}.",
-    "shape": "Outline not round here.",
-    "clipped": "Cut by the image edge here.",
-    "collapse": "Near collapse here: tiny bubble.",
-    "ml": "Outline from ML assist here.",
-    BEFORE: "Before the bubble.",
-    "other": "Worth a look here.",
+    NOT_FOUND: "Auto found no bubble here.",
+    SIZE_OFF: "The size may be off here.",
+    NOT_SURE: "Auto is not sure here.",
+    BEFORE: "Before the bubble: the frame looks empty.",
 }
-DONE_TEXT = "All frames to check are done"
-NEXT_EXPORT = "Next: export R(t)."
+LOST_SENTENCE = "Auto lost track of the bubble here."  # "No bubble found", with a result
+DONE_TEXT = "All done"
+SHOW = "show"  # the done page's link to the skipped frames
 
 
 def file_number(path: str, index: int) -> str:
@@ -121,11 +115,9 @@ def segment_title(segment: ReviewSegment, images: Sequence[str]) -> str:
 
 
 def problem_text(segment: ReviewSegment) -> str:
-    """What is wrong with a row, in plain words ('No result — Auto has a guess')."""
-    label = segment.label
-    if segment.category == "no_result" and _guess_count(segment):
-        label += GUESS_SUFFIX
-    return label
+    """What is wrong with a row, in plain words: its most common kind
+    ('Not sure', 'Mostly not sure (11 not found)')."""
+    return segment.label
 
 
 def span_text(segment: ReviewSegment) -> str:
@@ -143,37 +135,40 @@ def segment_text(segment: ReviewSegment, images: Sequence[str]) -> str:
     return SEP.join(parts)
 
 
-def summary_text(left: int, total: int, info: int, *, skipped: int = 0) -> str:
-    """The Review header: frames to check apart from those for information.
+def summary_text(left: int, total: int, *, skipped: int = 0) -> str:
+    """The Review header: the frames to check (every listed frame, the one
+    number the header, Review and ML assist all give).
 
-    *left* of *total* frames to check (red and amber rows) are still listed;
-    *info* frames are listed for information (grey rows); *skipped* of the
-    *total* were skipped, not checked.  '12 of 48 frames to check · 11 for
-    information'; 'All 48 checked'; '13 checked · 2 skipped'.
+    *left* of *total* frames to check are still listed; *skipped* of the
+    *total* were skipped, not checked.  '12 of 48 frames to check';
+    'All 48 checked'; '13 checked · 2 skipped'.
     """
     noun = "frame" if total == 1 else "frames"
     if left > 0:
-        head = f"{left} {noun} to check" if left == total else f"{left} of {total} {noun} to check"
-    elif total <= 0:
-        head = "Nothing to check"
-    elif skipped:
-        head = f"{max(total - skipped, 0)} checked{SEP}{skipped} skipped"
-    else:
-        head = f"All {total} checked" if total > 1 else "Checked"
-    return head + (f"{SEP}{info} for information" if info else "")
+        return f"{left} {noun} to check" if left == total else f"{left} of {total} {noun} to check"
+    if total <= 0:
+        return "Nothing to check"
+    if skipped:
+        return f"{max(total - skipped, 0)} checked{SEP}{skipped} skipped"
+    return f"All {total} checked" if total > 1 else "Checked"
 
 
-def done_text(skipped: int) -> str:
-    """The list's place once nothing is left: 'All frames to check are done.'"""
-    note = f" ({skipped} skipped)" if skipped else ""
-    return f"{DONE_TEXT}{note}.\n{NEXT_EXPORT}"
+def done_text(checked: int, skipped: int = 0, first_skipped: int | None = None) -> str:
+    """The list's place once nothing is left: 'All done — 229 checked,
+    1 skipped (Frame 4: show)' (*first_skipped*: 0-based, the link's frame)."""
+    text = f"{DONE_TEXT} — {checked} checked"
+    if not skipped:
+        return text
+    text += f", {skipped} skipped"
+    if first_skipped is None:
+        return text
+    where = f"Frame {first_skipped + 1}" if skipped == 1 else f"from Frame {first_skipped + 1}"
+    return f"{text} ({where}: {SHOW})"
 
 
-def problem_sentence(category: str, confidence: float = float("nan")) -> str:
-    """The card's first sentence: the row's problem in the row's words."""
-    text = PROBLEM_SENTENCES.get(category, PROBLEM_SENTENCES["other"])
-    score = f" ({confidence:.2f})" if np.isfinite(confidence) else ""
-    return text.format(score=score)
+def problem_sentence(kind: str) -> str:
+    """The card's first sentence: the frame's kind of problem in plain words."""
+    return PROBLEM_SENTENCES.get(kind, PROBLEM_SENTENCES[NOT_SURE])
 
 
 def position_text(segment: ReviewSegment) -> str:
@@ -213,8 +208,8 @@ def guess_lines(segment: ReviewSegment) -> list[str]:
     """What Accept does on a row with Auto's guesses (none: no line).
 
     A guess becomes a result once accepted: Accept stores the guess on
-    screen; Accept all stores every guess of the row (it asks first about
-    guesses nobody has looked at).
+    screen; Accept all stores the row's guesses Review recommends accepting
+    (it asks first about guesses nobody has looked at).
     """
     guessed = _guess_count(segment)
     if not guessed:
@@ -223,7 +218,8 @@ def guess_lines(segment: ReviewSegment) -> list[str]:
         return ["Auto's guess (dashed outline): Accept (A) stores it as the result",
                 REVIEW_NO_BUBBLE_HINT]
     return [f"Auto's guess on {guessed} of {segment.count} frames (dashed): Accept (A) "
-            "stores the one on screen, Accept all (Shift+A) every one", REVIEW_NO_BUBBLE_HINT]
+            "stores the one on screen, Accept all (Shift+A) the ones that fit the frames "
+            "around them", REVIEW_NO_BUBBLE_HINT]
 
 
 def accept_all_question(frames: int, unseen: int) -> str:

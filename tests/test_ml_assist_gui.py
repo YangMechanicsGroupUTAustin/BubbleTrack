@@ -109,7 +109,8 @@ def test_hint_after_an_auto_run_where_many_frames_fail(app, qapp, monkeypatch):
     assert hint.isHidden()                     # fewer than HINT_MIN_FRAMES: quiet
     monkeypatch.setattr(ml_assist, "HINT_MIN_FRAMES", 2)
     _fit_all(qapp, controller)
-    assert not hint.isHidden() and hint.text() == "22% of the bubble's frames have no result."
+    # A6: no number of its own (the header and Review count the frames to check)
+    assert not hint.isHidden() and hint.text() == "Many frames have no result — ML assist can help."
     assert window.header.status_text().endswith("· ML assist can help")
     hint.open_clicked.emit()
     assert _teach(controller).active and hint.isHidden()
@@ -139,7 +140,8 @@ def test_train_and_apply_measures_frames_to_check_and_lists_ml_outlines(app, qap
     assert state.fit_source[6] == FitSource.ML and "ml_outline" in state.fit_flags[6]
     assert all(state.fit_suggestion[f] is None for f in range(LAST + 1) if state.radius[f] > 0)
     assert state.radius[6] == pytest.approx(S.RADII[6], rel=0.1)
-    assert any("Outline from ML assist" in text for text in controller.review.panel.texts())
+    ml_rows = [s for s in controller.review.panel.segments() if s.category == "ml"]
+    assert ml_rows and all(s.kind == "not_sure" for s in ml_rows)  # B2: "Not sure"
     assert state.ml_assist and _box(window).ml_switch.isChecked()
     assert _box(window).ml_switch.text().startswith("On · ")
     assert window.header.status_text().startswith("ML assist measured ")

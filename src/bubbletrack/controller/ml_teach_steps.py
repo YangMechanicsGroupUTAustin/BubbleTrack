@@ -177,11 +177,9 @@ def train_state(p: Progress, *, scope: int) -> tuple[bool, str]:
 
 
 def summary_text(measured: int, total: int, listed: int, *, stopped: bool) -> str:
-    """'ML assist measured 41 of 52 frames to check; 9 are listed in Review'."""
-    if listed == 0:
-        tail = "none is left to check in Review"
-    else:
-        tail = f"{listed} {'is' if listed == 1 else 'are'} listed in Review"
+    """'ML assist measured 41 of 52 frames · 9 frames to check' (*listed*:
+    Review's frames to check, the number the header and Review give)."""
+    tail = "nothing left to check" if listed == 0 else f"{plural(listed, 'frame')} to check"
     if stopped:
-        return f"ML assist stopped: {measured} of {total} frames to check measured; {tail}"
-    return f"ML assist measured {measured} of {total} frames to check; {tail}"
+        return f"ML assist stopped: {measured} of {plural(total, 'frame')} measured · {tail}"
+    return f"ML assist measured {measured} of {plural(total, 'frame')} · {tail}"

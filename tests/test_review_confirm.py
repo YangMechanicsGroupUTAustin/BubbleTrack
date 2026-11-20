@@ -7,7 +7,7 @@ from pathlib import Path
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import QMessageBox
 
-from bubbletrack.ui.review_confirm import ACCEPT_ALL_TEXT, accept_all_box
+from bubbletrack.ui.review_confirm import ACCEPT_ALL_TEXT, accept_all_box, accept_all_detail
 
 QSS = Path(__file__).resolve().parents[1] / "src" / "bubbletrack" / "resources" / "style.qss"
 
@@ -31,6 +31,13 @@ def test_a_buttons_key_hint_steps_aside_when_the_text_needs_the_room(qapp):
     assert not button.key_shown()
     assert "⇧N" in button.toolTip()  # the key is still told
     button.close()
+
+
+def test_the_small_print_says_which_frames_stay_listed():
+    """B5: the frames Accept all leaves are the ones that need a fix."""
+    assert accept_all_detail(0).endswith("Ctrl+Z undoes the whole Accept all.")
+    assert accept_all_detail(1).endswith("1 frame that needs a fix stays listed.")
+    assert accept_all_detail(72).endswith("72 frames that need a fix stay listed.")
 
 
 def test_enter_and_escape_both_cancel(qapp):

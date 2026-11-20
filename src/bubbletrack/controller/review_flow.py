@@ -19,7 +19,7 @@ from bubbletrack.controller.suggestion_actions import UNDO_HINT
 from bubbletrack.ui.review_panel import ReviewPanel
 
 NEXT_ROW, ALL_DONE = "next row", "all done"  # where an action moved on to
-_ENDINGS = {NEXT_ROW: ". That row is done.", ALL_DONE: ". All done."}
+_ENDINGS = {NEXT_ROW: ". That row is done."}  # all done: the done page says so
 _OK = "#10b981"
 
 

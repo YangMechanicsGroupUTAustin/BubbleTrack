@@ -280,7 +280,7 @@ def test_ml_results_are_one_review_category_whatever_else_is_flagged():
     assert {category_of(i) for i in items} == {"ml"}
     segments = build_segments(items)
     assert len(segments) == 1 and segments[0].frames == (2, 3, 4)
-    assert segments[0].label == "Outline from ML assist"
+    assert segments[0].label == "Not sure"  # B2: one of four kinds; the tooltip says ML
     state.fit_flags[5] = frozenset({"ml_disagrees"})             # Auto kept, ML saw it elsewhere
     state.fit_confidence[5] = 0.2                                # also low confidence
     items = build_review_items(state)

@@ -261,7 +261,7 @@ class TestReviewRows:
         row = segments[0]
         lines = tooltip_lines(row, ())
         assert ("Auto's guess on 1 of 3 frames (dashed): Accept (A) stores the one on screen, "
-                "Accept all (Shift+A) every one") in lines
+                "Accept all (Shift+A) the ones that fit the frames around them") in lines
         assert "Not a bubble? No bubble (N); Shift+N for the whole row" in lines
         single = ReviewSegment("no_result", (row.items[1],))
         assert "Auto's guess (dashed outline): Accept (A) stores it as the result" \

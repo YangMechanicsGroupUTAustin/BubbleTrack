@@ -11,9 +11,11 @@ import numpy as np
 import pytest
 
 from bubbletrack.controller.display_mixin import EQUAL_AREA_CIRCLE, FITTED_CIRCLE, circle_legend
-from bubbletrack.controller.review_advice import FIX, NONE, advise
+from bubbletrack.controller.review_advice import ACCEPT, advise
 from bubbletrack.controller.review_queue import GUESS, build_review_items
-from bubbletrack.controller.review_segments import build_segments, category_label, category_of
+from bubbletrack.controller.review_segments import (
+    build_segments, category_label, category_of, kind_of,
+)
 from bubbletrack.model.config import load_config, save_config, validate_config
 from bubbletrack.model.edge import EdgeResult
 from bubbletrack.model.edge_pipeline import (
@@ -26,7 +28,7 @@ from bubbletrack.model.session import load_session, save_session, session_parame
 from bubbletrack.model.state import AppState
 from bubbletrack.model.suggestion import make_suggestion, set_suggestion
 from bubbletrack.model.teach import MeasureConfig, ml_region, select_result
-from bubbletrack.ui.review_text import problem_sentence, reason_text
+from bubbletrack.ui.review_text import reason_text
 
 NAN = float("nan")
 
@@ -150,7 +152,8 @@ def test_clipped_frames_have_a_row_of_their_own(flagged):
     assert rows[12].category == "clipped" and rows[12].tier == "high"     # no result
     assert {"rejected", GUESS, "clipped_unmeasurable"} <= set(items[12].reasons)
     assert category_label("clipped") == "Cut by the image edge"
-    assert problem_sentence("clipped") == "Cut by the image edge here."
+    # B2: with a result the circle may be off ("Not sure"); without one "No bubble found"
+    assert (kind_of(items[6]), kind_of(items[12])) == ("not_sure", "not_found")
     assert reason_text("clipped_unmeasurable", NAN) == "cut by the image edge: its area can't be measured"
     assert reason_text("clipped_not_round", NAN) == "cut by the image edge and the visible wall is not round"
 
@@ -163,19 +166,22 @@ def test_a_well_fitting_clipped_frame_is_information_only():
 
 def test_advice_in_plain_words(flagged):
     state, items = flagged
-    # The circle may be off the wall: no button is recommended, the text says
-    # when to accept (Accept stays available) and when to change the setting.
+    # The circle may be off the wall: A2, a result means Accept, and the text
+    # says when; the setting to change is in the tooltip.
     oval = advise(state, 0, items[0])
-    assert oval.action == NONE and oval.can_accept
-    assert oval.text.startswith("Outline not round here.")
-    assert 'tick "Bubble may be non-round"' in oval.text and "Fit again" in oval.text
+    assert oval.action == ACCEPT and oval.can_accept
+    assert oval.text.startswith("Auto is not sure here. The outline is not round")
+    assert 'tick "Bubble may be non-round"' in oval.tip and "Fit again" in oval.tip
     cut = advise(state, 6, items[6])
-    assert cut.action == NONE and cut.can_accept
-    assert cut.text.startswith("Cut by the image edge here.")
+    assert cut.action == ACCEPT and cut.can_accept
+    assert cut.text.startswith("Auto is not sure here. The image edge cuts it")
     assert "circle may be off" in cut.text
+    # a guess the size of the frames around it: Accept, as for any fitting guess
     unmeasurable = advise(state, 12, items[12])
-    assert unmeasurable.action == FIX and unmeasurable.guess and unmeasurable.can_accept
-    assert unmeasurable.text.startswith("Cut by the image edge here. Its area can't be measured")
+    assert unmeasurable.action == ACCEPT and unmeasurable.guess and unmeasurable.can_accept
+    assert unmeasurable.text.startswith(
+        "The image edge cuts the bubble here, so its area can't be measured.")
+    assert "takes the hidden part as round" in unmeasurable.tip
 
 
 def test_the_sequence_review_follows_the_same_rule():

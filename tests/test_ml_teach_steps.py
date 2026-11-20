@@ -158,9 +158,10 @@ def test_train_button_says_why_it_waits():
 
 
 def test_summary_after_train_and_apply():
+    """A6: the same "N frames to check" as the header and Review."""
     assert T.summary_text(41, 52, 9, stopped=False) == (
-        "ML assist measured 41 of 52 frames to check; 9 are listed in Review")
-    assert T.summary_text(52, 52, 1, stopped=False).endswith("; 1 is listed in Review")
-    assert T.summary_text(52, 52, 0, stopped=False).endswith("; none is left to check in Review")
+        "ML assist measured 41 of 52 frames · 9 frames to check")
+    assert T.summary_text(52, 52, 1, stopped=False).endswith(" · 1 frame to check")
+    assert T.summary_text(52, 52, 0, stopped=False).endswith(" · nothing left to check")
     assert T.summary_text(20, 52, 30, stopped=True) == (
-        "ML assist stopped: 20 of 52 frames to check measured; 30 are listed in Review")
+        "ML assist stopped: 20 of 52 frames measured · 30 frames to check")

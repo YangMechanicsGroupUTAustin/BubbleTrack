@@ -1,10 +1,11 @@
 """The short, non-blocking ML assist line in the Review dock.
 
-* After a run where many frames fail: what failed in a few words, and
-  "Try ML assist…" (it opens the teaching mode on step 1).
+* After a run where many frames fail: "Many frames have no result — ML
+  assist can help." and "Try ML assist…" (it opens the teaching mode on
+  step 1).
 * After Train and apply: what ML assist did ("ML assist measured 41 of 52
-  frames to check; 9 are listed in Review"), with no button: the next step
-  is the list below.
+  frames · 9 frames to check"), with no button: the next step is the list
+  below.
 """
 
 from __future__ import annotations

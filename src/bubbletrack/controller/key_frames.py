@@ -56,7 +56,7 @@ def find_collapses(radius: np.ndarray, max_count: int = MAX_COLLAPSES) -> list[i
 
 def to_check_frames(rows: Iterable) -> list[int]:
     """The first frame of each Review row to check (``ReviewSegment.to_check``,
-    red or amber), in queue order; grey rows are for information only."""
+    red or amber), in queue order; grey rows only want a quick look."""
     return [int(row.frames[0]) for row in rows if row.frames and row.to_check]
 
 

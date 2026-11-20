@@ -2,9 +2,9 @@
 
 C1/C2: frames before the bubble are one grey row whose action is "No bubble
 on all"; an empty frame is "No bubble" only when it looks like the reference
-frame outside the bubble's frames.  M4: the header counts checks apart from
-information, and the selected row stays in view.  Polish 9/10: skipped
-frames are not "checked"; the row dots are explained.
+frame outside the bubble's frames.  A6: one number of frames to check
+everywhere (every listed frame); the selected row stays in view.  Polish
+9/10: skipped frames are not "checked"; the row tooltip explains the dots.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ class TestBeforeTheBubble:
         _, controller, rc = app
         before = _row(rc, "before")
         assert before.frames == (0, 1, 2) and before.tier == "low"
-        assert rc.panel.texts()[-1] == "Frames 1–3 · Before the bubble · 3 frames"
+        assert rc.panel.texts()[-1] == "Frames 1–3 · Before / after the bubble · 3 frames"
         assert rc.panel.segments()[0].category != "before"  # not the top row
         state = controller._get_state()
         assert all(shown_suggestion(state, f) is None for f in (0, 2))  # weak: not offered
@@ -83,8 +83,7 @@ class TestBeforeTheBubble:
         assert segment.category == "no_result" and segment.tier == "high"
         assert rc.panel.card.recommended() == "fix"
         assert rc.panel.card.advice.text() == (
-            "No result here. Is there a bubble? Fix it (F), or No bubble (N) if the frame "
-            "is empty.")
+            "Auto found no bubble here. Fix it, or mark No bubble if the frame is empty.")
 
 
 class TestEmptyFramesAfterTheBubble:
@@ -93,7 +92,7 @@ class TestEmptyFramesAfterTheBubble:
         _, controller, rc = app
         controller.file_ctrl.on_frame_changed(12)  # after the bubble, empty
         assert rc.panel.card.recommended() == "no_bubble"
-        assert "looks like the reference frame" in rc.panel.card.advice.text()
+        assert "The frame looks empty" in rc.panel.card.advice.text()
         state = controller._get_state()
         state.radius[5] = -1.0  # a frame inside the bubble's frames
         state.fit_source[5] = FitSource.NONE
@@ -113,22 +112,20 @@ class TestEmptyFramesAfterTheBubble:
 
 
 class TestHeaderAndList:
-    def test_checks_and_information_are_counted_apart(self, app):
+    def test_every_listed_frame_is_a_frame_to_check(self, app):
+        """I-7: one notion of progress; the grey before row must be settled
+        too before "All done", so it counts."""
         _, controller, rc = app
         rc.panel.reset_progress()
-        # the red row (frame 4) and the after-bubble frames 11-14 are checks;
-        # the before row is for information
-        assert rc.panel.summary() == "5 frames to check · 3 for information"
-        assert not rc.panel.tier_key.isHidden()
-        assert "likely wrong" in rc.panel.tier_key.text()
-        assert "for information" in rc.panel.tier_key.text()
+        assert rc.panel.summary() == "8 frames to check"
+        tip = rc.panel._list.item(0).toolTip()  # the dots are explained there
+        assert "likely wrong" in tip and "worth a check" in tip and "a quick look" in tip
 
     def test_status_line_and_key_frames_count_what_review_counts(self, app):
         _, controller, rc = app
-        # "to check" means red and amber rows everywhere: the status line after
-        # a fit says 5 like Review's header, and the key-frame strip does not
-        # call the grey before-the-bubble frames "to check".
-        assert controller.auto_ctrl.review_count() == 5
+        # The status line after a fit says 8 like Review's header; the
+        # key-frame strip still picks its thumbnails from red and amber rows.
+        assert controller.auto_ctrl.review_count() == 8 == rc.check_count
         firsts = to_check_frames(rc.panel.segments())
         assert 3 in firsts and 0 not in firsts
 
@@ -139,11 +136,16 @@ class TestHeaderAndList:
         rc.perform("skip")
         controller.file_ctrl.on_frame_changed(10)
         rc.perform("no_bubble_all")
-        assert rc.panel.summary() == "4 checked · 1 skipped · 3 for information"
+        assert rc.panel.summary() == "3 of 8 frames to check"
         controller.file_ctrl.on_frame_changed(0)
         rc.perform("no_bubble_all")
-        assert rc.panel.done_page.text() == (
-            "All frames to check are done (1 skipped).\nNext: export R(t).")
+        page = rc.panel.done_page
+        assert page.text() == "All done — 7 checked, 1 skipped (Frame 4: show)"
+        assert page.offers_show_skipped() and page.offers_export()
+        assert rc.panel.card.isHidden()  # A5: the done page stands alone
+        rc.panel.show_skipped_requested.emit()  # "show": the skipped frame comes back
+        assert rc.panel.frames() == [3] and controller._get_state().image_no == 3
+        assert rc.panel.card.isVisibleTo(rc.panel)
 
     def test_the_selected_row_stays_in_view(self, qapp, gui, tmp_path):
         window, controller = gui
@@ -184,7 +186,7 @@ class TestMlAssistLeads:
         monkeypatch.setattr(ml_assist, "HINT_MIN_FRAMES", 5)
         controller.bus.emit("run_finished", finished)
         assert not ml.hint.isHidden()
-        assert ml.hint.text().startswith("100% of the bubble's frames need a check.")
+        assert ml.hint.text() == "Many frames to check — ML assist can help."  # no 2nd number
 
     def test_not_when_few_frames_need_a_check(self, app, monkeypatch):
         _, controller, rc = app

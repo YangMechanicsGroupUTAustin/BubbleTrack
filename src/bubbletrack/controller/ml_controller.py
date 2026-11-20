@@ -64,11 +64,15 @@ def switch_text(on: bool, n_examples: int) -> str:
     return head if on else f"{head} · not taught yet"
 
 
-def hint_text(missing) -> str:
-    """The Review dock's short hint after a run where many frames failed (two lines)."""
-    if missing.few_accepted:
-        return f"Only {missing.accepted} of {missing.run} frames measured."
-    return f"{round(100 * missing.share)}% of the bubble's frames have no result."
+HINT_TEXT = "Many frames have no result — ML assist can help."
+
+
+def hint_text(_missing) -> str:
+    """The Review dock's short hint after a run where many frames failed.
+
+    It names no number of its own: the header and Review count the frames
+    to check (one number everywhere)."""
+    return HINT_TEXT
 
 
 @contextmanager

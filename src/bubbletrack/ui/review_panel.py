@@ -2,13 +2,15 @@
 
 ::
 
-    12 of 48 frames to check · 11 for information   [All kinds ▾]
+    12 of 48 frames to check                        [All kinds ▾]
     ●  Frames 120–180               [61]
-       Auto lost the bubble
-    ● likely wrong  ● worth a check  ● for information
+       Mostly not sure (11 not found)
     ────────────────────────────────────────────
     Frame 125 · _135 ... the frame on screen, its advice and actions (ReviewCard)
     ✓ Frame 124 accepted.                   [Undo]
+
+The row's tooltip says what its dot colour means.  Once nothing is left,
+the done page takes the list's place, without the card.
 """
 
 from __future__ import annotations
@@ -23,17 +25,14 @@ from PyQt6.QtWidgets import (
 
 from bubbletrack.controller.review_queue import ReviewItem
 from bubbletrack.controller.review_segments import (
-    ReviewSegment, build_segments, category_of, queue_frames, segment_of,
+    ReviewSegment, build_segments, kind_of, queue_frames, segment_of,
 )
 from bubbletrack.ui.review_card import CardAdvice, DonePage, FeedbackLine, ReviewCard
 from bubbletrack.ui.review_filter import KindFilter, kinds_present
 from bubbletrack.ui.review_progress import (  # noqa: F401  (the messages, re-exported)
-    EMPTY_ALL_CLEAR, EMPTY_ALL_DONE, EMPTY_BEFORE_FIT, EMPTY_FILTERED, ReviewProgress,
-    check_frames,
+    EMPTY_ALL_CLEAR, EMPTY_BEFORE_FIT, EMPTY_FILTERED, ReviewProgress, check_frames,
 )
-from bubbletrack.ui.review_rows import (
-    ROW_ROLE, ReviewRowDelegate, row_data, row_menu, tier_key_html, tooltip_html,
-)
+from bubbletrack.ui.review_rows import ROW_ROLE, ReviewRowDelegate, row_data, row_menu, tooltip_html
 from bubbletrack.ui.review_text import detail_text, frame_title, position_text, segment_text
 
 
@@ -61,6 +60,7 @@ class ReviewPanel(QWidget):
     segment_changed = pyqtSignal(object)  # the selected ReviewSegment, or None
     export_case_requested = pyqtSignal(object)  # a row's ReviewSegment (right-click, More)
     export_requested = pyqtSignal()  # "Export R(t)..." once everything is checked
+    show_skipped_requested = pyqtSignal()  # the done page's "show" (skipped frames)
     undo_requested = pyqtSignal()  # the feedback line's Undo
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -88,10 +88,6 @@ class ReviewPanel(QWidget):
         layout.setSpacing(6)
         layout.addLayout(self._build_header())
         layout.addWidget(self._build_list(), 1)
-        self.tier_key = QLabel(tier_key_html())  # what the row dots mean
-        self.tier_key.setObjectName("reviewTierKey")
-        self.tier_key.setStyleSheet("font-size:10px;")
-        layout.addWidget(self.tier_key)
         self.card = ReviewCard()
         self.card.action_requested.connect(self.action_requested)
         self.card.export_case_requested.connect(self._export_selected_case)
@@ -114,7 +110,7 @@ class ReviewPanel(QWidget):
         self._summary.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self._summary, 1)
         self.kind_filter = KindFilter()
-        self.kind_filter.hidden_changed.connect(self.set_hidden_categories)
+        self.kind_filter.hidden_changed.connect(self.set_hidden_kinds)
         row.addWidget(self.kind_filter)
         return row
 
@@ -133,6 +129,7 @@ class ReviewPanel(QWidget):
         self._list.customContextMenuRequested.connect(self._on_context_menu)
         self.done_page = DonePage()
         self.done_page.export_requested.connect(self.export_requested)
+        self.done_page.show_skipped_requested.connect(self.show_skipped_requested)
         self._stack = QStackedWidget()
         self._stack.addWidget(self._list)
         self._stack.addWidget(self.done_page)
@@ -171,8 +168,12 @@ class ReviewPanel(QWidget):
         return queue_frames(self._visible)
 
     def count(self) -> int:
-        """Frames waiting for review, of every type."""
+        """Frames waiting for review, of every type (the frames to check)."""
         return sum(s.count for s in self._all)
+
+    def skipped(self) -> frozenset[int]:
+        """Frames the user skipped (left out of the list, not checked)."""
+        return self._skipped
 
     def texts(self) -> list[str]:
         return [segment_text(s, self._images) for s in self._visible]
@@ -189,12 +190,11 @@ class ReviewPanel(QWidget):
         self._update_header()
 
     def progress(self) -> tuple[int, int]:
-        """(frames still to check, frames to check since the last reset):
-        red and amber rows only; grey rows are for information."""
+        """(frames still to check, frames to check since the last reset)."""
         return self._progress.progress(self._all)
 
     def summary(self) -> str:
-        """The header line ('12 of 48 frames to check · 11 for information')."""
+        """The header line ('12 of 48 frames to check')."""
         return self._summary.text()
 
     def set_advisor(self, advisor: Advisor) -> None:
@@ -218,9 +218,12 @@ class ReviewPanel(QWidget):
         return self._shown
 
     def refresh_card(self) -> None:
-        """Re-ask the advisor (e.g. after the frame's result changed)."""
+        """Re-ask the advisor (e.g. after the frame's result changed).
+
+        The card shows after a fit while frames are listed; the done page
+        stands alone."""
         frame, segment = self._shown, self.current_segment()
-        on = frame is not None and bool(self._images) and self._fitted  # after a fit
+        on = frame is not None and bool(self._images) and self._fitted and bool(self._all)
         self.card.setVisible(on)
         if not on:
             return
@@ -249,12 +252,12 @@ class ReviewPanel(QWidget):
     def clear_feedback(self) -> None:
         self.feedback.clear()
 
-    # -- type filter ------------------------------------------------------- #
+    # -- kind filter ------------------------------------------------------- #
 
-    def hidden_categories(self) -> frozenset[str]:
+    def hidden_kinds(self) -> frozenset[str]:
         return self._hidden
 
-    def set_hidden_categories(self, keys: Iterable[str]) -> None:
+    def set_hidden_kinds(self, keys: Iterable[str]) -> None:
         hidden = frozenset(keys)
         if hidden != self._hidden:
             self._hidden = hidden
@@ -364,12 +367,12 @@ class ReviewPanel(QWidget):
     def _rebuild(self) -> None:
         """Refill the list; a selected row is followed to its successor.
 
-        The type filter hides frames, not rows: the frames left are grouped
+        The kind filter hides frames, not rows: the frames left are grouped
         into rows again.
         """
         old = self.current_segment()
         self._visible = self._all if not self._hidden else build_segments(
-            item for s in self._all for item in s.items if category_of(item) not in self._hidden)
+            item for s in self._all for item in s.items if kind_of(item) not in self._hidden)
         self._list.blockSignals(True)
         self._list.clear()
         for segment in self._visible:
@@ -410,7 +413,8 @@ class ReviewPanel(QWidget):
         self._summary.setText(self._progress.summary(self._all, self._skipped,
                                                      fitted=self._fitted))
         self.kind_filter.update_kinds(kinds_present(self._items.values()), self._hidden)
-        self.tier_key.setVisible(bool(self._visible))
+        # Once nothing is listed after a fit, the done page says it all.
+        self._summary.setVisible(bool(self._all) or not self._fitted)
         if self._visible:
             self._stack.setCurrentWidget(self._list)
             return

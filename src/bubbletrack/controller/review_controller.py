@@ -5,7 +5,8 @@ them into rows, ``review_advice`` recommends an action).  ``ReviewController``
 wires them to the running app: it refreshes on bus events and edits, keeps
 the R(t) chart showing the selected row, performs the actions
 (``review_actions``; Fix through ``FixMode``) and then moves on by itself
-(``review_flow``).  Nothing in Review deletes a result.
+(``review_flow``).  Nothing in Review deletes a result, and Accept all
+never locks a frame Review recommends fixing.
 
 Actions wait while Fit All runs.  A background re-track does not block
 them: an edit abandons it and restarts its countdown.  Ctrl+Z and the
@@ -24,7 +25,7 @@ from PyQt6.QtWidgets import QDockWidget
 from bubbletrack.controller import review_actions, suggestion_actions
 from bubbletrack.controller.circle_controller import RESULT_UNDONE
 from bubbletrack.controller.fix_mode import FixMode
-from bubbletrack.controller.review_advice import advise
+from bubbletrack.controller.review_advice import accept_all_frames, advise
 from bubbletrack.controller.review_background import BackgroundCheck, before_bubble
 from bubbletrack.controller.review_flow import ALL_DONE, ReviewFlow
 from bubbletrack.controller.review_memory import ReviewMemory
@@ -50,6 +51,9 @@ _FRAME_ACTIONS = frozenset({"accept", "fix", "no_bubble"})
 NOTHING_TO_ACCEPT = "Nothing to accept here — F to fix, N if there is no bubble"
 NOTHING_TO_ACCEPT_IN_ROW = ("Nothing to accept in this row — F to fix a frame, "
                             "Shift+N if there is no bubble")
+NOTHING_TO_ACCEPT_AT_ONCE = ("These frames need a fix: check them one by one — "
+                             "A to accept the one on screen, F to fix it")
+ML_LEAD_TEXT = "Many frames to check — ML assist can help."
 REVIEW_HIDDEN = "The Review panel is hidden: View ▸ Review shows it (its keys act there)"
 REVIEW_BEHIND = "Review is behind another panel: click its Review tab (its keys act there)"
 ML_LEAD_SHARE = 0.4  # above this share of the bubble's frames to check, suggest ML assist
@@ -74,9 +78,9 @@ class ReviewController:
         self.flow = ReviewFlow(app, panel, self._go, self._unskip)
 
         panel.set_advisor(self._advice)
-        panel.set_row_counter(
-            lambda segment: len(review_actions.acceptable(self._state(), segment.frames)))
+        panel.set_row_counter(lambda segment: len(self.accept_all_frames(segment)))
         panel.frame_activated.connect(self._go)
+        panel.show_skipped_requested.connect(self._show_skipped)
         panel.action_requested.connect(self.perform)
         panel.segment_changed.connect(self._show_range)
         panel.export_requested.connect(lambda: self.w.export_requested.emit())
@@ -118,7 +122,8 @@ class ReviewController:
 
     @property
     def check_count(self) -> int:
-        """Frames in rows to check (red or amber), as Review's header counts them."""
+        """Frames to check (every listed frame): the one number Review's header,
+        the status line and ML assist give."""
         return len(self.panel.check_frames())
 
     def set_extra(self, items: Iterable[ReviewItem]) -> None:
@@ -150,6 +155,11 @@ class ReviewController:
 
     def _items(self, state: AppState) -> list[ReviewItem]:
         return self.memory.items(state, before_bubble(state, self.looks_empty))
+
+    def accept_all_frames(self, segment: ReviewSegment) -> list[int]:
+        """The frames of *segment* Accept all stores: the ones recommended for
+        Accept (Fix-recommended frames stay listed)."""
+        return accept_all_frames(self._state(), segment.items, self.looks_empty)
 
     def perform(self, action: str) -> None:
         """Apply *action* (see ``ReviewPanel.ACTIONS``), then move on by itself.
@@ -230,9 +240,10 @@ class ReviewController:
         if action == "no_bubble_all":
             return review_actions.mark_no_bubble(app, segment.frames, span_text(segment))
         if action == "accept_all":
-            if not self._confirm_accept_all(segment):
+            frames = self.accept_all_frames(segment)
+            if not self._confirm_accept_all(segment, frames):
                 return None
-            return review_actions.accept_segment(app, segment)
+            return review_actions.accept_segment(app, segment, frames)
         self._app.retrack.exclude(segment.frames)  # a running re-track leaves them too
         self.memory.dismiss(self._state(), segment.frames)  # skip
         return f"{span_text(segment)} skipped: left as it is"
@@ -245,23 +256,25 @@ class ReviewController:
             return NOTHING_TO_ACCEPT
         if action == "accept_all" and not review_actions.acceptable(state, segment.frames):
             return NOTHING_TO_ACCEPT_IN_ROW
+        if action == "accept_all" and not self.accept_all_frames(segment):
+            return NOTHING_TO_ACCEPT_AT_ONCE
         return ""
 
-    def _confirm_accept_all(self, segment: ReviewSegment) -> bool:
-        """Ask once if Accept all would store guesses the user has not displayed."""
+    def _confirm_accept_all(self, segment: ReviewSegment, frames: Sequence[int]) -> bool:
+        """Ask once if Accept all would store guesses the user has not displayed
+        (among *frames*, the ones it stores)."""
         state = self._state()
         unseen = [f for f in suggestion_actions.guessed_frames(state, segment)
-                  if not self.memory.was_seen(state, f)]
+                  if f in frames and not self.memory.was_seen(state, f)]
         if not unseen:
             return True
         # A re-track must not land under the question (its results would be
         # accepted unseen): held while it is asked, then it runs as before.
-        frames = len(review_actions.acceptable(state, segment.frames))
         self._app.retrack.hold()
         try:
             if not review_confirm.ask_accept_all(
-                    self.w, accept_all_question(frames, len(unseen)),
-                    empty=segment.count - frames):
+                    self.w, accept_all_question(len(frames), len(unseen)),
+                    empty=segment.count - len(frames)):
                 return False
             return not self._fit_run and segment in self.panel.segments()
         finally:
@@ -281,6 +294,17 @@ class ReviewController:
         self.memory.undismiss(frames)
         self.refresh()
 
+    def _show_skipped(self) -> None:
+        """The done page's "show": the skipped frames come back to the list,
+        and the first of them is shown."""
+        skipped = sorted(self.panel.skipped())
+        if not skipped or self._fit_run:
+            return
+        self.flow.clear()
+        self._unskip(skipped)
+        self.panel.select_frame(skipped[0], keep_row=False)
+        self._go(skipped[0])
+
     # -- helpers ----------------------------------------------------------- #
 
     def _state(self) -> AppState:
@@ -296,7 +320,8 @@ class ReviewController:
 
     def _advice(self, frame: int, item: ReviewItem | None) -> CardAdvice:
         advice = advise(self._state(), frame, item, self.looks_empty)
-        return CardAdvice(advice.text, advice.action, advice.guess, advice.can_accept)
+        return CardAdvice(advice.text, advice.action, advice.guess, advice.can_accept,
+                          advice.tip)
 
     def _key(self, act: Callable[[], None]) -> None:
         """A review key: act while the dock shows, else say where it is."""
@@ -353,15 +378,15 @@ class ReviewController:
     def _lead_with_ml(self, state: AppState) -> None:
         """Show ML assist's hint (above the rows) when more than
         ``ML_LEAD_SHARE`` of the bubble's frames wait for a check (and at
-        least as many frames as ML assist's own hint needs)."""
+        least as many frames as ML assist's own hint needs).  It names no
+        number of its own: the header counts the frames to check."""
         ml = getattr(self._app, "ml", None)
         if ml is None or not getattr(ml, "available", False) or state.ml_assist \
                 or not ml.hint.isHidden():
             return
         inside, lifetime = in_lifetime(state, self.panel.check_frames())
         if inside >= ml_assist.HINT_MIN_FRAMES and inside > ML_LEAD_SHARE * lifetime:
-            ml.hint.show_text(f"{round(100 * inside / lifetime)}% of the bubble's frames need "
-                              "a check. ML assist can help: confirm a few frames and teach it.")
+            ml.hint.show_text(ML_LEAD_TEXT)
 
     def _on_undone(self, edit: ResultEdit) -> None:
         """Ctrl+Z (or the feedback's Undo) restored *edit*: show its frame."""

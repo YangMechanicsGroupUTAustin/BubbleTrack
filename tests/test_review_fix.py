@@ -106,13 +106,13 @@ class TestPointsTool:
     def test_while_fixing_the_strip_is_the_one_place_to_act(self, app):
         window, controller, rc = app
         rc.panel.step(1)
-        buttons = rc.panel.card.buttons
-        assert not buttons["accept"].isHidden() and not buttons["skip"].isHidden()
+        buttons, more = rc.panel.card.buttons, rc.panel.card.more
+        assert not buttons["accept"].isHidden() and not more.isHidden()  # ⋯ holds Skip
         rc.perform("fix")
-        assert all(b.isHidden() for b in buttons.values()) and rc.panel.card.more.isHidden()
+        assert all(b.isHidden() for b in buttons.values()) and more.isHidden()
         assert rc.panel.card.advice.text()  # what is wrong stays in view
         rc.fix.cancel()
-        assert not buttons["accept"].isHidden() and not buttons["skip"].isHidden()
+        assert not buttons["accept"].isHidden() and not more.isHidden()
 
     def test_an_empty_frame_offers_no_accept_button(self, app):
         """Nothing to accept: the card offers Fix and No bubble only."""

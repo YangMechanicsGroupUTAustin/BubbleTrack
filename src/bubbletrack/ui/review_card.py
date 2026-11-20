@@ -3,21 +3,23 @@
 ::
 
     Frame 125 · _135                      61 left in this row
-    Auto lost the bubble here. Auto's guess is dashed:
-    accept it if it sits on the wall.
+    Auto found no bubble here. Its guess (dashed outline) fits
+    the frames around it: accept it if it sits on the wall.
     [ Accept the guess                          A ]   <- recommended: filled
     [ Fix with a circle                         F ]
     [ No bubble here                            N ]
-    [ Accept all 61       ⇧A ] [ Skip   S ] [ ⋯ ]
+    [ Accept 58                          ⇧A ] [ ⋯ ]   <- ⋯: Skip this row, hard case
     ✓ Frame 124 accepted. Ctrl+Z undoes     [Undo]
 
 The card shows; ReviewController decides (``Advice`` picks the filled
-button, or none when there is nothing to do).  A row before the bubble
-shows "No bubble on all N" in Accept all's place, filled.
+button, or none when there is nothing to do).  Accept all names the real
+number it stores (the row's frames recommended for Accept).  A row before
+the bubble shows "No bubble on all N" in Accept all's place, filled.
 """
 
 from __future__ import annotations
 
+import html
 from typing import NamedTuple
 
 from PyQt6.QtCore import Qt, pyqtSignal
@@ -26,20 +28,23 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from bubbletrack.ui.review_text import SHOW
+
 FRAME_ACTIONS = ("accept", "fix", "no_bubble")
 
 
 class CardAdvice(NamedTuple):
     """What the card says about the frame on screen (from ``review_advice``)."""
 
-    text: str  # what is wrong and what to do
+    text: str  # what is wrong and what the recommended button does
     action: str  # the recommended (filled) action; "" for none
     guess: bool = False  # the frame shows Auto's guess: Accept stores it
     can_accept: bool = True  # False on an empty or settled frame: nothing to accept
+    tip: str = ""  # engine details for the advice's tooltip
 
 
 _KEYS = {"accept": "A", "fix": "F", "no_bubble": "N", "accept_all": "⇧A",
-         "no_bubble_all": "⇧N", "skip": "S"}
+         "no_bubble_all": "⇧N"}
 _TIPS = {
     "accept": "Keep this frame's result (or store Auto's dashed guess) and lock it, so Fit All "
               "keeps it. Ctrl+Z undoes.",
@@ -47,13 +52,14 @@ _TIPS = {
            "the exact wall), or click edge points. Esc cancels.",
     "no_bubble": "There is no bubble on this frame: it stays empty and locked (exported as no "
                  "bubble). Ctrl+Z undoes.",
-    "accept_all": "Accept every frame of this row that has a result or Auto's guess, and "
-                  "lock them. Empty frames stay for you to fix or mark. Ctrl+Z undoes.",
+    "accept_all": "Accept the frames of this row where Accept is recommended (a result, or "
+                  "Auto's guess that fits the frames around it) and lock them. Frames that "
+                  "need a fix stay listed. Ctrl+Z undoes.",
     "no_bubble_all": "There is no bubble on any frame of this row: they stay empty and "
                      "locked (exported as no bubble). Ctrl+Z undoes.",
-    "skip": "Leave this row as it is (nothing is stored) and go to the next one.",
 }
-_DIM, _FAINT, _OK = "#a1a1aa", "#71717a", "#34d399"
+SKIP_TIP = "Leave this row as it is (nothing is stored) and go to the next one (S)."
+_DIM, _FAINT, _OK, _LINK = "#a1a1aa", "#71717a", "#34d399", "#818cf8"
 _TEXT_PAD, _KEY_GAP = 20, 16  # px: the button's left padding; text-to-key gap + right margin
 
 
@@ -111,7 +117,7 @@ class ReviewCard(QWidget):
     """Where the shown frame is, what is wrong, and the actions (see module doc)."""
 
     action_requested = pyqtSignal(str)  # accept | fix | no_bubble | accept_all | skip | no_bubble_all
-    export_case_requested = pyqtSignal()  # More > Export these frames as a hard case
+    export_case_requested = pyqtSignal()  # ⋯ > Export these frames as a hard case
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -157,18 +163,20 @@ class ReviewCard(QWidget):
     def _build_row_actions(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(4)
-        # "Accept 228 of 252" / "No bubble on all 3" need room beside their key
-        row.addWidget(self._add_button("accept_all"), 5)
-        row.addWidget(self._add_button("no_bubble_all"), 5)  # only when recommended
-        row.addWidget(self._add_button("skip"), 2)
+        row.addWidget(self._add_button("accept_all"), 1)
+        row.addWidget(self._add_button("no_bubble_all"), 1)  # only when recommended
+        row.addStretch(0)  # keeps ⋯ at the right when it is alone
         self.more = QToolButton()
         self.more.setText("⋯")
-        self.more.setToolTip("More for this row")
+        self.more.setToolTip("More for this row: skip it, export it as a hard case")
         self.more.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
         self.more.setStyleSheet("QToolButton { padding: 2px 8px; } "
                                 "QToolButton::menu-indicator { image: none; }")
         self._more_menu = QMenu(self.more)
         self._more_menu.setToolTipsVisible(True)
+        self.skip_action = self._more_menu.addAction("")
+        self.skip_action.setToolTip(SKIP_TIP)
+        self.skip_action.triggered.connect(lambda: self.action_requested.emit("skip"))
         self._no_bubble_all = self._more_menu.addAction("")
         self._no_bubble_all.setToolTip("There is no bubble on any frame of this row "
                                        "(Shift+N). Ctrl+Z undoes.")
@@ -188,12 +196,13 @@ class ReviewCard(QWidget):
         """Fill the card for the frame on screen (*advice.action*: the filled button).
 
         *row_count*: frames of the selected row (0 = no row: no row actions);
-        *accept_count*: how many of them Accept all would store.
+        *accept_count*: how many of them Accept all would store (those
+        recommended for Accept); *why*: the tooltip (reasons, numbers).
         """
         self.title.setText(title)
         self.position.setText(position)
         self.advice.setText(advice.text)
-        self.advice.setToolTip(why)
+        self.advice.setToolTip("\n".join(t for t in (why, advice.tip) if t))
         self.buttons["accept"].setText("Accept the guess" if advice.guess
                                        else "Accept this frame")
         self.buttons["fix"].setText(fix_label)
@@ -205,10 +214,9 @@ class ReviewCard(QWidget):
             recommended = "no_bubble"  # a row of one frame
         self._mark_row = recommended == "no_bubble_all"
         self.buttons["accept_all"].setText(
-            f"Accept all {row_count}" if accept_count == row_count
-            else f"Accept {accept_count} of {row_count}")
+            f"Accept all {row_count}" if accept_count == row_count else f"Accept {accept_count}")
         self.buttons["no_bubble_all"].setText(f"No bubble on all {row_count}")
-        self.buttons["skip"].setText("Skip row" if row_count > 1 else "Skip")
+        self.skip_action.setText(("Skip this row" if row_count > 1 else "Skip this frame") + "\tS")
         self._no_bubble_all.setText(f"No bubble on all {row_count} frames\tShift+N")
         self._no_bubble_all.setVisible(row_count > 1 and not self._mark_row)
         for action, btn in self.buttons.items():
@@ -230,7 +238,6 @@ class ReviewCard(QWidget):
         self.buttons["accept_all"].setVisible(on and rows > 1 and self._accept_count > 0
                                               and not self._mark_row)
         self.buttons["no_bubble_all"].setVisible(on and self._mark_row)
-        self.buttons["skip"].setVisible(on and rows > 0)
         self.more.setVisible(on and rows > 0)
 
     def recommended(self) -> str | None:
@@ -285,20 +292,27 @@ class FeedbackLine(QWidget):
 
 
 class DonePage(QWidget):
-    """The list's place when nothing waits: a message, and Export when all is done."""
+    """The list's place when nothing waits: a message, and Export when all is done.
+
+    'All done — 229 checked, 1 skipped (Frame 4: show)': "show" is a link
+    to the skipped frames (``show_skipped_requested``).
+    """
 
     export_requested = pyqtSignal()
+    show_skipped_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         box = QVBoxLayout(self)
         box.setContentsMargins(16, 16, 16, 16)
         box.addStretch()
+        self._plain = ""
         self._text = QLabel()
         self._text.setObjectName("reviewEmpty")
         self._text.setWordWrap(True)
         self._text.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._text.setStyleSheet(f"color:{_DIM};")
+        self._text.linkActivated.connect(lambda _href: self.show_skipped_requested.emit())
         box.addWidget(self._text)
         self._export = QPushButton("Export R(t)...")
         self._export.setToolTip("Save the radius curve of every frame")
@@ -307,11 +321,25 @@ class DonePage(QWidget):
         box.addStretch()
 
     def set_message(self, text: str, *, offer_export: bool) -> None:
-        self._text.setText(text)
+        """*text* ending in '(…: show)' gets "show" as a link to the skipped frames."""
+        self._plain = text
+        tail = f": {SHOW})"
+        if text.endswith(tail):
+            head = html.escape(text[:-len(tail)]).replace("\n", "<br>")
+            self._text.setTextFormat(Qt.TextFormat.RichText)
+            self._text.setText(f"{head}: <a href='skipped' style='color:{_LINK}'>{SHOW}</a>)")
+            self._text.setToolTip("Show the skipped frames again in the list")
+        else:
+            self._text.setTextFormat(Qt.TextFormat.PlainText)
+            self._text.setText(text)
+            self._text.setToolTip("")
         self._export.setVisible(offer_export)
 
     def text(self) -> str:
-        return self._text.text()
+        return self._plain
+
+    def offers_show_skipped(self) -> bool:
+        return self._text.textFormat() == Qt.TextFormat.RichText
 
     def offers_export(self) -> bool:
         return not self._export.isHidden()

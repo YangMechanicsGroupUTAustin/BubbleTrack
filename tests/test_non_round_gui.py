@@ -77,7 +77,8 @@ def test_review_lists_a_clipped_frame_in_its_own_row(review):
     state.fit_flags[6] = frozenset({"non_circular", AREA_RADIUS_FLAG})  # information only
     state.fit_flags[8] = frozenset({"clipped", "clipped_completed", AREA_RADIUS_FLAG})
     rc.refresh()
-    assert rc.panel.texts() == ["Frame 3 · Cut by the image edge"]
+    assert rc.panel.texts() == ["Frame 3 · Not sure"]
     rc.panel.step(1)
     advice = rc.panel.card.advice.text()
-    assert advice.startswith("Cut by the image edge here. The wall you can see is not round")
+    assert advice.startswith("Auto is not sure here. The image edge cuts it and the wall you "
+                             "can see is not round")

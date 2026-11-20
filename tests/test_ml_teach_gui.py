@@ -442,7 +442,10 @@ def test_train_and_apply_measures_only_the_frames_that_need_review(app, qapp, mo
     assert not _teach(controller).active and controller.ml.dock.isHidden()
     assert not controller.review.dock.isHidden()
     text = window.header.status_text()
-    assert text.startswith("ML assist measured ") and f"of {len(scope)} frames to check" in text
+    assert text.startswith("ML assist measured ") and f"of {len(scope)} frames · " in text
+    n = controller.review.check_count  # A6: the number Review gives
+    assert text.rsplit(" · ", 1)[-1] == (
+        "nothing left to check" if n == 0 else f"{n} frame{'s' if n != 1 else ''} to check")
     assert controller.ml.hint.text() == text and not controller.ml.hint.isHidden()
     assert controller._get_state().ml_assist
 
