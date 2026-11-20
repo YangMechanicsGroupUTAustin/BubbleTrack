@@ -1,0 +1,121 @@
+# Build the Windows and macOS apps with build_onefile.spec (as build_app.bat / build_app.sh do).
+#
+# Push a tag to run it:
+#   v3.1.0-beta.1, v3.1.0, ...  build, then publish a GitHub release with the apps
+#                               (a tag with a "-" is published as a pre-release, so the
+#                               release page's "Latest" stays on the last stable version)
+#   build-<anything>            build only (a dry run); the apps are kept as run artifacts
+name: release
+
+on:
+  push:
+    tags: ["v*", "build-*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    continue-on-error: ${{ matrix.optional }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            asset: BubbleTrack-Windows.exe
+            optional: false
+          - os: macos-15  # arm64; an older macOS than -latest, so the app opens on older Macs
+            label: macOS Apple silicon
+            asset: BubbleTrack-macOS-AppleSilicon.zip
+            optional: false
+          - os: macos-15-intel
+            label: macOS Intel
+            asset: BubbleTrack-macOS-Intel.zip
+            optional: true
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install . pyinstaller
+      - name: Build
+        run: pyinstaller build_onefile.spec --noconfirm
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          mkdir -p out
+          cp dist/BubbleTrack.exe "out/${{ matrix.asset }}"
+      - name: Package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p out
+          ditto -c -k --sequesterRsrc --keepParent dist/BubbleTrack.app "out/${{ matrix.asset }}"
+      - name: Smoke test (the app starts and stays up for 20 s)
+        shell: bash
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then exe=dist/BubbleTrack.exe; else exe=dist/BubbleTrack.app/Contents/MacOS/BubbleTrack; fi
+          "$exe" > smoke.log 2>&1 &
+          pid=$!
+          sleep 20
+          if kill -0 "$pid" 2>/dev/null; then
+            echo "The app is running after 20 s."
+            kill "$pid" || true
+          else
+            echo "The app exited within 20 s:"
+            cat smoke.log
+            exit 1
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.asset }}
+          path: out/${{ matrix.asset }}
+          retention-days: 14
+
+  publish:
+    needs: build
+    if: always() && startsWith(github.ref_name, 'v') && !contains(needs.build.result, 'cancelled')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          ls -l assets
+          test -f assets/BubbleTrack-Windows.exe
+          test -f assets/BubbleTrack-macOS-AppleSilicon.zip
+          pre=""
+          case "$TAG" in *-*) pre="--prerelease" ;; esac
+          cat > notes.md <<'EOF'
+          Built automatically from this tag.
+
+          | File | For |
+          |---|---|
+          | `BubbleTrack-Windows.exe` | Windows 10/11 (double-click to run) |
+          | `BubbleTrack-macOS-AppleSilicon.zip` | Macs with an M1/M2/M3/M4 chip |
+          | `BubbleTrack-macOS-Intel.zip` | Macs with an Intel chip (if present) |
+
+          **macOS:** unzip, then open `BubbleTrack.app`. The app is not signed: if macOS says it cannot be opened,
+          go to System Settings > Privacy & Security and click "Open Anyway" (or right-click the app > Open).
+
+          **Windows:** if SmartScreen warns, click "More info" > "Run anyway".
+
+          This release uses the settings folder `~/.bubbletrack` like earlier versions; sessions (.brt)
+          saved by a newer version should not be opened in an older one.
+          EOF
+          gh release create "$TAG" assets/* --repo "$GITHUB_REPOSITORY" --title "BubbleTrack $TAG" \
+            --notes-file notes.md $pre
