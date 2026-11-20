@@ -235,6 +235,40 @@ def test_a_bubble_filling_most_of_the_roi_is_measured(seed):
     assert not before.accepted
 
 
+def _bubble_beside_a_bright_band(seed: int, *, band: bool):
+    """A large dark bubble (R 50) in a 120 x 200 ROI of moving speckle (30 % decorrelated from the
+    reference); with *band*, columns 0-34 of the frame are 3 x as bright as in the reference (an
+    air interface beside the bubble, lic_hard/02)."""
+    h, w = 120, 200
+    rng = np.random.default_rng(seed)
+    ref_tex = _speckle((h, w), 1.2, rng)
+    tex = 0.7 * ref_tex + 0.3 * _speckle((h, w), 1.2, rng)
+    light = np.ones((h, w))
+    if band:
+        light[:, :35] = 3.0
+    frame = 0.8 * 20000 * tex * np.where(_disk((h, w), 60, 110, 50), 0.08, 1.0) * light
+    return frame.astype(np.float32), (20000 * ref_tex).astype(np.float32)
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_a_bright_band_beside_a_large_bubble_keeps_its_snr(seed):
+    # edge-1.6.1: the band (2-4 x the background in lic_hard/02) read as noise over the ROI and
+    # cost the snr term ~30 %; the noise is now also measured just outside the wall
+    results = {}
+    for band in (False, True):
+        frame, ref = _bubble_beside_a_bright_band(seed, band=band)
+        results[band] = detect_edge(frame, (1, 120), (1, 200), reference=ref, params=EdgeParams())
+    plain, banded = results[False], results[True]
+    assert banded.provenance["noise"] > 1.1 * plain.provenance["noise"]       # the ROI texture is inflated
+    snr = banded.provenance["confidence_terms"]["snr"]
+    assert snr >= 0.85 and snr >= plain.provenance["confidence_terms"]["snr"] - 0.15
+    assert banded.accepted and banded.radius == pytest.approx(50.0, abs=1.5)
+    ring_off = replace(DEFAULT_CONFIG, segment=replace(DEFAULT_CONFIG.segment, wall_texture_min_pixels=10 ** 9))
+    frame, ref = _bubble_beside_a_bright_band(seed, band=True)
+    before = detect_edge_with_config(frame, (1, 120), (1, 200), reference=ref, params=EdgeParams(), config=ring_off)
+    assert before.provenance["confidence_terms"]["snr"] < snr - 0.15         # edge-1.6.0's ROI texture only
+
+
 def test_only_non_finite_pixels_are_invalid():
     h, w = 60, 80
     ref = np.full((h, w), 20000.0, np.float32)

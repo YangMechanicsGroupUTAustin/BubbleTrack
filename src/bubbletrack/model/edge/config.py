@@ -81,6 +81,13 @@ class SegmentConfig:
     texture_bg_level: float = 0.35
     texture_subsample: int = 3
     texture_min_pixels: int = 20
+    wall_texture_ring: tuple[float, float] = (1.1, 1.5)
+    """The snr term's noise is the background texture over the whole ROI or, when lower, the
+    same texture in this ring (multiples of the measured radius) just outside the bubble
+    (:func:`.segment.snr_noise`, edge-1.6.1): a bright structure elsewhere in the ROI (an air
+    interface at 2-4 x the background, a big bubble's bright core) no longer reads as noise."""
+    wall_texture_min_pixels: int = 50
+    """Fewest (subsampled) ring pixels for the ring's texture to count."""
 
     min_area_px: int = 6
     max_candidates: int = 10

@@ -249,8 +249,9 @@ def test_lic_no_regression_against_single_frame():
     assert tot["after"] >= tot["before"] >= 184             # edge-1.5.0 (1.4.0: 195, 1.3.0: 193, 1.2.0: 205)
     assert tot["app"] >= tot["shown_before"]
     # edge-1.5.0: 80 -> 72 (07: 17 -> 7; 1.4.0: 80 -> 76, 07: 17 -> 11, see the module
-    # docstring); until 1.3.0 the solver never lost a rejected no-bubble frame (83 -> 84)
-    assert tot["rej_before"] >= 80 and tot["rej_after"] >= 72
+    # docstring); until 1.3.0 the solver never lost a rejected no-bubble frame (83 -> 84).
+    # edge-1.6.1: 80 -> 71, 07 file 169 (the fragment cluster 161 and 177 already show)
+    assert tot["rej_before"] >= 80 and tot["rej_after"] >= 71
 
 
 def test_lic_hard_no_regression_against_single_frame():

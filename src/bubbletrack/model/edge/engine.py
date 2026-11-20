@@ -42,11 +42,12 @@ from bubbletrack.model.edge.rays import (
 )
 from bubbletrack.model.edge.region import own_cell
 from bubbletrack.model.edge.result import EdgeParams, EdgeResult
-from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate
+from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate, snr_noise
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.6.0"
-"""1.6.0: bright-side gain and surface anchor when the median is in shadow (``normalize.background_level``).
+ENGINE_VERSION = "edge-1.6.1"
+"""1.6.1: the snr noise is the lower of the ROI's and a near-wall ring's texture (``segment.snr_noise``).
+1.6.0: bright-side gain and surface anchor when the median is in shadow (``normalize.background_level``).
 1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
 31M points, 1.5 GB, on lic_hard/03 frame 77); accepted results unchanged (2026-11-18).
 1.5.0: the background surface never uses pixels darker than 0.3 x the median (owner
@@ -177,13 +178,13 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
         return _fail(coarse.mask, flags, prov, "outer_undefined", params, watch)
     outer_radius = _outer_radius(outer, outer_line)
     shoulder = _shoulder(steep_line, outer_line, steep, outer_radius)
+    noise = prov["snr_noise"] = snr_noise(coarse, chosen.circle.fit.circle, config.segment)
+    frame = FrameStats(coarse.contrast, noise, sel.runner_up, edges.multi_fraction)
     flags |= measurement_flags(region=chosen.region, multi_fraction=edges.multi_fraction,
-                               runner_up=sel.runner_up, contrast=coarse.contrast, noise=coarse.noise,
+                               runner_up=sel.runner_up, contrast=coarse.contrast, noise=noise,
                                saturated=bool(sat.any()), shoulder_width=shoulder, cfg=config.quality)
-    check = circle_check(chosen.region, chosen.stats.fit.radius, exclude,
-                         config.quality.clipped_check_hidden)
-    return _build(chosen, check, outer_radius, shoulder, edges, coarse, sel, flags, prov, origin, params,
-                  config, watch)
+    check = circle_check(chosen.region, chosen.stats.fit.radius, exclude, config.quality.clipped_check_hidden)
+    return _build(chosen, check, outer_radius, shoulder, frame, flags, prov, origin, params, config, watch)
 
 
 def _parse_roi(gridx, gridy, shape: tuple[int, int]) -> tuple[tuple[int, int], tuple[int, int], bool]:
@@ -365,16 +366,15 @@ def _fail(mask: np.ndarray, flags: set[str], prov: dict, reason: str, params: Ed
     return _empty_result(mask, flags | {reason}, prov, params.confidence_gate)
 
 
-def _build(line: Outline, check: CircleCheck, outer_radius: float, shoulder: float, edges: RayEdges,
-           coarse: CoarseMask, sel: Selection, flags: set[str], prov: dict, origin: tuple[int, int],
-           params: EdgeParams, config: EdgeConfig, watch: _Stopwatch) -> EdgeResult:
+def _build(line: Outline, check: CircleCheck, outer_radius: float, shoulder: float, frame: FrameStats,
+           flags: set[str], prov: dict, origin: tuple[int, int], params: EdgeParams, config: EdgeConfig,
+           watch: _Stopwatch) -> EdgeResult:
     """Assemble the result of the chosen edge and radius definitions (1-based full-image coords).
 
     A frame below the confidence gate keeps its definition, so its guess is what
     Accept would store: the circle (default), or the area of the drawn outline.
     """
     region, stats = line.region, line.stats
-    frame = FrameStats(coarse.contrast, coarse.noise, sel.runner_up, edges.multi_fraction)
     m = measure(line, check, frame, config.quality, non_round=params.non_round)
     prov["circle"] = _circle_provenance(line, origin)
     prov["confidence_terms"] = {k: round(v, 3) for k, v in m.terms.items()}

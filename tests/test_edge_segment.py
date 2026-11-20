@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import pytest
 from scipy import ndimage
@@ -12,6 +14,7 @@ from bubbletrack.model.edge.segment import (
     coarse_segment,
     fill_holes_border_aware,
     select_candidate,
+    snr_noise,
 )
 
 SEG, NORM, FIT = SegmentConfig(), NormalizeConfig(), FitConfig()
@@ -51,6 +54,44 @@ def test_texture_raises_the_smoothing_scale():
     noisy = _segment(_scene([(80, 130, 30, 0.5)], noise=0.3))
     assert noisy.smooth_sigma > clean.smooth_sigma
     assert noisy.noise <= noisy.contrast * SEG.texture_target
+
+
+# ------------------------------------------------------------------ snr noise (edge-1.6.1)
+
+SEG_SIGMA2 = replace(SEG, smooth_sigmas=(2.0,), texture_target=1.0)  # the texture always at sigma 2
+
+
+def _band_scene(band: bool, ring_noise: float = 0.0):
+    """A dark disk (R 40) in white noise; optionally a bright band (3 x the background) in
+    columns 0-39, far from the disk's wall, and extra noise in the ring 1.1-1.5 R."""
+    img = _scene([(80, 150, 40, 0.9)], noise=0.15).astype(np.float64)
+    if band:
+        img[:, :40] += 2.0
+    if ring_noise:
+        yy, xx = np.mgrid[0:SHAPE[0], 0:SHAPE[1]]
+        d = np.hypot(yy - 80, xx - 150)
+        ring = (d > 40) & (d < 65)
+        img[ring] += ring_noise * np.random.default_rng(1).standard_normal(int(ring.sum()))
+    return img.astype(np.float32)
+
+
+def test_snr_noise_ignores_a_bright_band_away_from_the_wall():
+    plain = coarse_segment(_band_scene(False), np.zeros(SHAPE, bool), SEG_SIGMA2, NORM)
+    banded = coarse_segment(_band_scene(True), np.zeros(SHAPE, bool), SEG_SIGMA2, NORM)
+    assert banded.noise > 1.2 * plain.noise                  # the band reads as noise over the ROI
+    noise = snr_noise(banded, (80.0, 150.0, 40.0), SEG_SIGMA2)
+    assert noise == pytest.approx(plain.noise, rel=0.15)     # ... but not just outside the wall
+
+
+def test_snr_noise_is_never_above_the_roi_texture():
+    coarse = coarse_segment(_band_scene(False, ring_noise=0.3), np.zeros(SHAPE, bool), SEG_SIGMA2, NORM)
+    assert snr_noise(coarse, (80.0, 150.0, 40.0), SEG_SIGMA2) == coarse.noise
+
+
+def test_snr_noise_without_a_usable_ring_is_the_roi_texture():
+    coarse = coarse_segment(_band_scene(True), np.zeros(SHAPE, bool), SEG_SIGMA2, NORM)
+    assert snr_noise(coarse, (80.0, 150.0, 3.0), SEG_SIGMA2) == coarse.noise          # ring too small
+    assert snr_noise(coarse, (80.0, 150.0, float("nan")), SEG_SIGMA2) == coarse.noise
 
 
 def test_hole_open_towards_the_border_is_filled():
