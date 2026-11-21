@@ -39,6 +39,14 @@ class CoarseMask:
     background: np.ndarray
     """Background-like pixels (bool, ROI shape): not excluded and brighter than
     ``1 - texture_bg_level * contrast`` at the contrast scale; the texture is their spread."""
+    texture_image: np.ndarray | None = None
+    """The image the texture is the spread of, when it is not ``smooth``: the working image
+    clipped above at ``texture_clip`` and smoothed at ``smooth_sigma`` (edge-1.6.2)."""
+
+    @property
+    def textured(self) -> np.ndarray:
+        """The smoothed image whose spread over the background is the texture (``noise``)."""
+        return self.smooth if self.texture_image is None else self.texture_image
 
 
 @dataclass(frozen=True)
@@ -78,12 +86,16 @@ class Selection:
 
 
 def coarse_segment(image: np.ndarray, exclude: np.ndarray, cfg: SegmentConfig,
-                   norm_cfg: NormalizeConfig, *, contrast_cap: float = 1.0) -> CoarseMask:
+                   norm_cfg: NormalizeConfig, *, contrast_cap: float = 1.0,
+                   ratio: bool = False) -> CoarseMask:
     """Threshold the normalised image at ``seg_level`` of the frame contrast.
 
     The smoothing is the smallest scale whose residual background texture is
     at most ``texture_target`` of the contrast, so speckle does not fragment
-    the mask while a clean frame keeps a sharp one.
+    the mask while a clean frame keeps a sharp one.  For a frame / reference
+    *ratio*, the texture reported at that scale (``noise``) is measured with the
+    image clipped above at ``texture_clip`` (the reference-free image has no such tail:
+    its bright grains are the speckle the dark gaps of which a bubble must stand out from).
     """
     s3 = cv2.GaussianBlur(image, (0, 0), cfg.contrast_blur_sigma)
     s3 = np.where(exclude, 1.0, s3)
@@ -92,7 +104,7 @@ def coarse_segment(image: np.ndarray, exclude: np.ndarray, cfg: SegmentConfig,
     step = cfg.texture_subsample
     background = (~exclude) & (s3 > 1.0 - cfg.texture_bg_level * c0)
     background_like = background[::step, ::step]
-    sigma, texture = cfg.smooth_fallback, noise
+    sigma, texture, textured = cfg.smooth_fallback, noise, None
     if background_like.sum() >= cfg.texture_min_pixels:
         for s_try in cfg.smooth_sigmas:
             sample = cv2.GaussianBlur(image, (0, 0), s_try)[::step, ::step][background_like]
@@ -100,12 +112,15 @@ def coarse_segment(image: np.ndarray, exclude: np.ndarray, cfg: SegmentConfig,
             if texture <= c0 * cfg.texture_target:
                 sigma = s_try
                 break
+        if ratio and float(image.max()) > cfg.texture_clip:
+            textured = cv2.GaussianBlur(np.minimum(image, np.float32(cfg.texture_clip)), (0, 0), sigma)
+            texture = _spread(textured[::step, ::step][background_like])
     smooth = cv2.GaussianBlur(image, (0, 0), sigma)
     smooth = np.where(exclude, np.maximum(smooth, 1.0), smooth)
     mask = smooth < 1.0 - cfg.seg_level * c0
     return CoarseMask(mask=mask, smooth=smooth, contrast=c0, noise=max(texture, 1e-4),
                       smooth_sigma=float(sigma), method=f"global(level={cfg.seg_level:g}c)",
-                      background=background)
+                      background=background, texture_image=textured)
 
 
 def _spread(sample: np.ndarray) -> float:
@@ -138,7 +153,7 @@ def snr_noise(coarse: CoarseMask, circle: tuple[float, float, float], cfg: Segme
     ring = background & (dist >= inner * radius) & (dist <= outer * radius)
     if ring.sum() < cfg.wall_texture_min_pixels:
         return coarse.noise
-    return min(coarse.noise, max(_spread(coarse.smooth[::step, ::step][ring]), 1e-4))
+    return min(coarse.noise, max(_spread(coarse.textured[::step, ::step][ring]), 1e-4))
 
 
 def fill_holes_border_aware(crop: np.ndarray, walls: tuple[bool, bool, bool, bool]) -> np.ndarray:

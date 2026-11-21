@@ -45,8 +45,9 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate, snr_noise
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.6.1"
-"""1.6.1: the snr noise is the lower of the ROI's and a near-wall ring's texture (``segment.snr_noise``).
+ENGINE_VERSION = "edge-1.6.2"
+"""1.6.2: moving saturating speckle: log-band bright-side level, bounded residual, texture clipped at 2.75 x.
+1.6.1: the snr noise is the lower of the ROI's and a near-wall ring's texture (``segment.snr_noise``).
 1.6.0: bright-side gain and surface anchor when the median is in shadow (``normalize.background_level``).
 1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
 31M points, 1.5 GB, on lic_hard/03 frame 77); accepted results unchanged (2026-11-18).
@@ -54,13 +55,12 @@ ENGINE_VERSION = "edge-1.6.1"
 decision 2026-11-15).  Up to 1.4.0 they were left out of the first fit only; in dense speckle
 the later fits re-admitted a big dark bubble as background, which lifted its inside to the
 background level (lic_hard/02 frames 6-41 gave no result).
-1.4.0: no reference pixel is excluded any more (owner decision 2026-11-14).  Up to 1.3.0,
-stage A marked the pixels where the blurred reference was darker than 0.12 x its median or
-lay in a saturated blob, widened by 5 px, as invalid: they were set to the background 1.0
-and later stages dropped edges next to them and completed regions touching them.  Now every
-pixel holds its real frame / reference ratio; only non-finite (NaN / inf) pixels of the frame
-or the reference are invalid.  The frame's own saturated blobs are still excluded for a dark
-bubble.
+1.4.0: no reference pixel is excluded any more (owner decision 2026-11-14).  Up to 1.3.0, stage A marked the
+pixels where the blurred reference was darker than 0.12 x its median or lay in a saturated blob, widened by 5
+px, as invalid: they were set to the background 1.0 and later stages dropped edges next to them and completed
+regions touching them.  Now every pixel holds its real frame / reference ratio; only non-finite (NaN / inf)
+pixels of the frame or the reference are invalid.  The frame's own saturated blobs are still excluded for a
+dark bubble.
 1.3.0: the default radius is the least-squares (Taubin, one outlier pass) circle through the
 bubble outline instead of the robust circle through the ray edges (owner decision 2026-11-13)."""
 
@@ -142,7 +142,7 @@ def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndar
         flags.add("saturation")
     watch.lap("normalize")
     coarse = coarse_segment(image, exclude, config.segment, config.normalize,
-                            contrast_cap=1.0 if params.polarity == "dark" else np.inf)
+                            contrast_cap=1.0 if params.polarity == "dark" else np.inf, ratio=ref is not None)
     sel = select_candidate(coarse, norm.invalid, config.segment, config.fit,
                            seed=_local(params.seed, origin), prior=_local(params.prior, origin))
     prov.update(segment=coarse.method, smooth_sigma=round(coarse.smooth_sigma, 2), select=sel.method,

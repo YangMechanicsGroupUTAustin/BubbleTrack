@@ -186,6 +186,17 @@ def test_background_level_is_exactly_the_median_without_a_shadow():
     assert background_level(y, CFG) == (float(np.median(y)), False)
 
 
+def test_bright_level_ignores_the_upper_tail_of_moving_speckle():
+    # edge-1.6.2: the ratio of two speckle patterns that do not match is spread over a factor ~10
+    # around the background, with a heavy upper tail; the level open above (edge-1.6.0) followed
+    # that tail to 1.2-1.7 x the background (Jin 2026-11-16 14:37:03 frames 10-69)
+    rng = np.random.default_rng(5)
+    y = np.concatenate([0.05 * np.exp(0.3 * rng.standard_normal(6000)),   # a dark bubble, 60 %
+                        0.8 * np.exp(0.8 * rng.standard_normal(4000))])  # the background (median 0.8)
+    level, shadowed = background_level(y, CFG)
+    assert shadowed and level == pytest.approx(0.8, rel=0.12)
+
+
 def test_gain_is_exactly_the_median_ratio_when_the_bubble_is_small():
     h, w = 100, 160
     rng = np.random.default_rng(5)
@@ -233,6 +244,34 @@ def test_a_bubble_filling_most_of_the_roi_is_measured(seed):
     old = replace(DEFAULT_CONFIG, normalize=replace(CFG, level_shadow_median=0.0))  # the median, always
     before = detect_edge_with_config(frame, (1, 120), (1, 160), reference=ref, params=EdgeParams(), config=old)
     assert not before.accepted
+
+
+def _big_bubble_in_saturating_moving_speckle(seed: int):
+    """A 250 x 400 uint16 frame of dense speckle that saturates (the reference ~10 % of its pixels,
+    the frame ~1 %), wholly decorrelated from the reference's (moving speckle) and 0.65 x as bright,
+    with a uniform dark bubble of R 150 at (130, 155) (0-based) covering 65 % of it, cut by the top
+    and bottom borders (Jin 2026-11-16 14:37:03 frames 20-50)."""
+    h, w = 250, 400
+    rng = np.random.default_rng(seed)
+    ref = np.minimum(20000 * _speckle((h, w), 1.5, rng), 65535)
+    background = 0.65 * 20000 * _speckle((h, w), 1.5, rng)
+    disk = _disk((h, w), 130, 155, 150)
+    frame = np.minimum(np.where(disk, 0.04 * 0.65 * 20000, background), 65535)
+    return frame.astype(np.uint16), ref.astype(np.uint16), disk
+
+
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_a_big_bubble_in_saturating_moving_speckle_is_measured(seed):
+    # edge-1.6.1: the bright-side gain followed the ratio's upper tail to 1.0-1.7 (true 0.65), the
+    # residual surface swung below 0 and the snr fell to ~0.2: confidence 0.00-0.16
+    frame, ref, disk = _big_bubble_in_saturating_moving_speckle(seed)
+    assert disk.mean() > 0.6 and np.mean(ref == 65535) > 0.05
+    res = detect_edge(frame, (1, 250), (1, 400), reference=ref, params=EdgeParams())
+    gain = res.provenance["gain"]
+    assert "bright-side" in res.provenance["normalize"] and 0.6 < gain < 0.8
+    assert res.accepted, (res.confidence, res.provenance.get("confidence_terms"))
+    assert res.radius == pytest.approx(150.0, abs=2.0)
+    assert np.hypot(res.rc - 131.0, res.cc - 156.0) < 2.0           # 1-based centre
 
 
 def _bubble_beside_a_bright_band(seed: int, *, band: bool):

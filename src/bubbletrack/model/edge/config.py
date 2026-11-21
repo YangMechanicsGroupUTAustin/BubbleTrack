@@ -47,12 +47,16 @@ class NormalizeConfig:
     gain_min_pixels: int = 100
     """Minimum valid pixels to estimate the frame-to-reference gain (flicker)."""
     level_bright_frac: float = 0.5
-    """The bright-side background level of a ratio image is the median of its shrunk pixels
-    brighter than this fraction of that level (a fixed point): a shadow can only darken, so the
-    background is the bright part of the ROI however much of it a bubble covers."""
-    level_start_quantile: float = 0.9
-    """The fixed point is searched from this quantile of the shrunk pixels, so a uniform dark
-    bubble covering up to ~90 % of the ROI is not taken for the background."""
+    """The bright-side background level of a ratio image is the median of its shrunk pixels of
+    the bright class (Otsu on log) between this fraction of that level and its inverse (a fixed
+    point; ``normalize.bright_level``): a shadow can only darken, so the background is the bright
+    class however much of the ROI a bubble covers.  Up to edge-1.6.1 the band was open above
+    (from the 90th percentile): in moving saturating speckle the ratio's upper tail (grains of
+    3-7 x the background) dragged it to 1.2-1.7 x the background (Jin 2026-11-16 14:37:03
+    frames 10-69), the bubble's 50 % level fell into the speckle and no circle was shown."""
+    bg_shadow_span: float = 2.0
+    """With the bright-side anchor, the residual surface's polynomial is held within this factor
+    of it (``normalize.estimate_background``)."""
     level_shadow_median: float = 0.5
     """With a reference, the median stands as the background level (the gain, and the anchor of
     the residual surface's dark thresholds) unless it is darker than this fraction of the
@@ -81,6 +85,20 @@ class SegmentConfig:
     texture_bg_level: float = 0.35
     texture_subsample: int = 3
     texture_min_pixels: int = 20
+    texture_clip: float = 2.75
+    """With a reference, the texture reported as noise (the snr term, the low_snr flag, the minimum
+    step of the ray edges and the outline support) is measured, at the chosen smoothing, on the
+    working image clipped above at this multiple of the background (edge-1.6.2).  The ratio of two
+    speckle patterns that do not match (moving or saturating speckle) has a heavy upper tail:
+    bright grains over dark reference grains, 3-7 x the background, which the smoothing spreads
+    into a texture of 0.17-0.23 around bubbles of R 80-150 (Jin 2026-11-16 recordings: snr
+    0.23-0.39, no circle shown) though they carry no step a dark bubble's wall could be confused
+    with.  The image itself and the choice of the smoothing are unchanged, so a recording without
+    such values is unchanged bit for bit.  Calibrated: at 2.5 three lic_hard/07 frames labelled
+    "no correct circle" reach 0.30-0.31; at 3.0 ten Jin 14:37:03 peak frames stay below 0.3.
+    Without a reference the image is the frame itself, whose bright grains are the speckle a bubble
+    must stand out from: not clipped (2026-11-16 17:26:22, a shot without a bubble, showed 30
+    circles on darker speckle when it was)."""
     wall_texture_ring: tuple[float, float] = (1.1, 1.5)
     """The snr term's noise is the background texture over the whole ROI or, when lower, the
     same texture in this ring (multiples of the measured radius) just outside the bubble

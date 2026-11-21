@@ -9,7 +9,9 @@ float32 on the full-bit-depth data.
 The background level of the ratio ``I / B_ref`` (the gain, and the anchor of the
 residual surface's dark thresholds) is its median, unless the median is in shadow
 (:func:`background_level`): a bubble filling most of the ROI puts the median inside
-the bubble, so the bright-side level is used instead (edge-1.6.0).
+the bubble, so the bright-side level is used instead (edge-1.6.0; since edge-1.6.2 a band
+symmetric in log around it, which the heavy upper tail of moving saturating speckle no
+longer drags up).
 
 No pixel is excluded for being dark or saturated in the reference frame (owner
 decision 2026-11-14): ``N`` holds the real ratio everywhere.  The only pixels
@@ -22,6 +24,7 @@ from dataclasses import dataclass
 
 import cv2
 import numpy as np
+from skimage.filters import threshold_otsu
 
 from bubbletrack.model.constants import UINT16_PACKED_DEPTHS
 from bubbletrack.model.edge.config import NormalizeConfig
@@ -157,25 +160,38 @@ def _shrink(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeConfig) -> tu
 
 
 def bright_level(y: np.ndarray, cfg: NormalizeConfig) -> float:
-    """Level of the bright part of *y*: the fixed point of ``L = median(y[y > frac * L])``.
+    """Level of the bright class of *y*: the median of its values within a band around itself.
 
-    ``frac`` is ``level_bright_frac``.  The search starts at the ``level_start_quantile`` of *y*;
-    the map is non-decreasing in ``L``, so the iterates move monotonically over a finite set
-    of values and stop exactly.  Values below ``frac * L`` (a shadow, a dark bubble) do not
-    move the result, however many there are, as long as the bright part reaches the start
-    quantile.  NaN for an empty *y*.
+    *y* is split in two classes by Otsu's threshold ``t`` on ``log y`` (a dark bubble or shadow,
+    and the background).  The level is the fixed point of ``L = median(y[(y > max(t, f L)) &
+    (y < L / f)])`` with ``f = level_bright_frac``, started at the median of the bright class:
+    a band symmetric in ``log y`` around ``L``, so neither a dark majority (below ``t`` and
+    ``f L``) nor the heavy upper tail of a frame / reference ratio in moving, saturating speckle
+    (bright grains over dark reference grains, 3-7 x the background) moves it (edge-1.6.2).
+    The map is non-decreasing in ``L``, so the iterates move monotonically over a finite set of
+    values and stop exactly.  NaN for an empty *y*.
     """
     y = y[np.isfinite(y)]
     if y.size == 0:
         return float("nan")
-    level = float(np.quantile(y, cfg.level_start_quantile))
+    split = _log_otsu(y)
+    level = float(np.median(y[y >= split]))
+    frac = cfg.level_bright_frac
     for _ in range(_LEVEL_MAX_STEPS):
-        bright = y[y > cfg.level_bright_frac * level]
-        new = float(np.median(bright)) if bright.size else level
+        band = y[(y > max(split, frac * level)) & (y < level / frac)]
+        new = float(np.median(band)) if band.size else level
         if new == level:
             break
         level = new
     return level
+
+
+def _log_otsu(y: np.ndarray) -> float:
+    """Otsu's threshold between the dark and the bright class of positive-ish *y*, on ``log y``."""
+    logs = np.log(np.maximum(y, _EPS))
+    if not np.ptp(logs) > 0:
+        return float(y.min())
+    return float(np.exp(threshold_otsu(logs)))
 
 
 def background_level(y: np.ndarray, cfg: NormalizeConfig) -> tuple[float, bool]:
@@ -204,7 +220,10 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
     the rejection band is so wide that a big dark bubble would otherwise be re-admitted
     and lifted to the background level.  The anchor must be a background value: with
     *shadow_aware* it is :func:`background_level`, which stays out of a bubble that
-    covers most of the image.
+    covers most of the image.  When that bubble does (the anchor is the bright-side level),
+    every polynomial fit is held within a factor ``bg_shadow_span`` of the anchor: fitted on
+    a thin rim of moving speckle, the cubic swung to 0 or below across the bubble and the ROI
+    corners (edge-1.6.2; Jin 2026-11-16 14:37:03 frames 20-55: residual from -1.2 to 2.9).
 
     Parameters
     ----------
@@ -215,7 +234,8 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
     cfg : NormalizeConfig
     shadow_aware : bool
         The dark thresholds are anchored on :func:`background_level` instead of the plain
-        median (for a frame / reference ratio, whose background is its bright part).
+        median (for a frame / reference ratio, whose background is its bright part), and the
+        surface is bounded around it when that level is the bright-side one.
 
     Returns
     -------
@@ -231,7 +251,7 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
     keep = ~ex_s.ravel()
     if not keep.any():
         keep = np.ones_like(keep)
-    med = background_level(y[keep], cfg)[0] if shadow_aware else float(np.median(y[keep]))
+    med, shadowed = background_level(y[keep], cfg) if shadow_aware else (float(np.median(y[keep])), False)
     keep &= y > cfg.bg_dark_start * med
     clearly_dark = y <= cfg.bg_dark_hold * med
     surface = np.full(small.shape, med, np.float32)
@@ -241,6 +261,8 @@ def estimate_background(values: np.ndarray, exclude: np.ndarray, cfg: NormalizeC
             break
         coef, *_ = np.linalg.lstsq(terms[keep], y[keep], rcond=None)
         surface = (terms @ coef).reshape(small.shape).astype(np.float32)
+        if shadowed:  # the cubic spans a bubble covering most of the ROI from a thin rim of background
+            surface = np.clip(surface, med / cfg.bg_shadow_span, med * cfg.bg_shadow_span)
         res = small / np.maximum(surface, _EPS) - 1.0
         r_in = res.ravel()[keep]
         sig = 1.4826 * float(np.median(np.abs(r_in - np.median(r_in))))

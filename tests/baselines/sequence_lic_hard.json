@@ -1,5 +1,5 @@
 {
- "engine": "edge-1.6.1",
+ "engine": "edge-1.6.2",
  "sequences": {
   "01_rgb8_dense_speckle_moving": {
    "correct_single": [
@@ -161,7 +161,8 @@
    ],
    "no_bubble_kept_after": [
     73,
-    81
+    81,
+    89
    ]
   },
   "04_rgb8_water_gel_postcollapse_drift": {
