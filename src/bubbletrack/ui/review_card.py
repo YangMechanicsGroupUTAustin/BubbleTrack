@@ -15,6 +15,14 @@ The card shows; ReviewController decides (``Advice`` picks the filled
 button, or none when there is nothing to do).  Accept all names the real
 number it stores (the row's frames recommended for Accept).  A row before
 the bubble shows "No bubble on all N" in Accept all's place, filled.
+
+The buttons never move under the pointer (users click Accept many times in
+a row).  The list above stretches, so the card sits on the feedback line:
+everything below the buttons keeps its height whatever it shows.  A hidden
+button keeps its slot (Fix never slides into Accept's place), the row line
+keeps its height without a row, both looks of a button are the same size,
+and the feedback line is always ``FEEDBACK_LINES`` lines tall.  Only while
+a fix runs do the buttons step aside.
 """
 
 from __future__ import annotations
@@ -22,15 +30,17 @@ from __future__ import annotations
 import html
 from typing import NamedTuple
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QToolButton, QVBoxLayout,
     QWidget,
 )
 
+from bubbletrack.ui.lines_label import LinesLabel
 from bubbletrack.ui.review_text import SHOW
 
 FRAME_ACTIONS = ("accept", "fix", "no_bubble")
+FEEDBACK_LINES = 2  # the feedback line's height in text lines, kept while it is empty
 
 
 class CardAdvice(NamedTuple):
@@ -63,6 +73,14 @@ _DIM, _FAINT, _OK, _LINK = "#a1a1aa", "#71717a", "#34d399", "#818cf8"
 _TEXT_PAD, _KEY_GAP = 20, 16  # px: the button's left padding; text-to-key gap + right margin
 
 
+def keep_slot(widget: QWidget, keep: bool) -> None:
+    """While hidden, *widget* keeps its room in the layout (*keep*) or gives it up."""
+    policy = widget.sizePolicy()
+    if policy.retainSizeWhenHidden() != keep:
+        policy.setRetainSizeWhenHidden(keep)
+        widget.setSizePolicy(policy)
+
+
 class ActionButton(QPushButton):
     """A full-width action with its key at the right; filled when recommended."""
 
@@ -84,8 +102,11 @@ class ActionButton(QPushButton):
             return
         self._primary = on
         self.setObjectName("" if on else "secondaryBtn")  # the app stylesheet's two looks
+        # The filled look gets the outline's 1 px border (unseen): both looks
+        # are the same height, so the buttons below never shift.
+        border = " border: 1px solid transparent;" if on else ""
         self.setStyleSheet("QPushButton { text-align: left; padding: 3px 10px; "
-                           "min-height: 24px; }")
+                           f"min-height: 24px;{border} }}")
         self.style().unpolish(self)
         self.style().polish(self)
         colour = "rgba(255, 255, 255, 0.70)" if on else _FAINT
@@ -229,35 +250,51 @@ class ReviewCard(QWidget):
         self._show_actions()
 
     def _show_actions(self) -> None:
-        on, rows = not self._fixing, self._row_count
-        for action in FRAME_ACTIONS:
-            self.buttons[action].setVisible(on)
+        on, rows, buttons = not self._fixing, self._row_count, self.buttons
+        shown: dict[QWidget, bool] = {buttons[action]: on for action in FRAME_ACTIONS}
         # Nothing to accept on an empty frame (A only says so: Fix or No bubble
         # decide), nor on a settled one.
-        self.buttons["accept"].setVisible(on and self._can_accept)
-        self.buttons["accept_all"].setVisible(on and rows > 1 and self._accept_count > 0
-                                              and not self._mark_row)
-        self.buttons["no_bubble_all"].setVisible(on and self._mark_row)
-        self.more.setVisible(on and rows > 0)
+        shown[buttons["accept"]] = on and self._can_accept
+        shown[buttons["accept_all"]] = (on and rows > 1 and self._accept_count > 0
+                                        and not self._mark_row)
+        shown[buttons["no_bubble_all"]] = on and self._mark_row
+        shown[self.more] = on and rows > 0
+        # Hidden, they keep their slots (No bubble on all takes Accept all's),
+        # so no button moves; during a fix they all step aside.
+        keep_slot(buttons["accept"], on)
+        keep_slot(buttons["accept_all"], on and not self._mark_row)
+        keep_slot(self.more, on)
+        # Hide first: showing lays the window out at once, and both row
+        # buttons shown together would widen the dock for a moment.
+        for widget, visible in sorted(shown.items(), key=lambda pair: pair[1]):
+            widget.setVisible(visible)
 
     def recommended(self) -> str | None:
         return next((a for a, b in self.buttons.items() if b.is_primary()), None)
 
 
 class FeedbackLine(QWidget):
-    """What the last action did, with Undo ('✓ Frame 124 accepted.  [Undo]')."""
+    """What the last action did, with Undo ('✓ Frame 124 accepted.  [Undo]').
+
+    Always ``FEEDBACK_LINES`` lines (or Undo) tall, shown or hidden, short
+    text or long: the card's buttons above it stay put.  A longer text ends
+    in '…' and shows whole in its tooltip.
+    """
 
     undo_requested = pyqtSignal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(0, 0, 0, 0)
-        self._text = QLabel()
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
+        keep_slot(self, True)
+        box = QVBoxLayout(self)
+        box.setContentsMargins(0, 0, 0, 0)
+        row = QHBoxLayout()
+        box.addLayout(row)
+        box.addStretch(1)  # the text and Undo sit at the top, as before
+        self._text = LinesLabel(FEEDBACK_LINES)
         self._text.setObjectName("reviewFeedback")
-        self._text.setWordWrap(True)
         self._text.setStyleSheet(f"color:{_OK}; font-size:11px;")
-        self._text.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         row.addWidget(self._text, 1)
         self._undo = QPushButton("Undo")
         self._undo.setObjectName("secondaryBtn")
@@ -267,25 +304,38 @@ class FeedbackLine(QWidget):
         row.addWidget(self._undo, 0, Qt.AlignmentFlag.AlignTop)
         self.clear()
 
+    def sizeHint(self) -> QSize:  # noqa: N802  (Qt's name)
+        return QSize(super().sizeHint().width(), self._height())
+
+    def minimumSizeHint(self) -> QSize:  # noqa: N802  (Qt's name)
+        return QSize(super().minimumSizeHint().width(), self._height())
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802  (Qt's name)
+        return False  # the same height at every width and for every text
+
+    def _height(self) -> int:
+        return max(self._text.lines_height(), self._undo.sizeHint().height())
+
     def show_text(self, text: str, *, undo: bool = True) -> None:
         self._text.setStyleSheet(f"color:{_OK}; font-size:11px;")
-        self._text.setText(f"✓ {text}")
         self._undo.setVisible(undo)
+        self._text.set_full_text(f"✓ {text}")
         self.show()
 
     def show_hint(self, text: str) -> None:
         """A note, not a result: nothing was done, nothing to undo."""
         self._text.setStyleSheet(f"color:{_DIM}; font-size:11px;")
-        self._text.setText(text)
         self._undo.hide()
+        self._text.set_full_text(text)
         self.show()
 
     def clear(self) -> None:
-        self._text.setText("")
+        self._text.set_full_text("")
         self.hide()
 
     def text(self) -> str:
-        return self._text.text()
+        """The whole text (the line may show it cut, ending in '…')."""
+        return self._text.full_text()
 
     def offers_undo(self) -> bool:
         return not self.isHidden() and not self._undo.isHidden()
