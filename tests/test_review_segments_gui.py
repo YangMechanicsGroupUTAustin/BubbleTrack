@@ -380,7 +380,8 @@ class TestKeysAndFilter:
         rc.panel.step(1)
         rc.perform("accept")
         assert page.text() == "All done — 1 checked" and page.offers_export()
-        assert rc.panel.card.isHidden() and rc.panel._summary.isHidden()  # A5: one summary
+        assert rc.panel._summary.isHidden()  # A5: one summary (the frame card stays below)
+        assert rc.panel.card.isVisibleTo(rc.panel) and rc.panel.card.recommended() is None
 
     def test_clicking_the_selected_row_goes_back_to_its_first_frame(self, review):
         _, controller, rc = review

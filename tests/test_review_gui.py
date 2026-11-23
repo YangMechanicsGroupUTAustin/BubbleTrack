@@ -284,7 +284,8 @@ class TestCardAndFeedback:
         page = rc.panel.done_page
         assert page.text() == "All done — 2 checked" and page.offers_export()
         assert rc.panel.feedback.text() == "✓ Frame 6 accepted and locked."  # Undo stays
-        assert rc.panel.card.isHidden()  # A5: no frame card under "All done"
+        card = rc.panel.card  # under "All done" the frame card stays, nothing filled
+        assert card.isVisibleTo(rc.panel) and card.recommended() is None
         exported = []
         window.export_requested.disconnect()  # not the real (modal) Export Results dialog
         window.export_requested.connect(lambda: exported.append(1))

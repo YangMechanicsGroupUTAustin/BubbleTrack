@@ -10,7 +10,8 @@
     ✓ Frame 124 accepted.                   [Undo]
 
 The row's tooltip says what its dot colour means.  Once nothing is left,
-the done page takes the list's place, without the card.
+the done page takes the list's place; after a fit the card of the frame
+on screen stays below it, no button filled, its buttons where they were.
 """
 
 from __future__ import annotations
@@ -220,10 +221,11 @@ class ReviewPanel(QWidget):
     def refresh_card(self) -> None:
         """Re-ask the advisor (e.g. after the frame's result changed).
 
-        The card shows after a fit while frames are listed; the done page
-        stands alone."""
+        The card shows once a fit exists.  With nothing left to check it
+        stays under the done page, no button filled: Fix is still at hand
+        for a frame Auto measured without a flag."""
         frame, segment = self._shown, self.current_segment()
-        on = frame is not None and bool(self._images) and self._fitted and bool(self._all)
+        on = frame is not None and bool(self._images) and self._fitted
         self.card.setVisible(on)
         if not on:
             return
@@ -231,6 +233,8 @@ class ReviewPanel(QWidget):
         item = self._items.get(frame)  # may be of another type than the row
         advice = (self._advisor(frame, item) if self._advisor is not None
                   else CardAdvice("", "accept"))
+        if not self._all:  # all done: nothing to recommend
+            advice = advice._replace(action="")
         self.card.show_frame(
             frame_title(frame, self._images),
             position_text(segment) if segment is not None else "", advice,

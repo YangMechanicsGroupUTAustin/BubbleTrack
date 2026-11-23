@@ -142,7 +142,8 @@ class TestHeaderAndList:
         page = rc.panel.done_page
         assert page.text() == "All done — 7 checked, 1 skipped (Frame 4: show)"
         assert page.offers_show_skipped() and page.offers_export()
-        assert rc.panel.card.isHidden()  # A5: the done page stands alone
+        assert rc.panel.card.isVisibleTo(rc.panel)  # the frame card stays below
+        assert rc.panel.card.recommended() is None
         rc.panel.show_skipped_requested.emit()  # "show": the skipped frame comes back
         assert rc.panel.frames() == [3] and controller._get_state().image_no == 3
         assert rc.panel.card.isVisibleTo(rc.panel)
