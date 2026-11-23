@@ -1,24 +1,20 @@
-"""Annotation layers of the R(t) chart: cursor, Rmax window, selection, and
-the span of the selected Review row.
+"""Annotation layers of the R(t) chart: cursor, Rmax fit window, selection,
+and the span of the selected Review row.
 
 All positions are on the chart's x axis, which is the 1-based frame number.
+Rmax itself (t = 0) is not drawn: the owner asked for no line there.
 """
 
 from __future__ import annotations
 
 import numpy as np
 import pyqtgraph as pg
-from PyQt6.QtCore import Qt
 
 CURSOR_PEN = pg.mkPen(228, 228, 231, 150, width=1)
 RMAX_BAND_BRUSH = pg.mkBrush(165, 180, 252, 28)
-RMAX_LINE_PEN = pg.mkPen("#a5b4fc", width=1.5, style=Qt.PenStyle.DashLine)
 SELECTION_BRUSH = pg.mkBrush(99, 102, 241, 55)
 SELECTION_PEN = pg.mkPen(129, 140, 248, 200, width=1)
 REVIEW_SPAN_BRUSH = pg.mkBrush(228, 228, 231, 26)  # the selected Review row, unframed
-# Label positions run along the line from the bottom (0) to the top (1) of the view.
-# Rmax sits high on the curve, so its label goes low.
-BOTTOM_LABEL = {"position": 0.03, "color": "#c7d2fe", "anchors": [(0, 1), (0, 1)]}
 
 
 def frames_in_span(x0: float, x1: float, total: int) -> tuple[int, int] | None:
@@ -53,14 +49,7 @@ class ChartOverlays:
         self.rmax_band.setZValue(-20)
         self.rmax_band.hide()
         plot_item.addItem(self.rmax_band, ignoreBounds=True)
-
-        self.rmax_line = pg.InfiniteLine(
-            angle=90, movable=False, pen=RMAX_LINE_PEN,
-            label="t = 0 (Rmax)", labelOpts=BOTTOM_LABEL,
-        )
-        self.rmax_line.setZValue(-4)
-        self.rmax_line.hide()
-        plot_item.addItem(self.rmax_line, ignoreBounds=True)
+        self._rmax: float | None = None  # t = 0 (1-based frame), kept but not drawn
 
         self.selection = pg.LinearRegionItem(
             values=(0, 1), movable=False, brush=SELECTION_BRUSH, pen=SELECTION_PEN,
@@ -90,12 +79,12 @@ class ChartOverlays:
 
     def set_rmax(self, frame_1based: float | None, lo: int | None = None,
                  hi: int | None = None) -> None:
+        """Keep t = 0 at Rmax and shade the inclusive fit window [lo, hi]."""
         if frame_1based is None or not np.isfinite(frame_1based):
+            self._rmax = None
             self.rmax_band.hide()
-            self.rmax_line.hide()
             return
-        self.rmax_line.setValue(float(frame_1based))
-        self.rmax_line.show()
+        self._rmax = float(frame_1based)
         if lo is None or hi is None:
             self.rmax_band.hide()
             return
@@ -103,11 +92,11 @@ class ChartOverlays:
         self.rmax_band.show()
 
     def rmax_info(self) -> tuple[float, tuple[float, float] | None] | None:
-        """(t=0 position, band region or None) while shown; None otherwise."""
-        if not self.rmax_line.isVisible():
+        """(t=0 position, band region or None) while Rmax is known; None otherwise."""
+        if self._rmax is None:
             return None
         band = tuple(self.rmax_band.getRegion()) if self.rmax_band.isVisible() else None
-        return float(self.rmax_line.value()), band
+        return self._rmax, band
 
     # -- range selection --------------------------------------------------- #
 

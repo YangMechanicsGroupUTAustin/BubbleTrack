@@ -213,8 +213,8 @@ class RadiusChart(QWidget):
 
     def set_rmax_info(self, frame_1based: float | None, window_lo: int | None = None,
                       window_hi: int | None = None) -> None:
-        """Mark t = 0 at Rmax (*frame_1based*, may be fractional) and shade the
-        inclusive 1-based fit window; ``None`` removes both."""
+        """Keep t = 0 at Rmax (*frame_1based*, may be fractional; not drawn) and
+        shade the inclusive 1-based fit window; ``None`` removes both."""
         self._overlays.set_rmax(frame_1based, window_lo, window_hi)
 
     def rmax_info(self):

@@ -161,8 +161,20 @@ class TestAnnotations:
         t0, band = chart.rmax_info()
         assert t0 == pytest.approx(10.4)
         assert band == pytest.approx((5.5, 15.5))
+        assert chart._overlays.rmax_band.isVisible()
         chart.set_rmax_info(None)
         assert chart.rmax_info() is None
+        assert not chart._overlays.rmax_band.isVisible()
+
+    def test_no_line_marks_rmax(self, chart):
+        """The owner asked for no vertical dashed line at Rmax: the only vertical
+        line on the chart is the current-frame cursor."""
+        chart.plot_all(*_series(20))
+        chart.set_current_frame(4)
+        chart.set_rmax_info(10.4, 6, 15)
+        lines = [item for item in chart._plot.plotItem.items if isinstance(item, pg.InfiniteLine)]
+        assert lines == [chart._overlays.cursor]
+        assert not hasattr(chart._overlays, "rmax_line")
 
     def test_plot_series_raw_faint_solved_solid(self, chart):
         frames = np.arange(1, 6)
