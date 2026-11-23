@@ -156,25 +156,30 @@ class TestAnnotations:
         chart.set_current_frame(None)
         assert not chart._overlays.cursor.isVisible()
 
-    def test_rmax_band_and_t0(self, chart):
+    def test_rmax_window_and_t0_are_kept(self, chart):
         chart.set_rmax_info(10.4, 6, 15)
-        t0, band = chart.rmax_info()
+        t0, window = chart.rmax_info()
         assert t0 == pytest.approx(10.4)
-        assert band == pytest.approx((5.5, 15.5))
-        assert chart._overlays.rmax_band.isVisible()
+        assert window == pytest.approx((5.5, 15.5))
+        chart.set_rmax_info(10.4)
+        assert chart.rmax_info() == (pytest.approx(10.4), None)
         chart.set_rmax_info(None)
         assert chart.rmax_info() is None
-        assert not chart._overlays.rmax_band.isVisible()
 
-    def test_no_line_marks_rmax(self, chart):
-        """The owner asked for no vertical dashed line at Rmax: the only vertical
-        line on the chart is the current-frame cursor."""
+    def test_nothing_marks_rmax(self, chart):
+        """The owner asked for no vertical dashed line and no shaded band at Rmax:
+        the only vertical line is the current-frame cursor, and no shaded span shows."""
         chart.plot_all(*_series(20))
         chart.set_current_frame(4)
         chart.set_rmax_info(10.4, 6, 15)
-        lines = [item for item in chart._plot.plotItem.items if isinstance(item, pg.InfiniteLine)]
+        items = chart._plot.plotItem.items
+        lines = [item for item in items if isinstance(item, pg.InfiniteLine)]
         assert lines == [chart._overlays.cursor]
+        shaded = [item for item in items
+                  if isinstance(item, pg.LinearRegionItem) and item.isVisible()]
+        assert shaded == []
         assert not hasattr(chart._overlays, "rmax_line")
+        assert not hasattr(chart._overlays, "rmax_band")
 
     def test_plot_series_raw_faint_solved_solid(self, chart):
         frames = np.arange(1, 6)

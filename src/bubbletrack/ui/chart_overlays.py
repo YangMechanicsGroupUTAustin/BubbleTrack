@@ -1,8 +1,9 @@
-"""Annotation layers of the R(t) chart: cursor, Rmax fit window, selection,
-and the span of the selected Review row.
+"""Annotation layers of the R(t) chart: cursor, selection, and the span of
+the selected Review row.
 
 All positions are on the chart's x axis, which is the 1-based frame number.
-Rmax itself (t = 0) is not drawn: the owner asked for no line there.
+Rmax (t = 0) and its fit window are kept as data but not drawn: the owner
+asked for neither a line nor a shaded band there.
 """
 
 from __future__ import annotations
@@ -11,7 +12,6 @@ import numpy as np
 import pyqtgraph as pg
 
 CURSOR_PEN = pg.mkPen(228, 228, 231, 150, width=1)
-RMAX_BAND_BRUSH = pg.mkBrush(165, 180, 252, 28)
 SELECTION_BRUSH = pg.mkBrush(99, 102, 241, 55)
 SELECTION_PEN = pg.mkPen(129, 140, 248, 200, width=1)
 REVIEW_SPAN_BRUSH = pg.mkBrush(228, 228, 231, 26)  # the selected Review row, unframed
@@ -42,14 +42,9 @@ class ChartOverlays:
         self.cursor.hide()
         plot_item.addItem(self.cursor, ignoreBounds=True)
 
-        self.rmax_band = pg.LinearRegionItem(
-            values=(0, 1), movable=False, brush=RMAX_BAND_BRUSH,
-            pen=pg.mkPen(None),
-        )
-        self.rmax_band.setZValue(-20)
-        self.rmax_band.hide()
-        plot_item.addItem(self.rmax_band, ignoreBounds=True)
-        self._rmax: float | None = None  # t = 0 (1-based frame), kept but not drawn
+        # t = 0 (1-based frame) and its fit window's x span: kept, not drawn
+        self._rmax: float | None = None
+        self._rmax_window: tuple[float, float] | None = None
 
         self.selection = pg.LinearRegionItem(
             values=(0, 1), movable=False, brush=SELECTION_BRUSH, pen=SELECTION_PEN,
@@ -75,28 +70,23 @@ class ChartOverlays:
         self.cursor.setValue(frame_1based)
         self.cursor.show()
 
-    # -- Rmax fit window -------------------------------------------------- #
+    # -- Rmax (kept, not drawn) -------------------------------------------- #
 
     def set_rmax(self, frame_1based: float | None, lo: int | None = None,
                  hi: int | None = None) -> None:
-        """Keep t = 0 at Rmax and shade the inclusive fit window [lo, hi]."""
+        """Keep t = 0 at Rmax and the inclusive fit window [lo, hi]; nothing is drawn."""
         if frame_1based is None or not np.isfinite(frame_1based):
-            self._rmax = None
-            self.rmax_band.hide()
+            self._rmax, self._rmax_window = None, None
             return
         self._rmax = float(frame_1based)
-        if lo is None or hi is None:
-            self.rmax_band.hide()
-            return
-        self.rmax_band.setRegion((min(lo, hi) - 0.5, max(lo, hi) + 0.5))
-        self.rmax_band.show()
+        self._rmax_window = (None if lo is None or hi is None
+                             else (min(lo, hi) - 0.5, max(lo, hi) + 0.5))
 
     def rmax_info(self) -> tuple[float, tuple[float, float] | None] | None:
-        """(t=0 position, band region or None) while Rmax is known; None otherwise."""
+        """(t=0 position, fit window's x span or None) while Rmax is known; None otherwise."""
         if self._rmax is None:
             return None
-        band = tuple(self.rmax_band.getRegion()) if self.rmax_band.isVisible() else None
-        return self._rmax, band
+        return self._rmax, self._rmax_window
 
     # -- range selection --------------------------------------------------- #
 
