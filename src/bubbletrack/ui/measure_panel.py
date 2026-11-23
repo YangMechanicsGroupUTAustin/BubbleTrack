@@ -1,9 +1,9 @@
 """Measuring settings of the side panel: the Auto box, classic methods on request.
 
-Auto (reference frame) is the method.  The Method selector and the classic
-methods' controls appear only when Settings > "Classic detection methods" is
-on, or when the loaded parameters use a classic method (so nobody is stuck
-with a method whose controls are hidden).
+Auto (reference frame) is the method.  The Method selector appears only by
+``method_row_shown``: when Settings > "Classic detection methods" is on, or
+while a classic method is in use (so nobody is stuck with a method whose
+controls are hidden); the classic controls appear with a classic method.
 """
 
 from __future__ import annotations
@@ -49,6 +49,13 @@ _PRESET_SETTING = {"threshold": "img_thr", "edge_flags": "bubble_cross_edges"}
 
 def is_classic(mode: str) -> bool:
     return mode in CLASSIC_METHODS
+
+
+def method_row_shown(classic_on: bool, mode: str) -> bool:
+    """The Method selector's one rule: shown when Settings shows classic methods,
+    or while a classic method is in use (e.g. from an older session); with the
+    setting off it hides the moment the method becomes Auto."""
+    return bool(classic_on) or is_classic(mode)
 
 
 def _checked_preset(preset: dict) -> dict:
@@ -105,7 +112,7 @@ class MeasurePanel(QWidget):
         layout.addWidget(self.classic_section)
         self._relay_classic_signals()
 
-        self._classic_allowed = False
+        self._classic_on = False  # Settings > "Classic detection methods"
         self._apply_visibility()
 
     def _relay_classic_signals(self) -> None:
@@ -124,13 +131,21 @@ class MeasurePanel(QWidget):
     def method(self) -> str:
         return self._method_combo.currentData()
 
+    def set_method(self, mode: str) -> None:
+        """Choose *mode* as if picked in the selector (``filters_changed`` follows)."""
+        index = self._method_combo.findData(mode)
+        if index < 0:
+            raise ValueError(f"unknown detection mode {mode!r}")
+        self._method_combo.setCurrentIndex(index)
+
     def set_classic_methods_visible(self, visible: bool) -> None:
-        """Offer the Method selector (and the classic controls of a classic method)."""
-        self._classic_allowed = bool(visible)
+        """Settings > "Classic detection methods" (see ``method_row_shown``)."""
+        self._classic_on = bool(visible)
         self._apply_visibility()
 
     def classic_methods_visible(self) -> bool:
-        return self._classic_allowed
+        """True while the Method selector is offered."""
+        return method_row_shown(self._classic_on, self.method())
 
     def _on_method_changed(self, _index: int) -> None:
         self._apply_visibility()
@@ -138,7 +153,7 @@ class MeasurePanel(QWidget):
 
     def _apply_visibility(self) -> None:
         mode = self.method()
-        self.method_row.setVisible(self._classic_allowed)
+        self.method_row.setVisible(method_row_shown(self._classic_on, mode))
         self.edge_box.setVisible(mode == AUTO_METHOD)
         self.classic_section.setVisible(is_classic(mode))
         self.classic.apply_method(mode)

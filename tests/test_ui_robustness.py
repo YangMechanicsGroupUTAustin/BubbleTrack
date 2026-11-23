@@ -100,11 +100,12 @@ def test_leaving_a_classic_method_hides_the_selector(gui, make_sequence):
     window, controller = gui
     controller.file_ctrl.on_folder_selected(str(make_sequence("a", 4)))
     panel = window.left_panel.measure_panel
+    # A loaded older session sets a classic method (Settings' switch is off)
     controller._set_state(update_state(controller._get_state(), detection_mode="gradient"))
-    controller.settings.apply_classic()
+    controller._sync_ui_from_state()
     assert panel.classic_methods_visible()
-    panel.set_filter_params({**panel.get_filter_params(), "detection_mode": "edge"})
-    panel.filters_changed.emit()
+    panel.set_method("edge")
+    assert controller._get_state().detection_mode == "edge"
     assert not panel.classic_methods_visible()
 
 

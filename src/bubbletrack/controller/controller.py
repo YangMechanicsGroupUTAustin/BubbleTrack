@@ -224,8 +224,6 @@ class AppController:
         mp.edges_changed.connect(self.pretune_ctrl.on_edges_changed)
         mp.autotune_clicked.connect(self.pretune_ctrl.on_autotune)
         mp.filters_changed.connect(self.pretune_ctrl.on_filters_changed)
-        # Leaving a classic method hides the selector again (unless Settings shows it)
-        mp.filters_changed.connect(lambda: self.settings.apply_classic())
 
         # Clicks on the image: edge points of Review's Fix, or the seed pick
         self.w.original_panel.point_clicked.connect(self.manual_ctrl.on_point_clicked)
@@ -304,9 +302,8 @@ class AppController:
             "edge_definition": self._state.edge_definition,
             "edge_polarity": self._state.edge_polarity,
             "bubble_non_round": self._state.bubble_non_round,
-        })
+        })  # the panel shows the Method selector while a classic method is in use
         self.pretune_ctrl.refresh_edge_labels()
-        self.settings.apply_classic()  # a classic method keeps its controls in view
 
     def _on_roi_selected(self, r0: int, r1: int, c0: int, c1: int) -> None:
         if self._run_locked:
