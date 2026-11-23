@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import numpy as np
 import pytest
+from PyQt6.QtGui import QImage
 from PyQt6.QtWidgets import QPushButton
 
 from _golden_cases import SceneSpec, render_scene
@@ -126,6 +127,63 @@ def test_bubble_free_frame_is_used_without_a_question(gui, make_sequence, asked,
     _box(window).use_current_reference_clicked.emit()
     assert asked == [] and controller._get_state().reference_frame == 1
     assert _status(window) == "Reference: frame 2"
+
+
+# -- a new reference: the Auto view follows, results say to fit again ------------ #
+
+def _right_panel(window) -> np.ndarray:
+    """The right panel's pixels (the Auto view: this frame / the reference)."""
+    image = window.binary_panel._pixmap_item.pixmap().toImage()
+    image = image.convertToFormat(QImage.Format.Format_Grayscale8)
+    bits = image.constBits()
+    bits.setsize(image.sizeInBytes())
+    rows = np.frombuffer(bits, np.uint8).reshape(image.height(), image.bytesPerLine())
+    return rows[:, :image.width()].copy()
+
+
+@pytest.fixture
+def auto_reference_frame_1(monkeypatch):
+    """Auto picks frame 1 and no frame seems to hold a bubble (no question)."""
+    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n: 0)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: False)
+
+
+def test_a_new_reference_redraws_the_auto_view_at_once(gui, make_sequence, auto_reference_frame_1):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
+    controller.file_ctrl.on_frame_changed(3)
+    with_frame_1 = _right_panel(window)
+    _box(window).use_current_reference_clicked.emit()  # frame 4 / frame 4, no navigation
+    with_frame_4 = _right_panel(window)
+    assert not np.array_equal(with_frame_4, with_frame_1)
+    controller.file_ctrl.on_frame_changed(2)
+    controller.file_ctrl.on_frame_changed(3)
+    np.testing.assert_array_equal(_right_panel(window), with_frame_4)  # what navigating shows
+    _box(window).auto_reference_clicked.emit()  # back to Auto (frame 1)
+    np.testing.assert_array_equal(_right_panel(window), with_frame_1)
+
+
+def test_a_new_reference_with_results_says_fit_again(gui, make_sequence, auto_reference_frame_1):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
+    radius = controller._get_state().radius
+    radius[:] = 30.0
+    controller.file_ctrl.on_frame_changed(3)
+    _box(window).use_current_reference_clicked.emit()
+    assert _status(window) == "Reference: frame 4" + edge_setup.FIT_AGAIN
+    _box(window).auto_reference_clicked.emit()
+    assert _status(window) == "Reference: auto" + edge_setup.FIT_AGAIN
+    np.testing.assert_array_equal(controller._get_state().radius, 30.0)  # nothing refitted
+
+
+def test_the_same_reference_chosen_by_hand_needs_no_new_fit(gui, make_sequence,
+                                                            auto_reference_frame_1):
+    window, controller = gui
+    controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
+    controller._get_state().radius[:] = 30.0
+    controller.file_ctrl.on_frame_changed(0)  # the frame Auto already uses
+    _box(window).use_current_reference_clicked.emit()
+    assert _status(window) == "Reference: frame 1"
 
 
 def test_the_question_names_the_frame_and_defaults_to_cancel(qapp):

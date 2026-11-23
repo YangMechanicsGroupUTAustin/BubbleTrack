@@ -49,7 +49,7 @@ class PretuneController(BaseController):
         # Auto-tune worker (lazy import to avoid circular dependency)
         self._autotune_worker = None
         self._autotune_target: tuple | None = None  # (frame, ROI) the running tune is for
-        self.edge_setup = EdgeSetup(bus, get_state, set_state, window)
+        self.edge_setup = EdgeSetup(bus, get_state, set_state, window, cache)
         # A tune of the previous recording must never land on the new one
         bus.subscribe(SOURCE_LOADED, lambda _n: self._cancel_autotune())
 

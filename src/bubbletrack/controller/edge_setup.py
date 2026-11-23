@@ -2,10 +2,11 @@
 
 A reference must be bubble-free: "Use this frame" runs the same test the
 automatic choice applies to its candidates (``edge_pipeline.frame_has_bubble``)
-and asks before accepting a frame that seems to hold a bubble.
+and asks before accepting a frame that seems to hold a bubble.  A new
+reference redraws the frame on screen (the Auto view divides by it).
 
-"Bubble may be non-round" (Advanced) changes the radius definition of the next
-fit only: results already measured keep theirs, so the header says to fit again.
+A new reference and "Bubble may be non-round" (Advanced) apply to the next fit
+only: results already measured keep theirs, so the header says to fit again.
 """
 
 from __future__ import annotations
@@ -13,13 +14,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 
-import numpy as np
 from PyQt6.QtWidgets import QMessageBox
 
 from bubbletrack.controller import edge_support
 from bubbletrack.controller.base import BaseController
-from bubbletrack.controller.display_mixin import current_source
+from bubbletrack.controller.display_mixin import current_source, display_frame
+from bubbletrack.controller.session_controller import has_results
 from bubbletrack.model import edge_pipeline
+from bubbletrack.model.cache import ImageCache
 from bubbletrack.model.state import AppState
 from bubbletrack.ui.edge_options import AUTO_POSITION_TEXT
 
@@ -101,8 +103,10 @@ def ask_bubble_reference(parent, frame_no: int) -> bool:
 class EdgeSetup(BaseController):
     """Reference frame and bubble position of the Auto box."""
 
-    def __init__(self, bus, get_state, set_state, window) -> None:
+    def __init__(self, bus, get_state, set_state, window,
+                 cache: ImageCache | None = None) -> None:
         super().__init__(bus, get_state, set_state, window)
+        self._cache = cache  # the frame cache, for redrawing the frame on screen
         # (parent, 1-based frame) -> use it anyway; None asks with a message box.
         self.ask_bubble_reference: Callable[[object, int], bool] | None = None
         self.picking_seed = False
@@ -131,16 +135,38 @@ class EdgeSetup(BaseController):
         if bubble and not ask(self.w, idx + 1):
             self.w.header.set_status(f"Reference unchanged: frame {idx + 1} was not used", _DIM)
             return
-        self._update(reference_frame=idx)
-        self.refresh_labels()
         if bubble:
-            self.w.header.set_status(f"Reference: frame {idx + 1} (it seems to hold a bubble)", _WARN)
+            status = f"Reference: frame {idx + 1} (it seems to hold a bubble)", _WARN
         else:
-            self.w.header.set_status(f"Reference: frame {idx + 1}", _OK)
+            status = f"Reference: frame {idx + 1}", _OK
+        self._set_reference(idx, status)
 
     def use_auto(self) -> None:
-        self._update(reference_frame=None)
+        self._set_reference(None)
+
+    def _set_reference(self, frame: int | None, status: tuple[str, str] | None = None) -> None:
+        """Make *frame* (None: automatic) the reference and redraw the frame on screen.
+
+        *status* is the header line; when the reference changed and results
+        exist, the line says they were measured with the previous one.
+        """
+        before = self._reference_index()
+        self._update(reference_frame=frame)
         self.refresh_labels()
+        display_frame(self.state, self.w, self.state.image_no, self._set_state, self._cache)
+        if before != self._reference_index() and has_results(self.state):
+            text = status[0] if status is not None else "Reference: auto"
+            self.w.header.set_status(text + FIT_AGAIN, _WARN)
+        elif status is not None:
+            self.w.header.set_status(*status)
+
+    def _reference_index(self) -> int | None:
+        """The frame Auto divides by now (None: none, or it cannot be read)."""
+        try:
+            return edge_support.reference_index(self.state) if self.state.images else None
+        except Exception as exc:  # noqa: BLE001 - unreadable frames are reported by the labels
+            logger.warning("Reference frame unavailable: %s", exc)
+            return None
 
     # -- bubble position ------------------------------------------------------ #
 
@@ -171,7 +197,6 @@ class EdgeSetup(BaseController):
     def announce_definition(self) -> None:
         """After "Bubble may be non-round" changed: say which radius the next fit measures,
         and that measured results keep theirs until fitted again (nothing is refitted)."""
-        radius = self.state.radius
-        fitted = radius is not None and bool(np.any(np.asarray(radius) > 0))
+        fitted = has_results(self.state)
         self.w.header.set_status(non_round_status(self.state.bubble_non_round, fitted),
                                  _WARN if fitted else _OK)
