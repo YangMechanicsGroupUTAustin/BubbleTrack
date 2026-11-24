@@ -49,7 +49,8 @@ _first_frame_bubble: dict[tuple, bool] = {}
 def holds_bubble(state: AppState, idx: int) -> bool:
     """True when frame *idx* seems to contain a bubble (False if it cannot be read)."""
     try:
-        return edge_pipeline.frame_has_bubble(edge_pipeline.read_raw(current_source(state, idx)))
+        return edge_pipeline.frame_has_bubble(edge_pipeline.read_raw(current_source(state, idx)),
+                                              black_level=edge_support.black_level(state))
     except Exception as exc:  # noqa: BLE001 - an unreadable frame is reported elsewhere
         logger.warning("Bubble check of frame %d failed: %s", idx + 1, exc)
         return False

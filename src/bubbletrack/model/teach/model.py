@@ -84,12 +84,15 @@ class MLModel:
     quantiles: np.ndarray
     """(Q, F) training quantiles of every feature (novelty check)."""
     info: TrainInfo
+    black_level: float = 0.0
+    """The recording's black level, removed from every frame as Auto does."""
 
     def features(self, raw: np.ndarray) -> FeatureStack:
         shape = to_gray_frame(raw).values.shape
         if shape != self.frame_shape:
             raise ValueError(f"frame shape {shape} differs from the training frames {self.frame_shape}")
         return compute_features(raw, self.gridx, self.gridy, reference=self.reference,
+                                black_level=self.black_level,
                                 config=self.config.features)
 
     def predict(self, raw: np.ndarray) -> Prediction:
@@ -127,10 +130,11 @@ def _predict_chunks(forest, x: np.ndarray, n_jobs: int) -> np.ndarray:
 
 
 def _frame_samples(examples: MLExamples, frame: int, raw: np.ndarray, shape: tuple[int, int], gx, gy,
-                   reference, cfg: MLConfig,
+                   reference, black_level: float, cfg: MLConfig,
                    rng: np.random.Generator) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """(bubble features, background features, range sample) of one example frame."""
-    stack = compute_features(raw, gx, gy, reference=reference, config=cfg.features)
+    stack = compute_features(raw, gx, gy, reference=reference, black_level=black_level,
+                             config=cfg.features)
     grid = stack.values
     origin = np.array([gx[0] - 1, gy[0] - 1])
     out = []
@@ -149,7 +153,8 @@ def _cap(rng: np.random.Generator, x: np.ndarray, n: int) -> np.ndarray:
 
 
 def train_model(examples: MLExamples, read_frame: Callable[[int], np.ndarray], gridx, gridy, *,
-                reference: np.ndarray | None = None, config: MLConfig = MLConfig()) -> MLModel:
+                reference: np.ndarray | None = None, black_level: float = 0.0,
+                config: MLConfig = MLConfig()) -> MLModel:
     """Train the pixel classifier on every frame that has examples.
 
     Parameters
@@ -161,6 +166,8 @@ def train_model(examples: MLExamples, read_frame: Callable[[int], np.ndarray], g
         1-based inclusive ROI bounds (the model measures inside this ROI only).
     reference : ndarray, optional
         The bubble-free reference frame (the "view" channel uses it).
+    black_level : float
+        The recording's black level (``edge_pipeline.recording_black_level``).
     config : MLConfig
 
     Raises
@@ -183,7 +190,8 @@ def train_model(examples: MLExamples, read_frame: Callable[[int], np.ndarray], g
             gx, gy = roi_bounds(gridx, gridy, shape)
         elif shape != frame_shape:
             raise MLError(f"frame {frame} has shape {shape}, expected {frame_shape}")
-        b, g, s = _frame_samples(examples, frame, raw, shape, gx, gy, reference, config, rng)
+        b, g, s = _frame_samples(examples, frame, raw, shape, gx, gy, reference, black_level,
+                                 config, rng)
         pos.append(b)
         neg.append(g)
         samples.append(s)
@@ -202,4 +210,4 @@ def train_model(examples: MLExamples, read_frame: Callable[[int], np.ndarray], g
                      n_features=x.shape[1], train_ms=(time.perf_counter() - t0) * 1e3)
     ref = None if reference is None else np.array(reference, copy=True)
     return MLModel(forest=forest, config=config, gridx=gx, gridy=gy, frame_shape=frame_shape,
-                   reference=ref, quantiles=quantiles, info=info)
+                   reference=ref, quantiles=quantiles, info=info, black_level=float(black_level))

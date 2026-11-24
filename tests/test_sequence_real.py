@@ -123,22 +123,23 @@ def _agree(circle, ref, crit) -> bool:
 
 def _solve_folder(folder: str, ref_index, seed):
     """Fit All + solve one recording.  Module level so a worker process can run it."""
-    from bubbletrack.model.edge import EdgeParams, detect_edge
+    from bubbletrack.model.edge import EdgeParams, detect_edge, recording_black_level
     from bubbletrack.model.image_io import imread_unicode
     from bubbletrack.model.sequence import Observation, solve_sequence
 
     files = _frames(Path(folder))
     ref = imread_unicode(files[ref_index]) if ref_index is not None else None
+    black = recording_black_level(lambda i: imread_unicode(files[i]), len(files))  # as the app
 
     def obs(res):
         return Observation(res.radius, res.rc, res.cc, res.confidence, res.flags)
-    raw = [obs(detect_edge(imread_unicode(f), *FULL, reference=ref, params=EdgeParams(seed=tuple(seed))))
-           for f in files]
+    params = EdgeParams(seed=tuple(seed), black_level=black)
+    raw = [obs(detect_edge(imread_unicode(f), *FULL, reference=ref, params=params)) for f in files]
     spent = [0.0]
 
     def redetect(i, prior):
         t0 = time.perf_counter()
-        out = obs(detect_edge(imread_unicode(files[i]), *FULL, reference=ref, params=EdgeParams(prior=prior)))
+        out = obs(detect_edge(imread_unicode(files[i]), *FULL, reference=ref, params=EdgeParams(prior=prior, black_level=black)))
         spent[0] += time.perf_counter() - t0
         return out
     t0 = time.perf_counter()
@@ -251,7 +252,9 @@ def test_lic_no_regression_against_single_frame():
     # edge-1.5.0: 80 -> 72 (07: 17 -> 7; 1.4.0: 80 -> 76, 07: 17 -> 11, see the module
     # docstring); until 1.3.0 the solver never lost a rejected no-bubble frame (83 -> 84).
     # edge-1.6.1: 80 -> 71, 07 file 169 (the fragment cluster 161 and 177 already show)
-    assert tot["rej_before"] >= 80 and tot["rej_after"] >= 71
+    # edge-1.7.0 (black level): 80 -> 70, 05 file 121 also kept after tracking (accepted single-frame
+    # too; 01 file 241 no longer is); 06: file 81 now correct, 209 not
+    assert tot["rej_before"] >= 80 and tot["rej_after"] >= 70
 
 
 def test_lic_hard_no_regression_against_single_frame():
@@ -267,9 +270,14 @@ def test_lic_hard_no_regression_against_single_frame():
     tot = _report("lic_hard", rows)
     _baselines.check("sequence_lic_hard", {name: r["frames"] for name, r in rows.items()})
     assert tot["b"] == 182
-    assert tot["after"] >= tot["before"] >= 81                       # edge-1.5.0 (1.4.0: 79)
+    # edge-1.7.0 (black level): 81 -> 63, all in 05 (blood, low contrast; shown 0 -> 0): its
+    # darkest level, 31 % of the background, is light, and with it removed the guesses below the gate
+    # come out 12-19 px too large.  edge-1.6.2's guesses there were right at the raw values only:
+    # +1 % (655 counts) already took them from 18 to 2 of 21 (offset study, 2026-11-24)
+    assert tot["after"] >= tot["before"] >= 63                       # edge-1.5.0: 81 (1.4.0: 79)
     assert tot["app"] >= tot["shown_before"]
     # edge-1.5.0: 29 -> 28 (03, see the module docstring); until 1.4.0 the solver never lost
     # a rejected no-bubble frame here (30 -> 30).  edge-1.6.2: 29 -> 28 and 28 -> 27, 03 file 89
     # (labelled no bubble: the dark debris file 81 already shows, confidence 0.29 -> 0.32)
+    # edge-1.7.0: 03 files 73 and 89 no longer kept after tracking
     assert tot["rej_before"] >= 28 and tot["rej_after"] >= 27

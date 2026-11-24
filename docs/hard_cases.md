@@ -134,7 +134,10 @@ frames/frame_000121.tif     ROI crop of the app's frame 121 (uint8/uint16/float,
 cases by it), `app_version`, `engine_version`, `reporter`, `note`, `source`
 (kind, name, frame count, frame size), `roi` (`gridx`, `gridy`, 1-based
 inclusive, and `offset`), `detection` (`mode`, `params` = the session
-parameters, `tracking`, `reference_index`, `max_radius`), `selection` and per
+parameters, `tracking`, `reference_index`, `black_level`, `max_radius`;
+`black_level` is the recording's black level that Auto removed, recorded since
+engine edge-1.7.0: a replay of an older bundle estimates it from the bundle's
+own frames), `selection` and per
 frame its 0-based `index`, `role` (selected / context / reference), the
 app's `result` (radius, centre, confidence, flags, source, locked) and its
 `label` (`bubble` with radius and centre, `no_bubble`, or `unlabelled`, and

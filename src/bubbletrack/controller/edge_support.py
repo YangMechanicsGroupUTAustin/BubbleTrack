@@ -1,7 +1,8 @@
 """Controller-side helpers for the Edge engine, shared by every fitting path.
 
 Single-frame fit, chart refit, neighbour refit and Fit All all resolve the
-reference frame, build engine parameters and store results the same way.
+reference frame and the recording's black level, build engine parameters and
+store results the same way.
 """
 
 from __future__ import annotations
@@ -18,17 +19,33 @@ from bubbletrack.model.suggestion import Suggestion, set_suggestion, shown_sugge
 # Auto-selected reference per source; choosing reads several frames.
 _reference_cache: dict[tuple, int | None] = {}
 _reference_raw_cache: dict[tuple, np.ndarray] = {}  # one entry: the current reference frame
+_black_cache: dict[tuple, float] = {}  # black level per recording; estimating reads <= 256 frames
 GUESS_HINT = "Auto's guess is shown dashed (see Review)"
 
 
 def forget_references() -> None:
-    """Drop the cached reference choices and pixels (a new source was loaded)."""
+    """Drop the cached reference choices, pixels and black levels (a new source was loaded)."""
     _reference_cache.clear()
     _reference_raw_cache.clear()
+    _black_cache.clear()
+
+
+def _recording_key(state: AppState) -> tuple:
+    return (state.folder_path, state.video_path, len(state.images))
 
 
 def _source_key(state: AppState) -> tuple:
-    return (state.folder_path, state.video_path, len(state.images), state.reference_frame)
+    return (*_recording_key(state), state.reference_frame)
+
+
+def black_level(state: AppState) -> float:
+    """The recording's black level (``edge_pipeline.recording_black_level``), once per recording."""
+    key = _recording_key(state)
+    if key not in _black_cache:
+        _black_cache[key] = edge_pipeline.recording_black_level(
+            lambda i: edge_pipeline.read_raw(current_source(state, i)), len(state.images),
+            state.video_path)
+    return _black_cache[key]
 
 
 def reference_index(state: AppState) -> int | None:
@@ -39,6 +56,7 @@ def reference_index(state: AppState) -> int | None:
             lambda i: edge_pipeline.read_raw(current_source(state, i)),
             len(state.images),
             state.reference_frame,
+            black_level=black_level(state),
         )
     return _reference_cache[key]
 
@@ -57,7 +75,8 @@ def reference_raw(state: AppState) -> np.ndarray | None:
 
 def build_job(state: AppState, max_radius: float, *,
               prior: tuple[float, float, float] | None = None) -> EdgeJob:
-    return EdgeJob(params=edge_pipeline.params_from_state(state, prior=prior),
+    return EdgeJob(params=edge_pipeline.params_from_state(state, prior=prior,
+                                                          black_level=black_level(state)),
                    reference=reference_raw(state), max_radius=max_radius)
 
 

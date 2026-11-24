@@ -107,6 +107,39 @@ class TestAutoMode:
         assert np.array_equal(reference, full[30:220, 60:340])
         assert seed == (100.0, 150.0)
 
+    def _engine_black_levels(self, case, read_frame, monkeypatch) -> set:
+        seen = set()
+        real = edge_pipeline._engine()
+
+        def engine(raw, gridx, gridy, *, reference=None, params=None):
+            seen.add(params.black_level)
+            return real(raw, gridx, gridy, reference=reference, params=params)
+
+        monkeypatch.setattr(edge_pipeline, "_engine", lambda: engine)
+        replay_case(case, read_frame)
+        return seen
+
+    def test_the_recorded_black_level_reaches_the_engine(self, edge_state, tmp_path, monkeypatch):
+        case = make_case(edge_state, CaseRequest(start=3, end=4, reference_index=0, black_level=300.0,
+                                                 max_radius=max_radius(edge_state)),
+                         imread_unicode(edge_state.images[0]).shape)
+        assert case.detection.black_level == 300.0
+        path = tmp_path / "c.zip"
+        write_case(path, case, lambda i: imread_unicode(edge_state.images[i]))
+        with open_bundle(path) as bundle:
+            assert bundle.case.detection.black_level == 300.0
+            assert self._engine_black_levels(bundle.case, bundle.read_frame, monkeypatch) == {300.0}
+
+    def test_a_bundle_from_before_1_7_estimates_the_black_level_from_its_frames(
+            self, edge_state, tmp_path, monkeypatch):
+        with open_bundle(_bundle(edge_state, tmp_path, reference=0)) as bundle:
+            case = dataclasses.replace(bundle.case, detection=dataclasses.replace(
+                bundle.case.detection, black_level=None))
+            crops = sorted(f.index for f in case.frames)
+            expected = edge_pipeline.recording_black_level(lambda k: bundle.read_frame(crops[k]), len(crops))
+            assert expected > 0
+            assert self._engine_black_levels(case, bundle.read_frame, monkeypatch) == {expected}
+
     def test_max_radius_of_the_app_applies(self, edge_state, tmp_path):
         path = _bundle(edge_state, tmp_path, reference=0)
         with open_bundle(path) as bundle:

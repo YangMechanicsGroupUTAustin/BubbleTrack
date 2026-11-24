@@ -147,6 +147,8 @@ class TestCaseJson:
         (lambda d: d["frames"][1].update(index=d["frames"][0]["index"]), "twice"),
         (lambda d: d["frames"][3]["label"].update(radius=None), "radius"),
         (lambda d: d["detection"].update(mode="magic"), "mode"),
+        (lambda d: d["detection"].update(black_level=-5), "black_level"),
+        (lambda d: d["detection"].update(black_level="655"), "black_level"),
         (lambda d: d["roi"].update(gridx=[5, 2]), "gridx"),
         (lambda d: d.update(frames=[]), "frames"),
     ])
@@ -191,6 +193,18 @@ def test_reference_frame_only_in_auto_mode(state):
     out_of_range = make_case(update_state(state, detection_mode="edge"),
                              _request(reference_index=99), (250, 400))
     assert out_of_range.detection.reference_index is None
+
+
+def test_black_level_is_recorded_in_auto_mode_only(state):
+    legacy = make_case(state, _request(black_level=655.0), (250, 400))
+    assert legacy.detection.black_level is None
+    auto = make_case(update_state(state, detection_mode="edge"), _request(black_level=655.0), (250, 400))
+    assert auto.detection.black_level == 655.0
+    data = json.loads(json.dumps(case_to_json(auto), allow_nan=False))
+    assert data["detection"]["black_level"] == 655.0
+    assert case_from_json(data) == auto
+    del data["detection"]["black_level"]                       # a bundle from before edge-1.7.0
+    assert case_from_json(data).detection.black_level is None
 
 
 def test_write_and_open_bundle(state, tmp_path):

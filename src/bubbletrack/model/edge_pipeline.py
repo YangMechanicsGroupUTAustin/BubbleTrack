@@ -4,6 +4,7 @@ The engine works on raw full-bit-depth frames and a bubble-free reference
 frame instead of the 8-bit adaptive-threshold image, so this module owns:
 
 * reading raw frames (paths, or frames already decoded from a video),
+* the recording's black level (its darkest level, removed before the ratio),
 * resolving the reference frame (explicit index, or auto-selected),
 * turning app state into ``EdgeParams``,
 * applying the confidence gate and the plausible-radius check.
@@ -19,6 +20,7 @@ from dataclasses import dataclass, field
 import cv2
 import numpy as np
 
+from bubbletrack.model.hpvx2_dat import is_dat_file
 from bubbletrack.model.image_io import ImageLoadError, imread_unicode, read_failure
 from bubbletrack.model.suggestion import Suggestion, make_suggestion
 
@@ -29,9 +31,10 @@ def _engine():
     return detect_edge
 
 
-def _choose_reference(read_raw: Callable[[int], np.ndarray], n_frames: int) -> int | None:
+def _choose_reference(read_raw: Callable[[int], np.ndarray], n_frames: int,
+                      black_level: float = 0.0) -> int | None:
     from bubbletrack.model.edge import choose_reference_frame
-    return choose_reference_frame(read_raw, n_frames)
+    return choose_reference_frame(read_raw, n_frames, black_level=black_level)
 
 
 def _params_class():
@@ -42,15 +45,19 @@ def _params_class():
 def make_params(*, edge_definition: str = "steep", polarity: str = "dark",
                 seed: tuple[float, float] | None = None,
                 prior: tuple[float, float, float] | None = None,
-                non_round: bool = False):
+                non_round: bool = False, black_level: float = 0.0):
     """``EdgeParams``; *non_round* ("Bubble may be non-round") makes R the outline's
-    area-equivalent radius instead of the least-squares circle through the bubble outline."""
+    area-equivalent radius instead of the least-squares circle through the bubble outline;
+    *black_level* is the recording's (:func:`recording_black_level`)."""
     return _params_class()(edge_definition=edge_definition, polarity=polarity,
-                           seed=seed, prior=prior, non_round=bool(non_round))
+                           seed=seed, prior=prior, non_round=bool(non_round),
+                           black_level=float(black_level))
 
 
-def params_from_state(state, *, prior: tuple[float, float, float] | None = None):
-    """Engine settings for *state*; a *prior* circle replaces the seed click.
+def params_from_state(state, *, prior: tuple[float, float, float] | None = None,
+                      black_level: float = 0.0):
+    """Engine settings for *state* and its recording's *black_level*; a *prior* circle
+    replaces the seed click.
 
     With both, the seed decides the candidate and the prior is ignored; on
     the labelled LIC sets that cost 3 points of accuracy for neighbour and
@@ -60,7 +67,23 @@ def params_from_state(state, *, prior: tuple[float, float, float] | None = None)
     seed = None if prior is not None else state.edge_seed
     return make_params(edge_definition=state.edge_definition, polarity=state.edge_polarity,
                        seed=seed, prior=prior,
-                       non_round=getattr(state, "bubble_non_round", False))
+                       non_round=getattr(state, "bubble_non_round", False),
+                       black_level=black_level)
+
+
+def recording_black_level(read_frame: Callable[[int], np.ndarray], n_frames: int,
+                          source_name: str = "") -> float:
+    """The recording's black level, removed from every frame before the ratio (edge-1.7.0).
+
+    A raw HPV-X2 .dat (*source_name*, a file name or path) holds the sensor's own values,
+    whose black is 0: nothing is estimated.  Otherwise the darkest level of an evenly spaced
+    sample of the frames (``model.edge.black``; 0.0 when no frame can be read): an exported
+    image sequence may carry an offset (the HPV-X TIFF16 export adds 655).
+    """
+    if source_name and is_dat_file(source_name):
+        return 0.0
+    from bubbletrack.model.edge.black import recording_black_level as estimate
+    return estimate(read_frame, n_frames)
 
 
 def read_raw(source) -> np.ndarray:
@@ -73,25 +96,26 @@ def read_raw(source) -> np.ndarray:
     return raw
 
 
-def frame_has_bubble(raw: np.ndarray) -> bool:
+def frame_has_bubble(raw: np.ndarray, *, black_level: float = 0.0) -> bool:
     """True when *raw* seems to contain a bubble, so it cannot be a reference.
 
     The test the automatic reference choice applies to its candidates
     (``model.edge.reference``): the engine, without a reference, finds a
-    confident circle of a plausible size on the full frame.
+    confident circle of a plausible size on the full frame (the recording's
+    *black_level* removed).
     """
     from bubbletrack.model.edge.config import DEFAULT_CONFIG
     from bubbletrack.model.edge.reference import _has_bubble
 
-    return bool(_has_bubble(raw, DEFAULT_CONFIG))
+    return bool(_has_bubble(raw, DEFAULT_CONFIG, black_level))
 
 
 def resolve_reference_index(read_frame: Callable[[int], np.ndarray], n_frames: int,
-                            explicit: int | None) -> int | None:
+                            explicit: int | None, *, black_level: float = 0.0) -> int | None:
     """The user's reference frame if set and valid, else the auto-selected one."""
     if explicit is not None and 0 <= explicit < n_frames:
         return explicit
-    return _choose_reference(read_frame, n_frames)
+    return _choose_reference(read_frame, n_frames, black_level)
 
 
 @dataclass(frozen=True)

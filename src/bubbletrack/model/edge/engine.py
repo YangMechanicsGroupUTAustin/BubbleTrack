@@ -28,7 +28,8 @@ from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge.config import DEFAULT_CONFIG, EdgeConfig
 from bubbletrack.model.edge.definition import FrameStats, measure
 from bubbletrack.model.edge.fit import CircleFit, fit_circle
-from bubbletrack.model.edge.normalize import normalize_frame_roi, to_gray_frame
+from bubbletrack.model.edge.black import gray_pair
+from bubbletrack.model.edge.normalize import normalize_frame_roi
 from bubbletrack.model.edge.outline import Outline, RayPoints, background_noise, measure_outline
 from bubbletrack.model.edge.quality import FitStats, confidence, fit_stats, measurement_flags
 from bubbletrack.model.edge.rays import (
@@ -45,8 +46,12 @@ from bubbletrack.model.edge.result import EdgeParams, EdgeResult
 from bubbletrack.model.edge.segment import CoarseMask, Selection, coarse_segment, select_candidate, snr_noise
 from bubbletrack.model.edge.shape_check import CircleCheck, circle_check
 
-ENGINE_VERSION = "edge-1.6.2"
-"""1.6.2: moving saturating speckle: log-band bright-side level, bounded residual, texture clipped at 2.75 x.
+ENGINE_VERSION = "edge-1.7.0"
+"""1.7.0: the recording's black level (its darkest level, ``black``; ``EdgeParams.black_level``) is
+subtracted from the frame and the reference before stage A, so a constant offset of the data no longer
+changes the result (owner decision 2026-11-24; HPV-X TIFF16 export, +655 counts: Jin 2026-11-16 14:37:03
+big-bubble frames shown 14/28 -> 26/28; .dat 27/28).
+1.6.2: moving saturating speckle: log-band bright-side level, bounded residual, texture clipped at 2.75 x.
 1.6.1: the snr noise is the lower of the ROI's and a near-wall ring's texture (``segment.snr_noise``).
 1.6.0: bright-side gain and surface anchor when the median is in shadow (``normalize.background_level``).
 1.5.1: a ray fit beyond 4 ROI diagonals ends as "fit_failed" (always rejected; it sampled
@@ -118,10 +123,7 @@ def detect_edge(raw: np.ndarray, gridx: tuple[int, int], gridy: tuple[int, int],
 def detect_edge_with_config(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
                             params: EdgeParams, config: EdgeConfig) -> EdgeResult:
     """:func:`detect_edge` with an explicit :class:`EdgeConfig` (for tuning and tests)."""
-    frame = to_gray_frame(raw)
-    ref = to_gray_frame(reference) if reference is not None else None
-    if ref is not None and ref.values.shape != frame.values.shape:
-        raise ValueError(f"reference shape {ref.values.shape} differs from frame shape {frame.values.shape}")
+    frame, ref = gray_pair(raw, reference, params.black_level)
     gx, gy, clamped = _parse_roi(gridx, gridy, frame.values.shape)
     origin = (gx[0], gy[0])                   # 1-based coordinate of ROI pixel (0, 0)
     flags: set[str] = set() if ref is not None else {"no_reference"}
@@ -215,10 +217,7 @@ def engine_view(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
     whether the reference frame matches (a flat background) or not.
     """
     params = params or EdgeParams()
-    frame = to_gray_frame(raw)
-    ref = to_gray_frame(reference) if reference is not None else None
-    if ref is not None and ref.values.shape != frame.values.shape:
-        raise ValueError(f"reference shape {ref.values.shape} differs from frame shape {frame.values.shape}")
+    frame, ref = gray_pair(raw, reference, params.black_level)
     gx, gy, _ = _parse_roi(gridx, gridy, frame.values.shape)
     _, _, image, _ = normalize_frame_roi(frame, ref, roi_to_slice(gx, gy), dark=params.polarity == "dark",
                                          cfg=config.normalize)

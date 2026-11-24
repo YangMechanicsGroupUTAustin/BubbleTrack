@@ -143,8 +143,10 @@ def measure_frame(model: MLModel, raw: np.ndarray, *, params: EdgeParams = EdgeP
     tracker prior if any): they pick ML's region and are passed to Auto, whose
     prior becomes the ML circle.  *auto* is plain Auto's result of this frame
     (the Fit All result) for the guarded policy; it is computed when missing.
+    Auto runs with the model's black level, the one its features were trained with.
     """
     cfg = config or model.config.measure
+    params = replace(params, black_level=model.black_level)
     pred = model.predict(raw)
     gx, gy = model.gridx, model.gridy
     view = engine_view(raw, gx, gy, reference=model.reference, params=params) if cfg.refine else None

@@ -5,7 +5,8 @@ It is found through the ``BUBBLETRACK_TEST_DATA`` environment variable (the ``te
 folder), else by looking for ``test_data/lic`` next to any parent of this file (works from
 the main checkout and from a ``.claude/worktrees/*`` worktree).  Every test skips without it.
 
-Mode: P2 + reference (frame 2, i.e. index 1) + seed click, single frame (no tracking).
+Mode: P2 + reference (frame 2, i.e. index 1) + seed click, single frame (no tracking); since
+edge-1.7.0 with the recording's black level, as the app measures (``black_level``).
 Since edge-1.1.0 ``radius`` is the area-equivalent radius of the bubble region (circle-completed
 when clipped; the circle fit on frames below the confidence gate).
 """
@@ -20,7 +21,7 @@ import numpy as np
 import pytest
 
 import _baselines
-from bubbletrack.model.edge import EdgeParams, choose_reference_frame, detect_edge
+from bubbletrack.model.edge import EdgeParams, choose_reference_frame, detect_edge, recording_black_level
 from bubbletrack.model.image_io import imread_unicode
 
 
@@ -47,6 +48,11 @@ def _frames(folder: Path) -> list[Path]:
     return sorted(p for p in folder.iterdir() if p.suffix.lower() in (".tif", ".tiff"))
 
 
+def black_level(files: list[Path]) -> float:
+    """The recording's black level, as the app estimates it (edge-1.7.0)."""
+    return recording_black_level(lambda i: imread_unicode(files[i]), len(files))
+
+
 def _labels() -> dict:
     path = ROOT / "lic" / "labels_edge.json"
     if not path.exists():
@@ -59,7 +65,8 @@ def _series(prefix: str, ref_r: np.ndarray, ref_c: np.ndarray, step: int = 2, **
     folder = _seq_dir("lic", prefix)
     files = _frames(folder)
     ref = imread_unicode(files[labels["reference_frame_index"]])
-    edge_params = EdgeParams(seed=tuple(labels["sequences"][folder.name]["seed"]), **params)
+    edge_params = EdgeParams(seed=tuple(labels["sequences"][folder.name]["seed"]),
+                             black_level=black_level(files), **params)
     d_r, d_c, d_ac, n_shoulder = [], [], [], 0
     for i in range(0, len(ref_r), step):
         if not np.isfinite(ref_r[i]):
@@ -162,6 +169,10 @@ def test_labelled_bubble_frames_on_lic():
     on lic_hard 79 -> 81 / 182 (01: 30 -> 31, 03: 0 -> 1, 07: 16 -> 17, 04: 1 -> 0), no-bubble
     frames accepted 1 -> 2 / 31 (03).
 
+    Measured with the recording's black level removed (edge-1.7.0, owner decision 2026-11-24):
+    184/235 agree (same count); 06 file 209 -> 81; no-bubble frames accepted 01 file 241 no
+    longer, 05 file 121 now (5/85 either way).
+
     Since 2026-11-18 the frames behind these numbers are tracked in
     ``tests/baselines/edge_lic_labelled.json``: any frame that moves fails the test until the
     file is regenerated (``BUBBLETRACK_UPDATE_BASELINES=1``) and committed with the change.
@@ -176,7 +187,7 @@ def test_labelled_bubble_frames_on_lic():
             pytest.skip(f"{name} not present")
         files = _frames(folder)
         ref = imread_unicode(files[labels["reference_frame_index"]])
-        params = EdgeParams(seed=tuple(info["seed"]))
+        params = EdgeParams(seed=tuple(info["seed"]), black_level=black_level(files))
         seq = found.setdefault(name, {"correct": [], "no_bubble_accepted": []})
         for frame_no, lab in info["frames"].items():
             res = detect_edge(imread_unicode(files[int(frame_no) - 1]), *FULL, reference=ref, params=params)
@@ -201,7 +212,7 @@ def test_big_dark_bubble_in_dense_speckle_is_measured():
     was checked by eye on the raw frame."""
     files = _frames(_seq_dir("lic_hard", "02"))
     res = detect_edge(imread_unicode(files[10]), *FULL, reference=imread_unicode(files[1]),
-                      params=EdgeParams())
+                      params=EdgeParams(black_level=black_level(files)))
     crit = {"radius_tol_px": 2.0, "radius_tol_frac": 0.05, "centre_tol_px": 3.0, "centre_tol_frac": 0.15}
     assert res.accepted, f"confidence {res.confidence:.2f}"
     assert _agree((res.radius, res.rc, res.cc), (106.12, 139.41, 191.71), crit), (res.radius, res.rc, res.cc)
@@ -214,8 +225,10 @@ def test_reference_frame_choice_on_real_recordings():
     expected["01"] = 8
     for prefix, want in expected.items():
         files = _frames(_seq_dir("lic", prefix))
-        assert choose_reference_frame(lambda i: imread_unicode(files[i]), len(files)) == want, prefix
+        assert choose_reference_frame(lambda i: imread_unicode(files[i]), len(files),
+                                      black_level=black_level(files)) == want, prefix
     for folder in (ROOT.parent / "example_1", *sorted((ROOT / "lic_hard").glob("01_*"))):
         if folder.is_dir():
             files = _frames(folder)
-            assert choose_reference_frame(lambda i: imread_unicode(files[i]), len(files)) is None, folder.name
+            assert choose_reference_frame(lambda i: imread_unicode(files[i]), len(files),
+                                          black_level=black_level(files)) is None, folder.name

@@ -1,0 +1,137 @@
+{
+ "engine": "edge-1.7.0",
+ "sequences": {
+  "lic/01_water_clipped_brightcore": {
+   "offset_1pct": [],
+   "8bit": [
+    165,
+    189,
+    201,
+    209,
+    233
+   ]
+  },
+  "lic/02_pdms_textured_residual": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic/03_honey_particles_brightness_step": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic/04_paam_alg_flicker_corner_object": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic/05_holes_circular_aperture_microbubbles": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic/06_multipulse_wall_half_bubble_speckle": {
+   "offset_1pct": [
+    21
+   ],
+   "8bit": [
+    49,
+    69,
+    101,
+    117,
+    145,
+    153,
+    201
+   ]
+  },
+  "lic/07_multipulse_interface_jet_fragments_8bit": {
+   "offset_1pct": [
+    13,
+    33,
+    37,
+    49,
+    57,
+    61,
+    105,
+    129,
+    133,
+    145,
+    165,
+    189,
+    241
+   ]
+  },
+  "lic/08_neural_transparent_bubble_electrodes": {
+   "offset_1pct": [],
+   "8bit": [
+    177
+   ]
+  },
+  "lic/09_rgb8_low_contrast_speckle": {
+   "offset_1pct": []
+  },
+  "lic/10_gelatin_clean_flicker": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic_hard/01_rgb8_dense_speckle_moving": {
+   "offset_1pct": []
+  },
+  "lic_hard/02_rgb8_air_interface_dense_speckle_moving": {
+   "offset_1pct": []
+  },
+  "lic_hard/03_gelgel_interface_migration_speckle": {
+   "offset_1pct": [
+    73,
+    81
+   ],
+   "8bit": [
+    61,
+    65,
+    73,
+    89
+   ]
+  },
+  "lic_hard/04_rgb8_water_gel_postcollapse_drift": {
+   "offset_1pct": [
+    9,
+    17,
+    25,
+    29,
+    33,
+    37,
+    41,
+    45,
+    49,
+    53,
+    57,
+    61,
+    69,
+    77,
+    89,
+    93,
+    97,
+    101,
+    117,
+    197,
+    201,
+    205,
+    225,
+    229,
+    245
+   ]
+  },
+  "lic_hard/05_blood_low_contrast": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic_hard/06_blood_lowcon_migrating_moving_texture": {
+   "offset_1pct": [],
+   "8bit": []
+  },
+  "lic_hard/07_rgb8_wall_lowcon_speckle_moving": {
+   "offset_1pct": []
+  },
+  "lic_hard/08_pegda_dvc_particles_advected": {
+   "offset_1pct": [],
+   "8bit": []
+  }
+ }
+}

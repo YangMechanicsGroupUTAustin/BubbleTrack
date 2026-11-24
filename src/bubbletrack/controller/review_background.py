@@ -25,6 +25,7 @@ from bubbletrack.controller import edge_support
 from bubbletrack.controller.display_mixin import current_source
 from bubbletrack.model import edge_pipeline
 from bubbletrack.model.conventions import clamp_roi, roi_to_slice
+from bubbletrack.model.edge.black import with_black
 from bubbletrack.model.edge.normalize import to_gray_frame
 from bubbletrack.model.suggestion import first_result, shown_suggestion
 
@@ -91,7 +92,7 @@ def source_key(state) -> Hashable:
 
 
 def roi_gray(state, idx: int) -> np.ndarray:
-    """Frame *idx*'s ROI as grey values (raw, not display-normalised)."""
+    """Frame *idx*'s ROI as grey values (raw, not display-normalised; black level removed)."""
     return _roi(state, edge_pipeline.read_raw(current_source(state, idx)))
 
 
@@ -102,7 +103,7 @@ def reference_gray(state) -> np.ndarray | None:
 
 
 def _roi(state, raw: np.ndarray) -> np.ndarray:
-    values = to_gray_frame(raw).values
+    values = with_black(to_gray_frame(raw), edge_support.black_level(state)).values
     gx, gy = clamp_roi(tuple(state.gridx), tuple(state.gridy), *values.shape[:2])
     return values[roi_to_slice(gx, gy)]
 

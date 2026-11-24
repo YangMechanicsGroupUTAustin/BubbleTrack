@@ -23,6 +23,7 @@ from bubbletrack.model.skimage_compat import multiscale_basic_features_compat
 from bubbletrack.model.conventions import clamp_roi, roi_to_slice
 from bubbletrack.model.edge import EdgeParams
 from bubbletrack.model.edge.engine import engine_view
+from bubbletrack.model.edge.black import with_black
 from bubbletrack.model.edge.normalize import to_gray_frame
 from bubbletrack.model.teach.config import FeatureConfig
 
@@ -70,12 +71,14 @@ def _bin2(img: np.ndarray) -> np.ndarray:
 
 
 def compute_features(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | None,
+                     black_level: float = 0.0,
                      config: FeatureConfig = FeatureConfig()) -> FeatureStack:
-    """Feature stack of the ROI ``gridx`` x ``gridy`` (1-based inclusive) of *raw*.
+    """Feature stack of the ROI ``gridx`` x ``gridy`` (1-based inclusive) of *raw*, with the
+    recording's *black_level* removed (as Auto does).
 
     Raises ValueError for a reference of another size.
     """
-    gray = to_gray_frame(raw).values
+    gray = with_black(to_gray_frame(raw), black_level).values
     gx, gy = roi_bounds(gridx, gridy, gray.shape)
     roi = roi_to_slice(gx, gy)
     planes = []
@@ -83,7 +86,8 @@ def compute_features(raw: np.ndarray, gridx, gridy, *, reference: np.ndarray | N
         if name == "raw":
             planes.append(_raw_channel(gray, roi))
         else:
-            view = engine_view(raw, gx, gy, reference=reference, params=EdgeParams(polarity=config.polarity))
+            view = engine_view(raw, gx, gy, reference=reference,
+                               params=EdgeParams(polarity=config.polarity, black_level=black_level))
             planes.append(np.asarray(view, np.float32))
     roi_shape = planes[0].shape
     step = 2 if config.half_resolution else 1

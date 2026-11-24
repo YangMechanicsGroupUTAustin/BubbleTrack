@@ -94,7 +94,7 @@ def test_reference_and_position_each_fit_on_one_line(qapp):
 def test_use_this_frame_on_a_bubble_frame_asks_and_cancel_keeps_auto(
         gui, make_sequence, asked, monkeypatch):
     window, controller = gui
-    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: True)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw, black_level=0.0: True)
     controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
     controller.file_ctrl.on_frame_changed(3)
     _box(window).use_current_reference_clicked.emit()
@@ -105,7 +105,7 @@ def test_use_this_frame_on_a_bubble_frame_asks_and_cancel_keeps_auto(
 
 def test_use_it_anyway_sets_the_reference_with_a_warning(gui, make_sequence, asked, monkeypatch):
     window, controller = gui
-    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: True)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw, black_level=0.0: True)
     controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
     controller.file_ctrl.on_frame_changed(3)
     asked.answer = True
@@ -121,7 +121,7 @@ def test_use_it_anyway_sets_the_reference_with_a_warning(gui, make_sequence, ask
 
 def test_bubble_free_frame_is_used_without_a_question(gui, make_sequence, asked, monkeypatch):
     window, controller = gui
-    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: False)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw, black_level=0.0: False)
     controller.file_ctrl.on_folder_selected(str(make_sequence("A", 5)))
     controller.file_ctrl.on_frame_changed(1)
     _box(window).use_current_reference_clicked.emit()
@@ -144,8 +144,8 @@ def _right_panel(window) -> np.ndarray:
 @pytest.fixture
 def auto_reference_frame_1(monkeypatch):
     """Auto picks frame 1 and no frame seems to hold a bubble (no question)."""
-    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n: 0)
-    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: False)
+    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n, black_level=0.0: 0)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw, black_level=0.0: False)
 
 
 def test_a_new_reference_redraws_the_auto_view_at_once(gui, make_sequence, auto_reference_frame_1):
@@ -199,8 +199,8 @@ def test_the_question_names_the_frame_and_defaults_to_cancel(qapp):
 ])
 def test_no_reference_says_why(gui, make_sequence, monkeypatch, first_has_bubble, text):
     window, controller = gui
-    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n: None)
-    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw: first_has_bubble)
+    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n, black_level=0.0: None)
+    monkeypatch.setattr(edge_pipeline, "frame_has_bubble", lambda raw, black_level=0.0: first_has_bubble)
     edge_setup._first_frame_bubble.clear()
     controller.file_ctrl.on_folder_selected(str(make_sequence(f"B{int(first_has_bubble)}", 4)))
     assert _box(window).reference_text() == text

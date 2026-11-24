@@ -55,6 +55,7 @@ class FakeParams:
     seed: tuple | None = None
     prior: tuple | None = None
     non_round: bool = False
+    black_level: float = 0.0
 
 
 @pytest.fixture
@@ -62,7 +63,7 @@ def fake_engine(monkeypatch):
     engine = FakeEngine()
     monkeypatch.setattr(edge_pipeline, "_engine", lambda: engine)
     monkeypatch.setattr(edge_pipeline, "_params_class", lambda: FakeParams)
-    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n: 1)
+    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read_raw, n, black_level=0.0: 1)
     monkeypatch.setattr(worker_module.BatchWorker, "inline", True)
     return engine
 

@@ -43,6 +43,7 @@ class CaseRequest:
     note: str = ""
     reporter: str = ""
     reference_index: int | None = None  # Auto mode's reference frame (resolved)
+    black_level: float = 0.0  # Auto mode: the recording's black level (edge_support.black_level)
     tracking: bool = False  # Auto mode: tracking after Fit All was on
     max_radius: float = float("inf")
 
@@ -168,6 +169,7 @@ def make_case(state, request: CaseRequest, frame_shape: tuple[int, ...], *,
             tracking=bool(request.tracking) and mode == "edge",
             reference_index=reference,
             reference_explicit=state.reference_frame is not None,
+            black_level=float(request.black_level) if mode == "edge" else None,
             max_radius=float(request.max_radius)),
         selection=(start, end),
         frames=tuple(frames),

@@ -1,5 +1,5 @@
 {
- "engine": "edge-1.6.1",
+ "engine": "edge-1.7.0",
  "sequences": {
   "01_water_clipped_brightcore": {
    "correct_single": [
@@ -399,12 +399,14 @@
     113
    ],
    "no_bubble_kept_after": [
+    121,
     129
    ]
   },
   "06_multipulse_wall_half_bubble_speckle": {
    "correct_single": [
     65,
+    81,
     97,
     105,
     113,
@@ -418,7 +420,6 @@
     177,
     185,
     201,
-    209,
     217,
     225,
     233,
@@ -427,6 +428,7 @@
    ],
    "correct_tracked": [
     65,
+    81,
     97,
     105,
     113,
@@ -440,7 +442,6 @@
     177,
     185,
     201,
-    209,
     217,
     225,
     233,
@@ -454,9 +455,7 @@
     121,
     145,
     153,
-    201,
-    225,
-    233
+    161
    ],
    "no_bubble_kept_after": []
   },

@@ -92,6 +92,8 @@ class Detection:
     tracking: bool = False  # Auto mode: "Track across frames after Fit All"
     reference_index: int | None = None  # Auto mode: the reference frame used
     reference_explicit: bool = False  # set by the user (else auto-selected)
+    black_level: float | None = None  # Auto mode: the recording's black level; None = not
+    # recorded (bundles before edge-1.7.0): replay estimates it from the bundle's frames
     max_radius: float = math.inf  # largest plausible radius (the frame's longer side)
 
 
@@ -176,6 +178,7 @@ def case_to_json(case: HardCase) -> dict:
         "detection": {"mode": det.mode, "params": dict(det.params), "tracking": det.tracking,
                       "reference_index": det.reference_index,
                       "reference_explicit": det.reference_explicit,
+                      "black_level": det.black_level,
                       "max_radius": _finite_or_none(det.max_radius)},
         "selection": {"start": case.selection[0], "end": case.selection[1]},
         "frames": [_frame_json(f) for f in case.frames],
@@ -274,10 +277,13 @@ def _detection(data: Any) -> Detection:
     _require(isinstance(params, dict), "detection params must be an object")
     ref = data.get("reference_index")
     max_radius = _number(data.get("max_radius"), "max_radius")
+    black = _number(data.get("black_level"), "black_level")
+    _require(black is None or black >= 0, f"black_level must be >= 0, got {black!r}")
     return Detection(mode=mode, params=MappingProxyType(dict(params)),
                      tracking=bool(data.get("tracking", False)),
                      reference_index=None if ref is None else _int(ref, "reference_index"),
                      reference_explicit=bool(data.get("reference_explicit", False)),
+                     black_level=black,
                      max_radius=math.inf if max_radius is None else max_radius)
 
 

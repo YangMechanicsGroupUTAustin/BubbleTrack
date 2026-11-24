@@ -53,6 +53,9 @@ class EdgeParams:
     non_round: bool = False
     """The radius definition.  False (default): the least-squares circle through the bubble
     outline; True ("Bubble may be non-round"): the area-equivalent radius ``sqrt(A / pi)`` of it."""
+    black_level: float = 0.0
+    """The recording's black level in the frame's own units (``black.recording_black_level``),
+    subtracted from the frame and the reference before stage A (edge-1.7.0)."""
 
     def __post_init__(self) -> None:
         if self.edge_definition not in _DEFINITIONS:
@@ -67,6 +70,9 @@ class EdgeParams:
             raise ValueError(f"confidence_gate must be in [0, 1], got {self.confidence_gate!r}")
         if not isinstance(self.non_round, bool):
             raise ValueError(f"non_round must be True or False, got {self.non_round!r}")
+        if not (_is_real(self.black_level) and math.isfinite(self.black_level) and self.black_level >= 0):
+            raise ValueError(f"black_level must be a finite number >= 0, got {self.black_level!r}")
+        object.__setattr__(self, "black_level", float(self.black_level))
         if self.seed is not None:
             object.__setattr__(self, "seed", _finite_tuple(self.seed, 2, "seed"))
         if self.prior is not None:

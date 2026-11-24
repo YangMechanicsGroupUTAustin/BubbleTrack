@@ -22,7 +22,8 @@ REGION_FIELDS = ["r_circle", "area_px", "perimeter_px", "circularity", "solidity
 
 def test_exports_exactly_the_contract():
     assert sorted(edge.__all__) == sorted(
-        ["EdgeParams", "EdgeResult", "detect_edge", "choose_reference_frame", "ENGINE_VERSION"])
+        ["EdgeParams", "EdgeResult", "detect_edge", "choose_reference_frame", "ENGINE_VERSION",
+         "recording_black_level"])
     assert isinstance(ENGINE_VERSION, str) and ENGINE_VERSION
 
 
@@ -103,9 +104,11 @@ def test_detect_edge_signature():
 
 def test_choose_reference_frame_signature():
     sig = inspect.signature(choose_reference_frame)
-    assert list(sig.parameters) == ["read_raw", "n_frames", "search"]
+    assert list(sig.parameters) == ["read_raw", "n_frames", "search", "black_level"]
     assert sig.parameters["search"].kind is inspect.Parameter.KEYWORD_ONLY
     assert sig.parameters["search"].default == 10
+    assert sig.parameters["black_level"].kind is inspect.Parameter.KEYWORD_ONLY
+    assert sig.parameters["black_level"].default == 0.0
 
 
 def test_params_gate_reaches_the_result():

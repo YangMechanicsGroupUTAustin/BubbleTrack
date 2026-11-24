@@ -50,6 +50,8 @@ class MLJob:
     gridy: tuple[int, int]
     reference: np.ndarray | None
     n_jobs: int = WORKER_THREADS
+    black_level: float = 0.0
+    """The recording's black level (the run's Auto job has the same)."""
 
 
 def train_job(job: MLJob):
@@ -58,7 +60,8 @@ def train_job(job: MLJob):
 
     config = MLConfig(forest=replace(ForestConfig(), n_jobs=max(1, int(job.n_jobs))))
     return train_model(MLExamples.from_dict(job.examples), job.frames.__getitem__,
-                       job.gridx, job.gridy, reference=job.reference, config=config)
+                       job.gridx, job.gridy, reference=job.reference,
+                       black_level=job.black_level, config=config)
 
 
 _WORKER: dict = {"model": None, "error": "not initialised"}

@@ -301,4 +301,4 @@ def test_a_nearly_straight_edge_stops_the_ray_passes(monkeypatch):
     res = engine.detect_edge(img, (1, 120), (1, 160), reference=ref, params=engine.EdgeParams())
     assert passes == [1]  # no second pass around the absurd circle
     assert "fit_failed" in res.flags and not res.accepted
-    assert engine.ENGINE_VERSION == "edge-1.6.2"
+    assert engine.ENGINE_VERSION == "edge-1.7.0"

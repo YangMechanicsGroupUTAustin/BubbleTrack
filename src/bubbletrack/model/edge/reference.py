@@ -20,6 +20,7 @@ Rules, on the first ``search`` frames:
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Callable
 
 import cv2
@@ -27,6 +28,7 @@ import numpy as np
 
 from bubbletrack.model.edge.config import DEFAULT_CONFIG, EdgeConfig, ReferenceConfig
 from bubbletrack.model.edge.engine import EdgeParams, detect_edge_with_config
+from bubbletrack.model.edge.black import with_black
 from bubbletrack.model.edge.normalize import to_gray_frame
 
 logger = logging.getLogger(__name__)
@@ -42,9 +44,9 @@ def _read(read_raw: Callable[[int], np.ndarray], i: int) -> np.ndarray | None:
         return None
 
 
-def _thumbnail(raw: np.ndarray, cfg: ReferenceConfig) -> tuple[np.ndarray, float]:
-    """Shrunk, smoothed, gain-normalised frame and its median brightness."""
-    values = to_gray_frame(raw).values
+def _thumbnail(raw: np.ndarray, cfg: ReferenceConfig, black: float) -> tuple[np.ndarray, float]:
+    """Shrunk, smoothed, gain-normalised frame (black level removed) and its median brightness."""
+    values = with_black(to_gray_frame(raw), black).values
     h, w = values.shape
     f = cfg.downsample
     small = cv2.resize(values, (max(w // f, 1), max(h // f, 1)), interpolation=cv2.INTER_AREA)
@@ -86,18 +88,18 @@ _BUBBLE_TEST_PARAMS = EdgeParams(non_round=True)
 definition's confidence (shape-agnostic) is the one this test was calibrated with."""
 
 
-def _has_bubble(raw: np.ndarray, config: EdgeConfig) -> bool:
+def _has_bubble(raw: np.ndarray, config: EdgeConfig, black_level: float = 0.0) -> bool:
     """A confident bubble of a plausible size (one the area mode could not measure because
-    the image edge cuts it is still a bubble)."""
+    the image edge cuts it is still a bubble); *black_level* is the recording's."""
     h, w = raw.shape[:2]
-    res = detect_edge_with_config(raw, (1, h), (1, w), reference=None, params=_BUBBLE_TEST_PARAMS,
-                                  config=config)
+    params = replace(_BUBBLE_TEST_PARAMS, black_level=black_level)
+    res = detect_edge_with_config(raw, (1, h), (1, w), reference=None, params=params, config=config)
     confident = bool(np.isfinite(res.radius) and res.confidence >= res.confidence_gate)
     return confident and res.radius >= config.reference.min_bubble_radius_px
 
 
 def choose_reference_frame(read_raw: Callable[[int], np.ndarray], n_frames: int, *,
-                           search: int = 10) -> int | None:
+                           search: int = 10, black_level: float = 0.0) -> int | None:
     """Pick the bubble-free reference frame among the first *search* frames.
 
     Parameters
@@ -110,6 +112,9 @@ def choose_reference_frame(read_raw: Callable[[int], np.ndarray], n_frames: int,
         Number of frames in the sequence.
     search : int
         How many leading frames to consider.
+    black_level : float
+        The recording's black level (``black.recording_black_level``), removed from every
+        frame before it is judged.
 
     Returns
     -------
@@ -123,11 +128,12 @@ def choose_reference_frame(read_raw: Callable[[int], np.ndarray], n_frames: int,
     ValueError
         If *n_frames* is negative or *search* is not positive.
     """
-    return choose_reference(read_raw, n_frames, search=search, config=DEFAULT_CONFIG)
+    return choose_reference(read_raw, n_frames, search=search, config=DEFAULT_CONFIG,
+                            black_level=black_level)
 
 
 def choose_reference(read_raw: Callable[[int], np.ndarray], n_frames: int, *, search: int,
-                     config: EdgeConfig) -> int | None:
+                     config: EdgeConfig, black_level: float = 0.0) -> int | None:
     """:func:`choose_reference_frame` with an explicit :class:`EdgeConfig`."""
     if int(n_frames) < 0:
         raise ValueError(f"n_frames must be >= 0, got {n_frames}")
@@ -140,14 +146,14 @@ def choose_reference(read_raw: Callable[[int], np.ndarray], n_frames: int, *, se
     raws = [r if r is not None and r.shape[:2] == shape else None for r in raws]
     thumbs, levels = [], []
     for raw in raws:
-        thumb, level = _thumbnail(raw, cfg) if raw is not None else (None, float("nan"))
+        thumb, level = _thumbnail(raw, cfg, black_level) if raw is not None else (None, float("nan"))
         thumbs.append(thumb)
         levels.append(level)
     event = _first_event(thumbs, levels, cfg)
     for c in range(event - 1, -1, -1):
         if raws[c] is None or not _is_normal(c, event, thumbs, levels, cfg):
             continue
-        if _has_bubble(raws[c], config):
+        if _has_bubble(raws[c], config, black_level):
             logger.info("Reference search: frame %d holds a bubble", c)
             continue
         return c

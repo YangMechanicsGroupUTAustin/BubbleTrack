@@ -232,7 +232,7 @@ class MLAssistController:
         state = self.state
         reference = edge_support.reference_raw(state)
         job = make_job(state, examples, lambda i: edge_pipeline.read_raw(current_source(state, i)),
-                       reference)
+                       reference, black_level=edge_support.black_level(state))
         key = (examples, job.gridx, job.gridy, edge_support.reference_index(state))
         if self._validated != key:
             with _wait_cursor():

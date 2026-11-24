@@ -324,15 +324,18 @@ def _process_frames_edge(images: list[str], args: argparse.Namespace,
     """Fit every frame with the Edge engine, using the GUI's acceptance rules
     (the last value is the 0-based reference frame used, None without one)."""
     explicit = args.reference - 1 if args.reference is not None else None
+    black = edge_pipeline.recording_black_level(lambda i: edge_pipeline.read_raw(images[i]),
+                                                len(images))
     ref_idx = edge_pipeline.resolve_reference_index(
-        lambda i: edge_pipeline.read_raw(images[i]), len(images), explicit,
+        lambda i: edge_pipeline.read_raw(images[i]), len(images), explicit, black_level=black,
     )
     reference = edge_pipeline.read_raw(images[ref_idx]) if ref_idx is not None else None
     print("Reference frame: "
           + (f"{ref_idx + 1}" if ref_idx is not None else "none (surface fallback)"))
+    print(f"Black level: {black:g}")
     job = edge_pipeline.EdgeJob(
         params=edge_pipeline.make_params(edge_definition=args.edge_definition,
-                                         non_round=args.non_round),
+                                         non_round=args.non_round, black_level=black),
         reference=reference, max_radius=max_radius,
     )
     n = len(images)

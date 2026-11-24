@@ -102,6 +102,16 @@ def _from_edge(fit: edge_pipeline.EdgeFrameFit, tracked: bool = False) -> Replay
     return Replayed(float(fit.radius), (float(fit.rc), float(fit.cc)), confidence, tracked)
 
 
+def _black_level(case: HardCase, read_frame: ReadFrame) -> float:
+    """The black level the app used; a bundle from before edge-1.7.0 has none recorded, so it
+    is estimated from the bundle's own frames (crops of the ROI) as the app would."""
+    if case.detection.black_level is not None:
+        return case.detection.black_level
+    indices = sorted(f.index for f in case.frames)
+    return edge_pipeline.recording_black_level(lambda k: read_frame(indices[k]), len(indices),
+                                               case.name)
+
+
 def _edge_job(case: HardCase, p: dict, read_frame: ReadFrame) -> edge_pipeline.EdgeJob:
     ref = case.detection.reference_index
     if ref is not None and case.frame(ref) is None:
@@ -113,7 +123,8 @@ def _edge_job(case: HardCase, p: dict, read_frame: ReadFrame) -> edge_pipeline.E
         seed = (seed[0] - dr, seed[1] - dc)
     params = edge_pipeline.make_params(edge_definition=p.get("edge_definition", "steep"),
                                        polarity=p.get("edge_polarity", "dark"), seed=seed,
-                                       non_round=p.get("bubble_non_round", False))
+                                       non_round=p.get("bubble_non_round", False),
+                                       black_level=_black_level(case, read_frame))
     return edge_pipeline.EdgeJob(params=params, reference=reference,
                                  max_radius=case.detection.max_radius)
 
@@ -149,7 +160,8 @@ def _ml_model(case: HardCase, read_frame: ReadFrame, gridx, gridy, job: edge_pip
         if examples.is_empty or missing:
             logger.warning("Replay without ML assist: example frames %s are not in the bundle", missing)
             return None
-        return train_model(examples, read_frame, gridx, gridy, reference=job.reference)
+        return train_model(examples, read_frame, gridx, gridy, reference=job.reference,
+                           black_level=job.params.black_level)
     except Exception as exc:  # noqa: BLE001 - e.g. scikit-learn missing: replay plain Auto
         logger.warning("Replay without ML assist: %s", exc)
         return None

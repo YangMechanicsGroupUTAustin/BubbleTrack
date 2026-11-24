@@ -19,6 +19,7 @@ class FakeParams:
     seed: tuple | None = None
     prior: tuple | None = None
     non_round: bool = False
+    black_level: float = 0.0
 
 
 @dataclass
@@ -46,7 +47,7 @@ def engine(monkeypatch):
 
     monkeypatch.setattr(edge_pipeline, "_engine", lambda: fake)
     monkeypatch.setattr(edge_pipeline, "_params_class", lambda: FakeParams)
-    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read, n: 0)
+    monkeypatch.setattr(edge_pipeline, "_choose_reference", lambda read, n, black_level=0.0: 0)
     return calls
 
 
@@ -66,7 +67,7 @@ def test_cli_edge_mode_uses_engine(make_sequence, tmp_path, engine):
 def test_cli_explicit_reference_is_one_based(make_sequence, tmp_path, engine, monkeypatch):
     chosen = []
     monkeypatch.setattr(edge_pipeline, "resolve_reference_index",
-                        lambda read, n, explicit: chosen.append(explicit) or explicit)
+                        lambda read, n, explicit, black_level=0.0: chosen.append(explicit) or explicit)
     folder = make_sequence("A", 4)
     cli.main(["--folder", str(folder), "--mode", "edge", "--reference", "2",
               "--output", str(tmp_path / "o.csv")])

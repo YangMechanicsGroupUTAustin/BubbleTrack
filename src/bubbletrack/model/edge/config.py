@@ -315,9 +315,26 @@ class ReferenceConfig:
 
 
 @dataclass(frozen=True)
+class BlackConfig:
+    """The recording's black level (``black.recording_black_level``, edge-1.7.0)."""
+
+    percentile: float = 0.1
+    """A frame's dark level: this percentile (in %) of its values below full scale."""
+    label_gap: float = 0.005
+    """Exact zeros are a burned-in label, not black, when the frame has no other value within
+    this fraction of full scale above 0 (the HPV-X TIFF16 export's info stamp is 0 on an image
+    offset by 655; true black data reaches 0 through the low values)."""
+    sample_frames: int = 256
+    """At most this many frames, evenly spaced over the recording, are read: every frame of an
+    HPV-X2 recording (256), whose single dark frame (lic/08 frame 4) a sample of 64 can miss;
+    0.3 s for 256 frames of 400 x 250."""
+
+
+@dataclass(frozen=True)
 class EdgeConfig:
     """All tunable constants of the Edge engine."""
 
+    black: BlackConfig = field(default_factory=BlackConfig)
     normalize: NormalizeConfig = field(default_factory=NormalizeConfig)
     segment: SegmentConfig = field(default_factory=SegmentConfig)
     rays: RayConfig = field(default_factory=RayConfig)

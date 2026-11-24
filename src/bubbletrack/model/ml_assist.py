@@ -90,10 +90,12 @@ def examples_for_run(state, user_examples: MLExamples | None = None) -> MLExampl
 
 
 def make_job(state, examples: MLExamples, read_raw: Callable[[int], np.ndarray],
-             reference: np.ndarray | None) -> MLJob:
-    """The pool job that trains on *examples* (their frames are read here)."""
+             reference: np.ndarray | None, black_level: float = 0.0) -> MLJob:
+    """The pool job that trains on *examples* (their frames are read here); *black_level*
+    is the recording's (``edge_support.black_level``)."""
     frames = {f: read_raw(f) for f in examples.frames}
-    return MLJob(examples.to_dict(), frames, tuple(state.gridx), tuple(state.gridy), reference)
+    return MLJob(examples.to_dict(), frames, tuple(state.gridx), tuple(state.gridy), reference,
+                 black_level=float(black_level))
 
 
 def stroke_count(examples: MLExamples) -> int:

@@ -1,5 +1,5 @@
 {
- "engine": "edge-1.6.2",
+ "engine": "edge-1.7.0",
  "sequences": {
   "01_rgb8_dense_speckle_moving": {
    "correct_single": [
@@ -160,9 +160,7 @@
     49
    ],
    "no_bubble_kept_after": [
-    73,
-    81,
-    89
+    81
    ]
   },
   "04_rgb8_water_gel_postcollapse_drift": {
@@ -180,46 +178,8 @@
    "no_bubble_kept_after": []
   },
   "05_blood_low_contrast": {
-   "correct_single": [
-    49,
-    57,
-    65,
-    73,
-    97,
-    105,
-    121,
-    129,
-    137,
-    145,
-    153,
-    161,
-    169,
-    177,
-    185,
-    193,
-    201,
-    209
-   ],
-   "correct_tracked": [
-    49,
-    57,
-    65,
-    73,
-    97,
-    105,
-    121,
-    129,
-    137,
-    145,
-    153,
-    161,
-    169,
-    177,
-    185,
-    193,
-    201,
-    209
-   ],
+   "correct_single": [],
+   "correct_tracked": [],
    "shown_correct": [],
    "no_bubble_kept_after": [
     25
